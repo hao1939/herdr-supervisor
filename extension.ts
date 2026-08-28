@@ -1069,15 +1069,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     pi.setActiveTools(supervisorTools);
     shuttingDown = false;
     await reloadGoals();
-    await connectObserver();
     const goals = await activeBindings();
-    for (const binding of goals.active) {
-      handleSignal(binding.paneId, {
-        force: true,
-        reason: "supervisor session started; reconcile current facts",
-        key: `restart:${binding.goalId}:${Date.now()}`,
-      });
-    }
+    for (const binding of goals.active) scheduleReview(binding);
+    await connectObserver();
+    await reconsiderCurrentBindings();
     await armReviewTimer();
     ctx.ui.setStatus("herdr-supervisor", goals.active.length ? `supervising ${goals.active.length}` : undefined);
   });

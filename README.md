@@ -79,6 +79,11 @@ observes only new evidence, and accepts without repeating the steer. A replaced
 pane occupant fails closed, and repeated ineffective steering causes the
 supervisor to ask the human instead of looping forever.
 
+Restart does not force a model turn for every healthy worker. It restores all
+bindings, refreshes their bounded review deadlines, and immediately reviews
+only workers whose fresh Herdr state needs attention. This keeps human input
+responsive as the number of concurrent goals grows.
+
 The recovery path has also been verified end to end. When an exact Codex
 process stopped but its original Herdr pane remained, the supervisor resumed
 that native Codex session, sent one continuation, observed its new result, and

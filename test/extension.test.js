@@ -563,7 +563,7 @@ test("restart reuses the named worker for an installed goal instead of creating 
   secondPi.events.get("session_shutdown")();
 });
 
-test("restart adopts a new terminal for the same native session before review", async (t) => {
+test("restart adopts a new terminal without forcing a healthy worker review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -580,12 +580,11 @@ test("restart adopts a new terminal for the same native session before review", 
   const pi = fakePi();
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
 
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
-  assert.doesNotMatch(pi.messages[0].content, /different terminal|replacement identity/);
+  assert.equal(pi.messages.length, 0);
   pi.events.get("session_shutdown")();
 });
 

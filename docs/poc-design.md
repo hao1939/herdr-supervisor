@@ -473,7 +473,9 @@ would solve.
   the next bounded review; code does not guess whether semantic actions are
   duplicates.
 - No durable work queue is introduced. On restart, every unfinished current goal
-  is reconsidered against one fresh Herdr snapshot.
+  is restored and checked against fresh Herdr state. Healthy working goals get a
+  fresh bounded deadline without a model turn; idle, blocked, missing, or
+  identity-changed workers are reviewed immediately.
 
 The small in-memory set of workers needing reconsideration is coordination for
 the shared model session, not another work queue. Human commands and Herdr
