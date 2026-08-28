@@ -739,9 +739,9 @@ stores or displays copied live status as goal truth.
   and acceptance criteria, and keeps human focus on the supervisor pane.
 - **Verified live:** the deployed supervisor created a disposable read-only
   goal without manual pane setup or `/supervise`. Herdr automatically reported
-  native session `redacted-native-session`; the worker reported
-  `Python 3.11.2` from pane `w1:pA`, made no workspace changes, and the
-  supervisor observed and accepted the evidence.
+  an exact native session identity; the worker reported the expected runtime
+  version, made no workspace changes, and the supervisor observed and accepted
+  the evidence.
 
 ## 17. Acceptance criteria
 

@@ -108,8 +108,9 @@ Start Pi in a Herdr pane from a stable supervisor directory, separate from any
 worker project:
 
 ```sh
+supervisor_extension=/path/to/herdr-supervisor/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-pi --no-builtin-tools -e /app/projects/herdr-supervisor/extension.ts --supervisor-mode live
+pi --no-builtin-tools -e "$supervisor_extension" --supervisor-mode live
 ```
 
 Then describe the outcome normally. The supervisor forms explicit completion
@@ -182,6 +183,13 @@ client does not stop the server, supervisor, or workers. Reattach with
 `docker compose exec herdr herdr`. API keys present in the shell that starts
 Compose are passed into the container; mounting an existing agent home is an
 optional operator choice and is intentionally not part of the default setup.
+
+> **Security:** full-access mode lets Codex modify every writable path visible
+> in the container, including a bind-mounted host workspace. Mount only the
+> workspace you intend agents to change, do not expose the Herdr socket, and
+> use `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=0` when the container is not an
+> adequate trust boundary. Keep API keys in the local environment or another
+> secret store; never commit them to this repository.
 
 Herdr 0.8.x does not expose a web UI or HTTP server. Its supported remote
 interface is the terminal UI over SSH (`herdr --remote <ssh-host>`), while its
