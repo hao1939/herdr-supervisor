@@ -151,7 +151,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   });
   assert.equal(startRequest.kind, "codex");
   assert.equal(startRequest.paneId, managed.pane_id);
-  assert.match(startRequest.name, /^goal-g_/);
+  assert.match(startRequest.name, /^goal-[a-z0-9_-]+$/);
+  assert.ok(startRequest.name.length <= 32);
   assert.deepEqual(startRequest.args, [
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",

@@ -64,6 +64,11 @@ function codexLaunchArgs() {
   ];
 }
 
+function workerNameForGoal(goalId: string) {
+  const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
+  return `goal-${suffix.slice(0, 27)}`;
+}
+
 export default function herdrSupervisor(pi: ExtensionAPI) {
   let stopSubscription: undefined | (() => void);
   let reconnectTimer: undefined | ReturnType<typeof setTimeout>;
@@ -458,7 +463,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     const goalId = installed.goalId;
     const contract = installed.contract;
-    const workerName = `goal-${goalId}`;
+    const workerName = workerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
     if (!paneId) {
       const supervisorPane = process.env.HERDR_PANE_ID;

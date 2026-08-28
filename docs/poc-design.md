@@ -783,6 +783,10 @@ stores or displays copied live status as goal truth.
 - **Implemented:** a neutral, file-safe first turn initializes Codex's native
   session before the goal is bound and delivered. If identity capture fails,
   retrying the same goal reuses the pending pane instead of creating another.
+- **Implemented:** the restart-stable worker name is derived from the goal UUID
+  but shortened to Herdr's 32-character agent-name limit. The retained 108-bit
+  UUID prefix keeps names practical to correlate without using an invalid full
+  UUID.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
   Codex worker, persists one goal contract and checkpoint, sends both the goal
   and acceptance criteria, and keeps human focus on the supervisor pane.
