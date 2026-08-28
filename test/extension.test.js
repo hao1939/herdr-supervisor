@@ -772,6 +772,36 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   pi.events.get("session_shutdown")();
 });
 
+test("only the current automated review remains in model context", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const context = pi.events.get("context")({
+    messages: [
+      { role: "user", content: "Keep the goals moving." },
+      { role: "assistant", content: "I will." },
+      { role: "custom", customType: "herdr-supervisor-review", content: "old large goal" },
+      { role: "assistant", content: "old tool call" },
+      { role: "toolResult", content: "old large observation" },
+      { role: "assistant", content: "old review result" },
+      { role: "user", content: "Also prefer plain language." },
+      { role: "assistant", content: "Understood." },
+      { role: "custom", customType: "herdr-supervisor-review", content: "current goal" },
+      { role: "assistant", content: "current tool call" },
+      { role: "toolResult", content: "current observation" },
+    ],
+  });
+
+  assert.deepEqual(context.messages.map((message) => message.content), [
+    "Keep the goals moving.",
+    "I will.",
+    "Also prefer plain language.",
+    "Understood.",
+    "current goal",
+    "current tool call",
+    "current observation",
+  ]);
+});
+
 test("a successful steer is not repeated when checkpointing fails", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

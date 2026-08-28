@@ -466,9 +466,12 @@ task or durable message queue is created.
 ## 10. Shared supervisor context
 
 The PoC deliberately uses one persistent supervisor session. Each review is a
-new, self-contained request inside that session. The model retains the useful
-history of the overall supervision conversation while the new request clearly
-re-establishes which worker and goal it must judge.
+new, self-contained request inside that session. Completed automated review
+turns remain visible in its log but leave model context when the next review
+starts; their durable progress is already in the goal checkpoint. Direct human
+conversation remains in context. The new request clearly re-establishes which
+worker and goal the model must judge without repeatedly sending old goal,
+observation, and tool blocks.
 
 Only one registered worker is the subject of a review turn. Its request
 includes:
@@ -482,8 +485,9 @@ includes:
 - new human steering, if any;
 - allowed decisions and safety limits.
 
-The model may use relevant earlier session history, including relationships the
-human established between goals and its own previous action for this worker. If
+The model may use relevant human conversation history and current goal state,
+including relationships the human established between goals and the recorded
+previous action for this worker. If
 the worker depends on a peer, the model may read the existing all-worker status
 and use recorded peer progress for coordination. It must not treat another
 worker's evidence as proof that the current worker is complete. We first trust
@@ -514,9 +518,8 @@ would solve.
   worker.
 - A review fence rejects another pane, a repeated successful observation, and
   every tool call after steering or acceptance until the model turn settles.
-- The persistent supervisor session exposes its previous steering decisions to
-  the next bounded review; code does not guess whether semantic actions are
-  duplicates.
+- The goal checkpoint exposes its previous steering decision to the next
+  bounded review; code does not guess whether semantic actions are duplicates.
 - No durable work queue is introduced. On restart, every unfinished current goal
   is restored and checked against fresh Herdr state. Healthy working goals get a
   fresh bounded deadline without a model turn; idle, blocked, missing, or
