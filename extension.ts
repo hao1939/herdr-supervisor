@@ -467,6 +467,20 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       throw new Error(`Created worker pane ${paneId}, but Codex did not start: ${error.message}. Do not create another worker.`);
     }
 
+    try {
+      await client.waitForAgentSession(paneId);
+    } catch (error) {
+      throw new Error(`Created idle Codex worker ${paneId}, but Herdr could not identify its native session: ${error.message}. The goal was not delivered or registered; repair the Codex integration and reuse or remove this pane before retrying.`);
+    }
+
+    let result;
+    try {
+      result = await register(paneId, objective, acceptance, { wake: false });
+      pendingStarts.delete(objective);
+    } catch (error) {
+      throw new Error(`Started identified Codex worker ${paneId}, but could not record its goal: ${error.message}. The goal was not delivered; do not create another worker.`);
+    }
+
     const prompt = [
       "Pursue this goal until it is fully achieved:",
       objective,
@@ -481,20 +495,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       await client.promptAgent(paneId, prompt);
     } catch (error) {
       promptWarning = ` Initial delivery could not be confirmed: ${error.message}.`;
-    }
-
-    try {
-      await client.waitForAgentSession(paneId);
-    } catch (error) {
-      throw new Error(`Created and prompted Codex worker ${paneId}, but its native session could not be identified: ${error.message}. Do not create another worker.`);
-    }
-
-    let result;
-    try {
-      result = await register(paneId, objective, acceptance);
-      pendingStarts.delete(objective);
-    } catch (error) {
-      throw new Error(`Started Codex in ${paneId}, but could not record its goal: ${error.message}. Do not create another worker.`);
     }
     return { ...result, existing: false, warning: `${result.warning}${promptWarning}` };
   }

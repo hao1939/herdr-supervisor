@@ -8,7 +8,7 @@ ARG CODEX_VERSION=0.150.1
 ARG TARGETARCH
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client procps \
+    && apt-get install -y --no-install-recommends ca-certificates curl git openssh-client procps python3 \
     && rm -rf /var/lib/apt/lists/* \
     && case "$TARGETARCH" in \
          amd64) herdr_arch=x86_64; herdr_sha="$HERDR_SHA256_AMD64" ;; \

@@ -165,7 +165,11 @@ directory on every start, starts plain `pi` in
 `HERDR_SUPERVISOR_DIRECTORY` (`/app` by default), and selects live mode through
 the environment. A worker's project directory is always an explicit absolute
 path chosen for that goal; it is never inherited from the supervisor. This
-also survives Herdr restoring the Pi session as plain `pi`; no special resume
+image also includes the small runtime required by Herdr's managed Codex session
+hook. Worker startup captures that native identity and saves the goal binding
+before delivering the goal, so a failed integration cannot leave assigned work
+running outside supervision. This also survives Herdr restoring the Pi session
+as plain `pi`; no special resume
 command is required. Talk to that Pi session normally. It keeps the supervisor in its current tab
 and groups related Codex workers in other tabs as goals are accepted. Container
 launches pass Codex `--dangerously-bypass-approvals-and-sandbox` and

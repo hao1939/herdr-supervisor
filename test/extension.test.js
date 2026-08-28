@@ -97,6 +97,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   let createTabRequest;
   let startRequest;
   let initialPrompt;
+  let bindingExistsAtPrompt = false;
   t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
     createTabRequest = request;
     return {
@@ -118,6 +119,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "Supervisor" }],
   }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => {
+    bindingExistsAtPrompt = (await loadSupervisorGoals(root)).active.length === 1;
     initialPrompt = prompt;
   });
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
@@ -149,6 +151,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   ]);
   assert.match(initialPrompt, /Fix the focused regression/);
   assert.match(initialPrompt, /The focused test passes/);
+  assert.equal(bindingExistsAtPrompt, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
@@ -285,6 +288,60 @@ test("a worker requires an explicit absolute working directory", async (t) => {
   assert.equal(relative.isError, true);
   assert.match(relative.content[0].text, /absolute path/);
   assert.equal(snapshots, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("a missing native session cannot leave assigned work running unsupervised", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-gate-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  let prompts = 0;
+  const managed = {
+    pane_id: "w1:p3",
+    terminal_id: "term_managed",
+    agent_status: "idle",
+    interactive_ready: true,
+    tab_id: "w1:t2",
+    workspace_id: "w1",
+  };
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [managed],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, tab_id: managed.tab_id, workspace_id: "w1" },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => ({
+    root_pane: { pane_id: managed.pane_id },
+  }));
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => managed);
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => {
+    throw new Error("native session unavailable");
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("missing-session", {
+    goal: "Complete one full validation.",
+    acceptance: ["Every result is accounted for."],
+    placement: { mode: "new", label: "validation" },
+    working_directory: "/app/projects/sample-project",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /goal was not delivered or registered/);
+  assert.equal(prompts, 0);
+  assert.equal((await loadSupervisorGoals(root)).active.length, 0);
   pi.events.get("session_shutdown")();
 });
 
