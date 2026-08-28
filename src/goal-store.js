@@ -377,12 +377,12 @@ export async function appendAudit(entry, root = defaultGoalsRoot()) {
   const paths = goalPaths(entry.goalId, root);
   const line = `${JSON.stringify(entry)}\n`;
   if (Buffer.byteLength(line) > MAX_AUDIT_ENTRY_BYTES) throw new Error("audit entry is too large");
-  const state = await loadGoalState(entry.goalId, root);
-  if (entry.goalRevision > state.revision) {
-    throw new Error("audit entry refers to an unknown future goal revision");
-  }
   const key = `${paths.journal}\0audit`;
   return serializeWrite(key, async () => {
+    const state = await loadGoalState(entry.goalId, root);
+    if (entry.goalRevision > state.revision) {
+      throw new Error("audit entry refers to an unknown future goal revision");
+    }
     await repairAuditTail(paths.journal);
     const file = await open(paths.journal, "a", 0o600);
     try {

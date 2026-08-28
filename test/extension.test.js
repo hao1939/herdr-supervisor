@@ -128,7 +128,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   const result = await pi.tools.get("supervisor_start_goal").execute("start", {
     goal: "Fix the focused regression.",
     acceptance: ["The focused test passes.", "The change is reviewed."],
-    tab_label: "sample-project",
+    placement: { mode: "new", label: "sample-project" },
     working_directory: "/app/projects/sample-project",
     direction: "down",
   }, undefined, undefined, { ui: { setStatus() {} } });
@@ -230,7 +230,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   const result = await pi.tools.get("supervisor_start_goal").execute("start-related", {
     goal: "Implement the related design.",
     acceptance: ["The focused proof passes."],
-    related_worker_pane: related.paneId,
+    placement: { mode: "related", pane_id: related.paneId },
     working_directory: "/app/projects/example",
     direction: "right",
   }, undefined, undefined, { ui: { setStatus() {} } });
