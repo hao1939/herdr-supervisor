@@ -195,6 +195,8 @@ directory, avoiding an interactive choice when it entered a goal-owned
 worktree before the restart.
 If the supervisor was waiting for a human decision, that wait is restored from
 the goal checkpoint; worker events and restarts do not repeat the question.
+Compose restarts the service after an unexpected process or Docker-daemon
+failure, while an explicit operator stop remains stopped.
 
 ```sh
 docker compose up -d --build

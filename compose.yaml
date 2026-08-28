@@ -2,6 +2,7 @@ services:
   herdr:
     build:
       context: .
+    restart: unless-stopped
     init: true
     stdin_open: true
     tty: true
