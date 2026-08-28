@@ -111,7 +111,7 @@ export function formatWorker({ binding, agent, mismatch }) {
   return lines.join("\n");
 }
 
-export function reviewMessage(binding, agent, reason) {
+export function reviewMessage(binding, agent, reason, now = new Date()) {
   const criteria = binding.acceptance.length
     ? binding.acceptance.map((item) => `- ${item}`).join("\n")
     : "- The stated goal is fully achieved with convincing evidence.";
@@ -124,5 +124,5 @@ export function reviewMessage(binding, agent, reason) {
   const wait = binding.wait
     ? `\n\nCurrent wait\n  ${binding.wait.condition}\n  Review at: ${binding.wait.reviewAt}`
     : "";
-  return `Worker review · ${binding.agentSession.agent} ${binding.paneId}\n\nThis turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.\n\nGoal\n  ${binding.goal}\n\nRequired context\n${context}\n\nConstraints\n${constraints}\n\nCurrent progress\n  ${progress}${wait}\n\nCurrent evidence\n${evidence}\n\nWhy review now\n  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.\n\nWorker acceptance criteria\n${criteria}\n\nReview\n  Observe this exact worker once. If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there. If a wait deadline elapsed, continue the due work; leave it waiting again only when fresh current evidence establishes why and supplies the next exact boundary. Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.`;
+  return `Worker review · ${binding.agentSession.agent} ${binding.paneId}\nReview time: ${now.toISOString()} (UTC)\n\nThis turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.\n\nGoal\n  ${binding.goal}\n\nRequired context\n${context}\n\nConstraints\n${constraints}\n\nCurrent progress\n  ${progress}${wait}\n\nCurrent evidence\n${evidence}\n\nWhy review now\n  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.\n\nWorker acceptance criteria\n${criteria}\n\nReview\n  Observe this exact worker once. Compare all timestamps with the UTC review time above. If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there. If a wait deadline elapsed, continue the due work; leave it waiting again only when fresh current evidence establishes why and supplies the next exact boundary. Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.`;
 }

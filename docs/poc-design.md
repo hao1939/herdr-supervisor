@@ -401,7 +401,9 @@ are justified and implemented.
 
 Herdr lifecycle events answer "when should this goal be reconsidered?" Native
 agent records answer "what did the worker communicate?" Neither one alone
-decides success.
+decides success. For a settled wait whose deadline is still in the future, an
+idle/done lifecycle event wakes a model turn only when bounded native evidence
+changed; restart-only lifecycle noise leaves the durable timer intact.
 
 ## 9. Supervisor decision
 
@@ -459,6 +461,8 @@ instead of doing delay arithmetic, and a quiet peer wait need not spend a model
 turn every ten minutes. The condition and deadline are checkpointed and
 restored after restart. A bounded native-evidence check suppresses restored
 no-change lifecycle noise; new evidence and real failures still wake promptly.
+Every review states its exact current UTC time so the model compares like-for-like
+timestamps rather than guessing from the conversation date.
 
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves

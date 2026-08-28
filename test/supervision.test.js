@@ -153,8 +153,14 @@ test("review notice explains the goal and signal in plain language", () => {
       reviewAt: "2026-08-29T00:00:00Z",
     },
   });
-  const message = reviewMessage(current, agent({ agent_status: "idle" }), "worker is idle");
+  const message = reviewMessage(
+    current,
+    agent({ agent_status: "idle" }),
+    "worker is idle",
+    new Date("2026-08-28T23:59:00.000Z"),
+  );
   assert.match(message, /Worker review · codex w1:p2/);
+  assert.match(message, /Review time: 2026-08-28T23:59:00.000Z \(UTC\)/);
   assert.match(message, /Goal\n  Fix cancellation/);
   assert.match(message, /Why review now\n  worker is idle; Herdr reports idle/);
   assert.match(message, /Worker acceptance criteria\n- focused test passes/);
@@ -165,6 +171,7 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
   assert.match(message, /If a wait deadline elapsed, continue the due work/);
+  assert.match(message, /Compare all timestamps with the UTC review time above/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {

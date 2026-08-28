@@ -812,13 +812,20 @@ test("restart restores a settled wait without a no-change review before its dead
     state_change_seq: 9,
     agent_session: exactWorker.agentSession,
   }));
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
 
   const pi = fakePi({ reviewMs: "1000" });
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.equal(pi.messages.length, 0, "restart must not review unchanged settled evidence early");
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 0, "lifecycle-only events must not wake an unchanged future wait");
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /review deadline elapsed/);
