@@ -104,9 +104,9 @@ export function formatWorker({ binding, agent, mismatch }) {
   const lines = [`${name} · ${state}`, `  ${goalLabel}: ${binding.goal}`];
   if (binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${binding.progress}`);
-  if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
+  if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
+  else if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
   else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
-  else if (mismatch) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (agent.agent_status === "working") lines.push("  Next: review when the worker settles or blocks");
   else lines.push(`  Next: supervisor should review current evidence`);
   return lines.join("\n");

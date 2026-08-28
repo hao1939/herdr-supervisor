@@ -157,6 +157,22 @@ test("a persisted human question is the next action shown after restart", () => 
   assert.doesNotMatch(output, /review current evidence/);
 });
 
+test("changed worker identity takes priority over an earlier human question", () => {
+  const current = binding({
+    lastDecision: {
+      decision: "ask_human",
+      at: "2026-08-28T10:00:00.000Z",
+      action: "May this worker use shared capacity?",
+    },
+  });
+  const replacement = agent({
+    agent_session: { ...agent().agent_session, value: "replacement-session" },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(replacement)));
+  assert.match(output, /Needs you: worker value changed; supervision is paused/);
+  assert.doesNotMatch(output, /answer the supervisor's question above/);
+});
+
 test("review notice explains the goal and signal in plain language", () => {
   const current = binding({
     goal: "Fix cancellation",
