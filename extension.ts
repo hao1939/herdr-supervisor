@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { isAbsolute } from "node:path";
 import { HerdrClient } from "./src/herdr-client.js";
 import {
   loadSupervisorGoals,
@@ -421,7 +422,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
     const supervisorPane = process.env.HERDR_PANE_ID;
     if (!supervisorPane) throw new Error("Start the supervisor inside a Herdr pane before creating a worker.");
-    const cwd = params.working_directory?.trim() || process.cwd();
+    if (typeof params.working_directory !== "string") {
+      throw new Error("The worker working_directory is required and must be an absolute path.");
+    }
+    const cwd = params.working_directory.trim();
+    if (!isAbsolute(cwd)) {
+      throw new Error("The worker working_directory must be an absolute path.");
+    }
     const direction = params.direction === "down" ? "down" : "right";
     const snapshot = await client.snapshot();
     const supervisor = findPane(snapshot, supervisorPane);
@@ -532,7 +539,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           pane_id: Pane,
         }),
       ], { description: "Create a new worker tab, or join the tab of one exact active related worker." }),
-      working_directory: Type.Optional(Type.String({ minLength: 1, description: "Absolute project directory. Defaults to the supervisor's current directory." })),
+      working_directory: Type.String({ minLength: 1, description: "Absolute project directory for this worker. It is independent of the supervisor directory." }),
       direction: Type.Optional(Type.Union([Type.Literal("right"), Type.Literal("down")], { description: "Where to place the worker pane. Defaults to right." })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {

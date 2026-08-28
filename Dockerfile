@@ -27,11 +27,15 @@ RUN mkdir -p /app /opt/herdr-supervisor \
     && chown node:node /app
 
 COPY --chown=node:node . /opt/herdr-supervisor
-RUN ln -s /opt/herdr-supervisor/bin/herdr-supervisor.js /usr/local/bin/herdr-supervisor
+RUN chmod 0755 /opt/herdr-supervisor/container/bin/pi \
+    && mv /usr/local/bin/pi /usr/local/bin/pi-agent \
+    && ln -s /opt/herdr-supervisor/container/bin/pi /usr/local/bin/pi \
+    && ln -s /opt/herdr-supervisor/bin/herdr-supervisor.js /usr/local/bin/herdr-supervisor
 
 USER node
 WORKDIR /app
 ENV HERDR_SUPERVISOR_GOALS=/home/node/.local/state/herdr-supervisor/goals
+ENV HERDR_SUPERVISOR_DIRECTORY=/app
 
 ENTRYPOINT ["/opt/herdr-supervisor/bin/container-entrypoint.sh"]
 CMD ["herdr", "server"]

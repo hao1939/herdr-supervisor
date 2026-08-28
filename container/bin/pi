@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
+
+case "$supervisor_directory" in
+  /*) ;;
+  *)
+    echo "HERDR_SUPERVISOR_DIRECTORY must be an absolute directory" >&2
+    exit 2
+    ;;
+esac
+
+cd "$supervisor_directory"
+exec /usr/local/bin/pi-agent "$@"

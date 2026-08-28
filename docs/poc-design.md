@@ -21,8 +21,10 @@ pause, ask questions, stall, crash, or produce an incomplete result.
    would materially change the work.
 3. The supervisor decides whether the goal belongs with active related work.
    It either adds a pane to that worker tab or creates a new unfocused tab,
-   starts one Codex worker, records the exact worker binding, and gives it the
-   goal. The supervisor stays in its own tab. A human may still attach an
+   starts one Codex worker in an explicit absolute project directory, records
+   the exact worker binding, and gives it the goal. The supervisor stays in
+   its own tab and stable infrastructure directory; a worker never inherits
+   the supervisor's directory. A human may still attach an
    already-running worker explicitly when needed.
 4. The worker continues independently. The supervisor is not consuming model
    turns while nothing meaningful is happening.
@@ -107,6 +109,12 @@ and workspace are separate mounts. The operator attaches through
 `docker compose exec`; remote hosts use Herdr's existing SSH client. Herdr
 0.8.x has no native HTTP or browser UI, so the container exposes no network port
 and does not turn the local socket into a public API.
+
+The dedicated container starts the supervisor from
+`HERDR_SUPERVISOR_DIRECTORY`, which defaults to `/app`. Worker creation always
+requires its own absolute working directory. This keeps supervisor conversation
+state independent of whichever project a worker edits without adding project
+registries or directory inference.
 
 ## 6. Minimal durable state: contract, checkpoint, audit
 

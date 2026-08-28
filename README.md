@@ -104,9 +104,11 @@ explicit operator controls.
 
 ## Try it
 
-Start Pi in a Herdr pane with the extension:
+Start Pi in a Herdr pane from a stable supervisor directory, separate from any
+worker project:
 
 ```sh
+cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi --no-builtin-tools -e /app/projects/herdr-supervisor/extension.ts --supervisor-mode live
 ```
 
@@ -159,7 +161,10 @@ pi
 ```
 
 The dedicated container installs the extension into Pi's normal extension
-directory on every start and selects live mode through the environment. This
+directory on every start, starts plain `pi` in
+`HERDR_SUPERVISOR_DIRECTORY` (`/app` by default), and selects live mode through
+the environment. A worker's project directory is always an explicit absolute
+path chosen for that goal; it is never inherited from the supervisor. This
 also survives Herdr restoring the Pi session as plain `pi`; no special resume
 command is required. Talk to that Pi session normally. It keeps the supervisor in its current tab
 and groups related Codex workers in other tabs as goals are accepted. Container

@@ -247,6 +247,47 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
+test("a worker requires an explicit absolute working directory", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-worker-directory-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  let snapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshots += 1;
+    return { agents: [], panes: [] };
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const missing = await pi.tools.get("supervisor_start_goal").execute("missing-directory", {
+    goal: "Fix one regression.",
+    acceptance: ["The focused test passes."],
+    placement: { mode: "new", label: "regression" },
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  const relative = await pi.tools.get("supervisor_start_goal").execute("relative-directory", {
+    goal: "Fix another regression.",
+    acceptance: ["The focused test passes."],
+    placement: { mode: "new", label: "regression" },
+    working_directory: ".",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(missing.isError, true);
+  assert.match(missing.content[0].text, /working_directory/);
+  assert.equal(relative.isError, true);
+  assert.match(relative.content[0].text, /absolute path/);
+  assert.equal(snapshots, 0);
+  pi.events.get("session_shutdown")();
+});
+
 test("a successful steer is not repeated when checkpointing fails", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
