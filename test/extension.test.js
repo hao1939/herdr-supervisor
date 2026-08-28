@@ -99,8 +99,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   };
   let createTabRequest;
   let startRequest;
-  let initialPrompt;
-  let bindingExistsAtPrompt = false;
+  const deliveredPrompts = [];
   t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
     createTabRequest = request;
     return {
@@ -122,8 +121,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "Supervisor" }],
   }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => {
-    bindingExistsAtPrompt = (await loadSupervisorGoals(root)).active.length === 1;
-    initialPrompt = prompt;
+    deliveredPrompts.push({
+      prompt,
+      bindingExists: (await loadSupervisorGoals(root)).active.length === 1,
+    });
   });
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
@@ -152,9 +153,12 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
   ]);
-  assert.match(initialPrompt, /Fix the focused regression/);
-  assert.match(initialPrompt, /The focused test passes/);
-  assert.equal(bindingExistsAtPrompt, true);
+  assert.match(deliveredPrompts[0].prompt, /Initialize this worker session only/);
+  assert.equal(deliveredPrompts[0].bindingExists, false);
+  assert.doesNotMatch(deliveredPrompts[0].prompt, /Fix the focused regression/);
+  assert.match(deliveredPrompts[1].prompt, /Fix the focused regression/);
+  assert.match(deliveredPrompts[1].prompt, /The focused test passes/);
+  assert.equal(deliveredPrompts[1].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
@@ -307,7 +311,7 @@ test("a missing native session cannot leave assigned work running unsupervised",
     else process.env.HERDR_PANE_ID = previousPane;
   });
 
-  let prompts = 0;
+  const prompts = [];
   const managed = {
     pane_id: "w1:p3",
     terminal_id: "term_managed",
@@ -330,7 +334,7 @@ test("a missing native session cannot leave assigned work running unsupervised",
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => {
     throw new Error("native session unavailable");
   });
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
 
   const pi = fakePi();
   herdrSupervisor(pi);
@@ -343,8 +347,86 @@ test("a missing native session cannot leave assigned work running unsupervised",
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /goal was not delivered or registered/);
-  assert.equal(prompts, 0);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /Initialize this worker session only/);
+  assert.doesNotMatch(prompts[0], /Complete one full validation/);
   assert.equal((await loadSupervisorGoals(root)).active.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("retry reuses a pending initialized pane instead of creating another worker", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-retry-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  let creates = 0;
+  let starts = 0;
+  let waits = 0;
+  let sessionReady = false;
+  const prompts = [];
+  const managed = {
+    pane_id: "w1:p3",
+    terminal_id: "term_managed",
+    agent_status: "idle",
+    interactive_ready: true,
+    tab_id: "w1:t2",
+    workspace_id: "w1",
+  };
+  const identified = {
+    ...managed,
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_managed" },
+  };
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [sessionReady ? identified : managed],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, tab_id: managed.tab_id, workspace_id: "w1" },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    creates += 1;
+    return { root_pane: { pane_id: managed.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => {
+    starts += 1;
+    return managed;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => {
+    waits += 1;
+    if (waits === 1) throw new Error("native session unavailable");
+    sessionReady = true;
+    return identified;
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const request = {
+    goal: "Complete one bounded diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+    placement: { mode: "new", label: "diagnostic" },
+    working_directory: "/app",
+  };
+  const first = await pi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
+  const second = await pi.tools.get("supervisor_start_goal").execute("second", request, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(first.isError, true);
+  assert.equal(second.isError, false);
+  assert.equal(creates, 1);
+  assert.equal(starts, 1);
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /Initialize this worker session only/);
+  assert.match(prompts[1], /Complete one bounded diagnostic/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   pi.events.get("session_shutdown")();
 });
 

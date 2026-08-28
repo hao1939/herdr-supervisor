@@ -166,9 +166,11 @@ directory on every start, starts plain `pi` in
 the environment. A worker's project directory is always an explicit absolute
 path chosen for that goal; it is never inherited from the supervisor. This
 image also includes the small runtime required by Herdr's managed Codex session
-hook. Worker startup captures that native identity and saves the goal binding
-before delivering the goal, so a failed integration cannot leave assigned work
-running outside supervision. This also survives Herdr restoring the Pi session
+hook. Worker startup uses one file-safe no-op turn to initialize Codex, captures
+the resulting native identity, and saves the goal binding before delivering the
+goal. A failed integration therefore cannot leave assigned work running outside
+supervision, and retrying the same goal reuses the pending pane. This also
+survives Herdr restoring the Pi session
 as plain `pi`; no special resume
 command is required. Talk to that Pi session normally. It keeps the supervisor in its current tab
 and groups related Codex workers in other tabs as goals are accepted. Container

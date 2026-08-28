@@ -235,12 +235,14 @@ register worker
   -> review immediately when the worker is already settled or blocked
   -> return immediately
 
-For a worker created by the supervisor, identity capture and the durable goal
-binding happen before the goal prompt is delivered. If the native session hook
-does not report an identity, the new worker remains idle and unregistered and
-the goal is not sent. This makes integration failure visible without creating
-orphan work. The dedicated image includes the runtime required by Herdr's
-managed Codex hook.
+For a worker created by the supervisor, one neutral first turn initializes the
+native Codex session without inspecting or changing files. Identity capture and
+the durable goal binding then happen before the goal prompt is delivered. If
+the native session hook does not report an identity, the new worker remains
+unassigned and the goal is not sent. Retrying the same goal reuses that pane
+instead of creating another. This makes integration failure visible without
+creating orphan work. The dedicated image includes the runtime required by
+Herdr's managed Codex hook.
 
 Herdr event or stale deadline
   -> coalesce latest signal for that worker

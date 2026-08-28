@@ -428,12 +428,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const existing = goals.active.find((binding) => binding.goal.trim() === objective);
     if (existing) return { binding: existing, existing: true, warning: "" };
     const pendingPane = pendingStarts.get(objective);
-    if (pendingPane) {
-      throw new Error(`A previous start already created worker pane ${pendingPane} for this goal. Do not create another worker; inspect or repair that pane.`);
-    }
 
-    const supervisorPane = process.env.HERDR_PANE_ID;
-    if (!supervisorPane) throw new Error("Start the supervisor inside a Herdr pane before creating a worker.");
     if (typeof params.working_directory !== "string") {
       throw new Error("The worker working_directory is required and must be an absolute path.");
     }
@@ -441,48 +436,53 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (!isAbsolute(cwd)) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
-    const direction = params.direction === "down" ? "down" : "right";
-    const snapshot = await client.snapshot();
-    const supervisor = findPane(snapshot, supervisorPane);
-    if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
+    let paneId = pendingPane;
+    if (!paneId) {
+      const supervisorPane = process.env.HERDR_PANE_ID;
+      if (!supervisorPane) throw new Error("Start the supervisor inside a Herdr pane before creating a worker.");
+      const direction = params.direction === "down" ? "down" : "right";
+      const snapshot = await client.snapshot();
+      const supervisor = findPane(snapshot, supervisorPane);
+      if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
 
-    let paneId;
-    if (params.placement.mode === "related") {
-      const relatedPaneId = params.placement.pane_id.trim();
-      if (!goals.active.some((binding) => binding.paneId === relatedPaneId)) {
-        throw new Error(`${relatedPaneId} is not an active supervised worker.`);
+      if (params.placement.mode === "related") {
+        const relatedPaneId = params.placement.pane_id.trim();
+        if (!goals.active.some((binding) => binding.paneId === relatedPaneId)) {
+          throw new Error(`${relatedPaneId} is not an active supervised worker.`);
+        }
+        const anchor = findPane(snapshot, relatedPaneId);
+        if (!anchor) throw new Error(`The related worker pane ${relatedPaneId} is not present in Herdr.`);
+        if (anchor.workspace_id !== supervisor.workspace_id || anchor.tab_id === supervisor.tab_id) {
+          throw new Error(`The related worker ${relatedPaneId} is not in a separate worker tab in this workspace.`);
+        }
+        const created = await client.splitPane({ paneId: anchor.pane_id, direction, cwd, focus: false });
+        paneId = created?.pane?.pane_id;
+      } else {
+        const label = params.placement.label.trim();
+        const created = await client.createTab({
+          workspaceId: supervisor.workspace_id,
+          cwd,
+          label,
+          focus: false,
+        });
+        paneId = created?.root_pane?.pane_id;
       }
-      const anchor = findPane(snapshot, relatedPaneId);
-      if (!anchor) throw new Error(`The related worker pane ${relatedPaneId} is not present in Herdr.`);
-      if (anchor.workspace_id !== supervisor.workspace_id || anchor.tab_id === supervisor.tab_id) {
-        throw new Error(`The related worker ${relatedPaneId} is not in a separate worker tab in this workspace.`);
-      }
-      const created = await client.splitPane({ paneId: anchor.pane_id, direction, cwd, focus: false });
-      paneId = created?.pane?.pane_id;
-    } else {
-      const label = params.placement.label.trim();
-      const created = await client.createTab({
-        workspaceId: supervisor.workspace_id,
-        cwd,
-        label,
-        focus: false,
-      });
-      paneId = created?.root_pane?.pane_id;
-    }
-    if (!paneId) throw new Error("Herdr created worker space but did not return its pane identity.");
-    pendingStarts.set(objective, paneId);
+      if (!paneId) throw new Error("Herdr created worker space but did not return its pane identity.");
+      pendingStarts.set(objective, paneId);
 
-    const name = `worker-${Date.now().toString(36)}`;
-    try {
-      await client.startAndWaitAgent({ name, kind: "codex", paneId, args: codexLaunchArgs() });
-    } catch (error) {
-      throw new Error(`Created worker pane ${paneId}, but Codex did not start: ${error.message}. Do not create another worker.`);
+      const name = `worker-${Date.now().toString(36)}`;
+      try {
+        await client.startAndWaitAgent({ name, kind: "codex", paneId, args: codexLaunchArgs() });
+        await client.promptAgent(paneId, "Initialize this worker session only. Do not inspect or change files. Wait for the goal.");
+      } catch (error) {
+        throw new Error(`Created worker pane ${paneId}, but Codex did not initialize: ${error.message}. Do not create another worker.`);
+      }
     }
 
     try {
       await client.waitForAgentSession(paneId);
     } catch (error) {
-      throw new Error(`Created idle Codex worker ${paneId}, but Herdr could not identify its native session: ${error.message}. The goal was not delivered or registered; repair the Codex integration and reuse or remove this pane before retrying.`);
+      throw new Error(`Created idle Codex worker ${paneId}, but Herdr could not identify its native session: ${error.message}. The goal was not delivered or registered; repair the Codex integration and retry this same goal to reuse the pane.`);
     }
 
     let result;
