@@ -712,7 +712,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     parameters: Type.Object({ pane_id: Type.Optional(Pane) }),
     executionMode: "parallel",
     async execute(_id, params, _signal, _onUpdate, ctx) {
-      const fenceError = reviewTurn.guard(params.pane_id);
+      const fenceError = reviewTurn.guard();
       if (fenceError) return text(fenceError, true);
       try { return text(await status(params.pane_id)); }
       catch (error) { return text(`Could not read supervisor status: ${error.message}`, true); }

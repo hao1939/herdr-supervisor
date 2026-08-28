@@ -653,6 +653,10 @@ test("an idle worker cannot be left working and may be steered in the same revie
   const status = await pi.tools.get("supervisor_status").execute("status", {});
   assert.equal(status.isError, false);
   assert.match(status.content[0].text, /Finish the exact goal/);
+  const peerStatus = await pi.tools.get("supervisor_status").execute("status", { pane_id: "w1:p3" });
+  assert.equal(peerStatus.isError, false);
+  assert.match(peerStatus.content[0].text, /w1:p3 is not supervised/);
+  assert.doesNotMatch(peerStatus.content[0].text, /review is scoped/);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
