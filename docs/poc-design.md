@@ -433,9 +433,11 @@ the outcome is known, and atomically updates the current goal context.
 
 `supervisor_leave` also covers a settled worker whose next step has one concrete
 peer or external condition. The model supplies that condition as structured
-input; the extension records it and schedules the existing bounded review
-without prompting the worker merely to wait. A settled worker without such a
-condition is still rejected. When several goals share scarce capacity, the
+input together with an explicit bounded review timestamp; the extension rejects a
+wait that could silently fall back to the generic review interval. A known
+retry boundary is reviewed on time, while an event-driven peer wait uses a
+low-frequency safety review. A settled worker without a concrete condition and
+delay is still rejected. When several goals share scarce capacity, the
 supervisor keeps one worker responsible for probing it and parks peers this way
 instead of adding a resource scheduler or letting every worker retry.
 
@@ -443,12 +445,15 @@ instead of adding a resource scheduler or letting every worker retry.
 because the runtime must distinguish a deliberate choice from a malformed,
 interrupted, or purely narrative response. If a turn settles without one valid
 decision, no action or evidence checkpoint is committed and one bounded retry
-is scheduled.
+is scheduled. If a decision was completed, settlement preserves the timer or
+human wait chosen by that decision instead of replacing it with the generic
+review interval.
 
-`reviewAfterMs` is a model decision bounded by mechanical minimum and maximum
-values. It lets healthy work sleep longer and questionable work be checked
-sooner without hard-coded semantic rules. Settled and blocked Herdr events still
-wake the supervisor immediately.
+`reviewAt` is an absolute ISO timestamp bounded to the next 24 hours. It is
+required for an explicit wait, so the model can copy an exact retry boundary
+instead of doing delay arithmetic, and a quiet peer wait need not spend a model
+turn every ten minutes. Settled and blocked Herdr events still wake the
+supervisor immediately.
 
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
@@ -745,7 +750,7 @@ stores or displays copied live status as goal truth.
   execution checkpoint in `current.json`; startup must not replay history.
 - **Implemented:** record completed reviews, action results, material human changes, acceptance,
   and explicit stops in the audit journal without making it runtime authority.
-- **Implemented:** explicit `leave` uses bounded `reviewAfterMs`; a turn that only narrates
+- **Implemented:** explicit `leave` uses bounded `reviewAt`; a turn that only narrates
   an intention is not complete.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads

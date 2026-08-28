@@ -14,7 +14,7 @@ const worker = {
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
 
-function fakePi() {
+function fakePi({ reviewMs = "600000" } = {}) {
   const commands = new Map();
   const tools = new Map();
   const events = new Map();
@@ -27,7 +27,7 @@ function fakePi() {
     registerFlag() {},
     getFlag(name) {
       if (name === "supervisor-mode") return "live";
-      if (name === "supervisor-review-ms") return "600000";
+      if (name === "supervisor-review-ms") return reviewMs;
     },
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
@@ -697,7 +697,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
     waiting_for: "w1:p7 to report that shared ADO capacity is available",
-    review_after_ms: 60_000,
+    review_at: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(leave.isError, false);
@@ -706,6 +706,69 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.lastDecision.decision, "leave");
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a settled worker wait requires its bounded review timestamp", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The server permits one retry in 431 seconds.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The authenticated request is throttled.",
+    waiting_for: "the server-directed retry boundary",
+  });
+
+  assert.equal(leave.isError, true);
+  assert.match(leave.content[0].text, /without a valid review_at timestamp/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.lastDecision, undefined);
+  pi.events.get("session_shutdown")();
+});
+
+test("settlement preserves the deadline chosen by a completed decision", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The server permits one later retry.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The authenticated request is throttled.",
+    waiting_for: "the server-directed retry boundary",
+    review_at: new Date(Date.now() + 1400).toISOString(),
+  });
+  assert.equal(leave.isError, false);
+
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal(pi.messages.length, 1, "the generic interval must not replace the decision deadline");
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
 });
 
