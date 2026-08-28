@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+# Herdr Supervisor owns the durable goal lifecycle. Keeping Codex's separate
+# goal feature enabled would add a second authority and can leave a restored
+# worker waiting at an interactive "resume goal" prompt.
+previous=""
+has_disabled_goals=0
+has_full_access=0
+has_hook_trust=0
+for argument in "$@"; do
+  if [ "$previous" = "--disable" ] && [ "$argument" = "goals" ]; then
+    has_disabled_goals=1
+  fi
+  if [ "$argument" = "--dangerously-bypass-approvals-and-sandbox" ]; then
+    has_full_access=1
+  fi
+  if [ "$argument" = "--dangerously-bypass-hook-trust" ]; then
+    has_hook_trust=1
+  fi
+  previous="$argument"
+done
+
+if [ "$has_disabled_goals" -eq 0 ]; then
+  set -- --disable goals "$@"
+fi
+
+if [ "${HERDR_SUPERVISOR_CODEX_FULL_ACCESS:-0}" = "1" ]; then
+  if [ "$has_hook_trust" -eq 0 ]; then
+    set -- --dangerously-bypass-hook-trust "$@"
+  fi
+  if [ "$has_full_access" -eq 0 ]; then
+    set -- --dangerously-bypass-approvals-and-sandbox "$@"
+  fi
+fi
+
+exec /usr/local/bin/codex-agent "$@"

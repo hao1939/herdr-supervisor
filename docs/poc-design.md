@@ -259,6 +259,9 @@ identity is the native agent session; the Herdr pane is its routing slot and
 the terminal ID is a transient location checkpoint. When Herdr restores the
 same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
+Supervised Codex processes disable Codex's separate native goal feature. The
+Herdr goal contract remains the single durable authority, so restoring the
+exact session cannot introduce a second interactive "resume goal" gate.
 The native identity is immutable within that local execution. To run a goal
 elsewhere or again, copy its `goal.json` into a new goal directory and explicitly
 select a new worker. Old checkpoints and logs are neither required nor moved.

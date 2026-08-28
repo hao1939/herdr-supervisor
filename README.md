@@ -166,6 +166,12 @@ they can share Herdr's local socket and observe the same processes. Goal state
 and agent sessions live in the `herdr-home` volume; the working directory is a
 separate `herdr-workspace` volume by default.
 
+Supervised Codex workers use the Herdr goal contract as their only durable goal
+authority. The container disables Codex's separate native goal feature so an
+exact session restored after a container restart cannot stop at a second
+"resume goal" confirmation. This does not disable session reuse: Herdr still
+restores the exact native Codex session recorded by the goal checkpoint.
+
 ```sh
 docker compose up -d --build
 docker compose exec herdr herdr

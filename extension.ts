@@ -57,11 +57,14 @@ function text(value: string, isError = false) {
 }
 
 function codexLaunchArgs() {
-  if (process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS !== "1") return [];
-  return [
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--dangerously-bypass-hook-trust",
-  ];
+  const args = ["--disable", "goals"];
+  if (process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS === "1") {
+    args.unshift(
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--dangerously-bypass-hook-trust",
+    );
+  }
+  return args;
 }
 
 function workerNameForGoal(goalId: string) {

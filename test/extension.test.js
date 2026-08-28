@@ -156,6 +156,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(startRequest.args, [
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
+    "--disable",
+    "goals",
   ]);
   assert.match(deliveredPrompts[0].prompt, /Initialize this worker session only/);
   assert.equal(deliveredPrompts[0].bindingExists, false);
@@ -264,7 +266,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
     focus: false,
   });
   assert.equal(startRequest.paneId, started.pane_id);
-  assert.deepEqual(startRequest.args, []);
+  assert.deepEqual(startRequest.args, ["--disable", "goals"]);
   pi.events.get("session_shutdown")();
 });
 

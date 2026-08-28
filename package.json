@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --experimental-strip-types --check extension.ts && node --experimental-strip-types --check container/pi-extension.ts && node --check bin/herdr-supervisor.js && node --check src/goal-registry.js && node --check src/goal-store.js && node --check src/herdr-client.js && node --check src/observation.js && node --check src/review-turn.js && node --check src/supervision.js && sh -n bin/container-entrypoint.sh && sh -n container/bin/pi"
+    "check": "node --experimental-strip-types --check extension.ts && node --experimental-strip-types --check container/pi-extension.ts && node --check bin/herdr-supervisor.js && node --check src/goal-registry.js && node --check src/goal-store.js && node --check src/herdr-client.js && node --check src/observation.js && node --check src/review-turn.js && node --check src/supervision.js && sh -n bin/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
   },
   "engines": {
     "node": ">=22"
