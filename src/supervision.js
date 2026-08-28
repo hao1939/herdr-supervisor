@@ -114,6 +114,11 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   else if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
   else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
   else if (agent.agent_status === "working") lines.push("  Next: review when the worker settles or blocks");
+  else if (binding.wait) {
+    const condition = detailed ? binding.wait.condition : compact(binding.wait.condition, 360);
+    lines.push(`  Next: wait for ${condition}`);
+    lines.push(`  Review at: ${binding.wait.reviewAt}`);
+  }
   else lines.push(`  Next: supervisor should review current evidence`);
   return lines.join("\n");
 }

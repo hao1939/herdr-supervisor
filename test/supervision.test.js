@@ -175,6 +175,20 @@ test("the all-worker view stays bounded while one-worker detail stays complete",
   assert.ok(detail.length > summary.length);
 });
 
+test("a settled future wait shows its condition and review time", () => {
+  const current = binding({
+    progress: "Local proof is complete.",
+    wait: {
+      condition: "the capacity owner to release the shared pipeline slot",
+      reviewAt: "2026-08-29T09:53:30.000Z",
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
+  assert.match(output, /Next: wait for the capacity owner to release the shared pipeline slot/);
+  assert.match(output, /Review at: 2026-08-29T09:53:30.000Z/);
+  assert.doesNotMatch(output, /review current evidence/);
+});
+
 test("changed worker identity takes priority over an earlier human question", () => {
   const current = binding({
     lastDecision: {
