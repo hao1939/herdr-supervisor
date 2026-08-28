@@ -672,7 +672,7 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   pi.events.get("session_shutdown")();
 });
 
-test("recovery reports a resumed session separately from a failed continuation", async (t) => {
+test("recovery resumes the exact session with one atomic continuation", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -682,14 +682,15 @@ test("recovery reports a resumed session separately from a failed continuation",
   });
   let resumes = 0;
   let prompts = 0;
+  let resumeRequest;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => {
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
     resumes += 1;
+    resumeRequest = request;
     return snapshot().agents[0];
   });
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
     prompts += 1;
-    throw new Error("prompt transport closed");
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -704,11 +705,16 @@ test("recovery reports a resumed session separately from a failed continuation",
   });
 
   assert.equal(resumes, 1);
-  assert.equal(prompts, 1);
-  assert.equal(result.isError, true);
+  assert.equal(prompts, 0);
+  assert.deepEqual(resumeRequest.args, [
+    "--disable",
+    "goals",
+    "resume",
+    worker.agentSession.value,
+    "Continue from current goal evidence.",
+  ]);
+  assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Resumed the exact codex session/);
-  assert.match(result.content[0].text, /could not confirm whether the continuation was delivered/);
-  assert.doesNotMatch(result.content[0].text, /^Could not recover worker/);
   const repeated = await pi.tools.get("supervisor_recover").execute("recover-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",

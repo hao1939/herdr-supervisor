@@ -881,7 +881,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_recover",
     label: "Resume worker",
-    description: "Resume the exact registered native agent session in its unchanged current terminal after its process exits, then send one goal-aware continuation message. Refuses changed panes, replacement agents, and unsupported session identities.",
+    description: "Resume the exact registered native agent session in its unchanged current terminal with one goal-aware continuation turn. Refuses changed panes, replacement agents, and unsupported session identities.",
     parameters: Type.Object({
       pane_id: Pane,
       message: Type.String({ minLength: 1 }),
@@ -894,7 +894,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
         const request = recoveryRequest(binding, snapshot);
-        request.args = [...codexLaunchArgs(), ...request.args];
+        request.args = [...codexLaunchArgs(), ...request.args, params.message.trim()];
         if (mode() !== "live") {
           reviewTurn.close(params.pane_id);
           return text(`${mode()} mode: would resume the exact ${binding.agentSession.agent} session in ${params.pane_id} and send: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
@@ -918,13 +918,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           return text(`The resume command ran, but the resulting worker identity did not match: ${mismatch}. No message was sent.\n\nEnd this supervisor turn now; do not retry recovery without fresh evidence.`, true);
         }
         const refreshedBinding = await refreshObservedLocation(binding, resumed);
-        try {
-          await client.promptAgent(params.pane_id, params.message.trim());
-        } catch (error) {
-          reviewTurn.close(params.pane_id);
-          scheduleReview(binding);
-          return text(`Resumed the exact ${binding.agentSession.agent} session in ${params.pane_id}, but could not confirm whether the continuation was delivered: ${error.message}.\n\nEnd this supervisor turn now; do not resume or prompt it again. Wait for fresh worker evidence.`, true);
-        }
         reviewTurn.close(params.pane_id);
         try {
           const result = await recordDecision(refreshedBinding, "recover", {

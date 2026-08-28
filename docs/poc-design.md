@@ -262,6 +262,9 @@ that checkpoint instead of treating the new terminal process as a replacement.
 Supervised Codex processes disable Codex's separate native goal feature. The
 Herdr goal contract remains the single durable authority, so restoring the
 exact session cannot introduce a second interactive "resume goal" gate.
+An automatic Herdr restore includes one plain continuation turn. Explicit
+supervisor recovery carries its goal-aware continuation in the same resume
+command, so recovery cannot split into a successful resume and a lost prompt.
 The native identity is immutable within that local execution. To run a goal
 elsewhere or again, copy its `goal.json` into a new goal directory and explicitly
 select a new worker. Old checkpoints and logs are neither required nor moved.

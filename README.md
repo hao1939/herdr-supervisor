@@ -171,6 +171,9 @@ authority. The container disables Codex's separate native goal feature so an
 exact session restored after a container restart cannot stop at a second
 "resume goal" confirmation. This does not disable session reuse: Herdr still
 restores the exact native Codex session recorded by the goal checkpoint.
+Herdr's automatic session restore supplies one ordinary continuation turn, so
+the restored worker resumes useful work without waiting for the supervisor or
+the human to press a key.
 
 ```sh
 docker compose up -d --build
