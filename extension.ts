@@ -99,7 +99,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (!runtime) {
       runtime = {
         lastReviewStateChangeSeq: 0,
-        awaitingHuman: false,
+        awaitingHuman: binding.lastDecision?.decision === "ask_human",
         missingDecisionRetries: 0,
       };
       runtimeGoals.set(binding.goalId, runtime);
@@ -286,6 +286,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
     for (const stored of goals.active) {
       const binding = await refreshObservedLocation(stored, findAgent(snapshot, stored.paneId));
+      if (runtimeFor(binding).awaitingHuman) continue;
       const decision = shouldWake(
         binding,
         findAgent(snapshot, binding.paneId),
@@ -337,6 +338,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const agent = findAgent(snapshot, paneId);
     const pane = findPane(snapshot, paneId);
     const binding = await refreshObservedLocation(stored, agent);
+    if (runtimeFor(binding).awaitingHuman) return;
     const currentDecision = shouldWake(binding, agent, pane);
     const decision = signal?.force && !identityMismatch(binding, agent, pane)
       ? {
@@ -1070,7 +1072,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     shuttingDown = false;
     await reloadGoals();
     const goals = await activeBindings();
-    for (const binding of goals.active) scheduleReview(binding);
+    for (const binding of goals.active) {
+      if (!runtimeFor(binding).awaitingHuman) scheduleReview(binding);
+    }
     await connectObserver();
     await reconsiderCurrentBindings();
     await armReviewTimer();

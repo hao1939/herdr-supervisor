@@ -593,6 +593,45 @@ test("restart adopts a new terminal without forcing a healthy worker review", as
   pi.events.get("session_shutdown")();
 });
 
+test("restart preserves a pending human decision without asking again", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "A real human decision is required.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const firstPi = fakePi();
+  herdrSupervisor(firstPi);
+  await firstPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => firstPi.messages.length === 1);
+  await firstPi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await firstPi.tools.get("supervisor_ask_human").execute("ask", {
+    pane_id: worker.paneId,
+    question: "May this worker use shared capacity?",
+  });
+  firstPi.events.get("session_shutdown")();
+
+  const secondPi = fakePi();
+  herdrSupervisor(secondPi);
+  await secondPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  assert.equal(secondPi.messages.length, 0);
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(secondPi.messages.length, 0);
+  const status = await secondPi.tools.get("supervisor_status").execute("status", {});
+  assert.match(status.content[0].text, /Needs you: answer the supervisor's latest question/);
+  secondPi.events.get("session_shutdown")();
+});
+
 test("a successful steer is not repeated when checkpointing fails", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

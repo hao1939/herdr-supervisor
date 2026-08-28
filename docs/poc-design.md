@@ -283,6 +283,9 @@ command, so recovery cannot split into a successful resume and a lost prompt.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
+The last recorded `ask_human` decision restores the goal's human-wait state.
+Until the human answers, restart reconciliation and worker events remain quiet
+instead of asking the same question again.
 The native identity is immutable within that local execution. To run a goal
 elsewhere or again, copy its `goal.json` into a new goal directory and explicitly
 select a new worker. Old checkpoints and logs are neither required nor moved.

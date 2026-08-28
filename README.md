@@ -182,6 +182,8 @@ the restored worker resumes useful work without waiting for the supervisor or
 the human to press a key. A restored Codex worker also reuses the session's
 saved directory. This avoids an interactive directory-choice prompt when the
 worker entered a goal-owned worktree before the restart.
+If the supervisor was waiting for a human decision, that wait is restored from
+the goal checkpoint; worker events and restarts do not repeat the question.
 
 ```sh
 docker compose up -d --build
