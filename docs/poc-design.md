@@ -279,9 +279,10 @@ Herdr goal contract remains the single durable authority, so restoring the
 exact session cannot introduce a second interactive "resume goal" gate.
 An automatic Herdr restore reopens the exact session without starting another
 worker turn. The supervisor decides from the goal checkpoint whether useful
-work should continue. Explicit supervisor recovery carries its goal-aware
-continuation in the resume command, so recovery cannot split into a successful
-resume and a lost prompt.
+work should continue. The model chooses one `steer` decision; execution code
+prompts a present process or carries the continuation atomically in an
+exact-session resume when that process has exited. Transport is not a model
+decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
@@ -294,10 +295,12 @@ select a new worker. Old checkpoints and logs are neither required nor moved.
 Exact recovery of the original execution is a separate local operation that
 requires its original runtime and native session.
 
-Pending signals, review timers, and suppression of a repeated human question
-stay in memory. None of these files contains raw events, terminal output,
-reconnects, or copied Herdr status. The PoC needs no task store, replay
-framework, export command, archive operation, or status database.
+Pending signals and the one armed timer stay in memory. A concrete wait's
+condition and absolute review deadline live in `current.json`, as does a human
+wait through its last decision, so restart does not lose either. None of these
+files contains raw events, terminal output, reconnects, or copied Herdr status.
+The PoC needs no task store, replay framework, export command, archive
+operation, or status database.
 
 ## 7. Event flow
 
@@ -331,8 +334,9 @@ Herdr event or stale deadline
 Supervisor restart or resumed session
   -> load each goal.json and current.json directly
   -> fetch one fresh Herdr snapshot
-  -> reconsider every unfinished goal from current facts
-  -> reread bounded recent worker evidence, even when some evidence repeats
+  -> restore exact wait deadlines
+  -> reread bounded worker evidence before waking an unchanged settled wait
+  -> reconsider expired waits, new evidence, and failures from current facts
   -> continue normal event-driven supervision
 ```
 
@@ -343,7 +347,7 @@ Supervisor restart or resumed session
 | Output/activity while `working`          | No lifecycle wake; the bounded review deadline remains the safety net   |
 | `blocked`                                | Review immediately and determine whether the worker or human can answer |
 | `idle` or Herdr `done`                   | Review the result; never assume goal completion                         |
-| Agent process exits but pane remains     | Review identity and consider exact-session recovery                      |
+| Agent process exits but pane remains     | Continue the goal; code resumes the exact session                        |
 | Pane disappears or occupant changes      | Fail closed and ask the human only when a decision is needed             |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
@@ -408,24 +412,24 @@ with exactly one explicit, validated decision:
 
 ```json
 {
-  "decision": "leave | steer | ask_human | recover | accept",
+  "decision": "leave | steer | ask_human | accept",
   "progress": "Plain-language account of what is now true",
   "message": "Optional exact message for the worker or human",
   "evidence": ["Required when accepting"],
-  "reviewAfterMs": 600000
+  "reviewAt": "2026-08-29T00:00:00Z"
 }
 ```
 
 Meaning:
 
 - `leave`: progress is healthy; do not interfere.
-- `steer`: send one useful instruction to the same worker.
+- `steer`: continue the same worker with one useful instruction; code resumes
+  its exact session automatically when the process has exited.
 - `ask_human`: a real decision or missing fact requires the human.
-- `recover`: restore or resume the same goal only after identity checks.
 - `accept`: acceptance criteria are supported by current evidence.
 
 The corresponding tools are `supervisor_leave`, `supervisor_steer`,
-`supervisor_ask_human`, `supervisor_recover`, and `supervisor_finish`. The
+`supervisor_ask_human`, and `supervisor_finish`. The
 executor contains no keyword router for these judgments. It validates tool
 arguments, authority, identity, evidence requirements, and the one-decision
 turn boundary, performs the operation, records one concise audit entry after
@@ -452,16 +456,15 @@ review interval.
 `reviewAt` is an absolute ISO timestamp bounded to the next 24 hours. It is
 required for an explicit wait, so the model can copy an exact retry boundary
 instead of doing delay arithmetic, and a quiet peer wait need not spend a model
-turn every ten minutes. Settled and blocked Herdr events still wake the
-supervisor immediately.
+turn every ten minutes. The condition and deadline are checkpointed and
+restored after restart. A bounded native-evidence check suppresses restored
+no-change lifecycle noise; new evidence and real failures still wake promptly.
 
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
-the worker untouched. While the process remains alive, a small in-memory marker
-suppresses repeated stale reviews for that goal. The human's answer may then
-steer that same worker once. After restart the marker is gone; fresh reconciliation
-rediscovers the missing decision and may ask a new, better question. No waiting
-task or durable message queue is created.
+the worker untouched. The last decision in the checkpoint restores that wait
+after restart. The human's answer may then steer that same worker once. No
+waiting task or durable message queue is created.
 
 ## 10. Shared supervisor context
 
@@ -729,19 +732,20 @@ stores or displays copied live status as goal truth.
   terminal process ID; the supervisor refreshed that transient location and
   continued supervision without asking the human to repair or replace work.
 - **Implemented:** distinguish a stopped agent process in an existing pane from
-  a missing pane or replacement occupant. Only the first case is eligible for
-  exact-session recovery.
+  a missing pane or replacement occupant. A single `steer` operation prompts a
+  present process or resumes the exact session in the first case.
 - **Verified:** after the registered Codex process stopped, the supervisor
   resumed its exact native session in the same terminal, sent one continuation,
   observed the exact `RECOVERY_POC_OK` result on the next event, and accepted the
   goal. No replacement worker or goal was created.
-- **Verified:** when the model proposed recovery for a `done` worker whose exact
-  process was still present, the executor refused it. The same review then
-  steered the existing worker; it did not start a duplicate process.
+- **Verified:** continuing a stopped worker resumes its exact session, while
+  continuing a `done` worker whose process is still present prompts it normally;
+  the model cannot select the wrong transport or start a duplicate process.
 - **Finding:** Herdr does not emit an event when `interactive_ready` changes.
   Its own start command polls `agent.get` during startup. The supervisor mirrors
-  that bounded 200 ms readiness handshake only inside explicit recovery, before
-  sending the continuation. Normal supervision remains event-driven and idle.
+  that bounded 200 ms readiness handshake only inside automatic exact-session
+  recovery, with the continuation in the resume command. Normal supervision
+  remains event-driven and idle.
 - Decide from evidence whether Shepherd or any additional component is needed.
 
 ### Stage 5: goal-backed simple recovery
@@ -758,7 +762,8 @@ stores or displays copied live status as goal truth.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads
   bounded evidence; the audit never advances the cursor.
-- **Implemented:** keep pending signals, review timers, and human-question suppression in memory.
+- **Implemented:** keep pending signals and the one armed timer in memory while
+  checkpointing concrete wait deadlines and human-wait decisions.
 - **Verified:** resume the same Pi session when possible; a new session can
   continue every unfinished goal from the contract, checkpoint, and fresh facts.
 - **Verified:** measure the whole system, including Herdr subscription work and model-review
@@ -871,8 +876,8 @@ The PoC is successful when all of these are demonstrated:
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn
     triggered by fresh Herdr state.
-13. A stopped supported process can resume its exact native session in the same
-    terminal; a missing pane or changed identity is never recovered implicitly.
+13. Continuing a stopped supported process resumes its exact native session in
+    the same terminal; a missing pane or changed identity fails closed.
 14. Every automatic review ends in one explicit decision; prose alone cannot
     advance a checkpoint or hide an incomplete review.
 15. Restart recovery loads every unfinished goal directly and reconsiders it from current

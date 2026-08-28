@@ -20,12 +20,14 @@ const stateFields = new Set([
   "evidence",
   "progress",
   "lastDecision",
+  "wait",
   "terminal",
   "observationCursor",
 ]);
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
+const waitFields = new Set(["condition", "reviewAt"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
@@ -151,6 +153,17 @@ export function validateGoalState(state) {
     requiredString(state.lastDecision.action, "lastDecision.action");
     if (!Number.isFinite(Date.parse(state.lastDecision.at))) {
       throw new Error("lastDecision.at must be an ISO timestamp");
+    }
+  }
+  if (state.wait !== undefined) {
+    if (!state.wait || typeof state.wait !== "object" || Array.isArray(state.wait)) {
+      throw new Error("goal wait must be an object");
+    }
+    onlyFields(state.wait, waitFields, "goal wait");
+    requiredString(state.wait.condition, "goal wait condition");
+    requiredString(state.wait.reviewAt, "goal wait reviewAt");
+    if (!Number.isFinite(Date.parse(state.wait.reviewAt))) {
+      throw new Error("goal wait reviewAt must be an ISO timestamp");
     }
   }
   if (state.terminal !== undefined) {

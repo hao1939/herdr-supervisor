@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import herdrSupervisor from "../extension.ts";
-import { loadSupervisorGoals, registerSupervisedGoal } from "../src/goal-registry.js";
+import { loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.js";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.js";
 import { HerdrClient } from "../src/herdr-client.js";
 
@@ -706,6 +706,8 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.lastDecision.decision, "leave");
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
+  assert.equal(stored.wait.condition, "w1:p7 to report that shared ADO capacity is available");
+  assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
 });
 
@@ -772,6 +774,57 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   pi.events.get("session_shutdown")();
 });
 
+test("restart restores a settled wait without a no-change review before its deadline", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-wait-restart-"));
+  const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
+  const sessionFile = join(sessions, "worker.jsonl");
+  const line = `${JSON.stringify({
+    timestamp: "2026-08-28T20:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Waiting safely." }] },
+  })}\n`;
+  await writeFile(sessionFile, line);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Wait until one exact retry boundary.",
+    acceptance: ["The retry succeeds."],
+  }, root, { goalId: "g_wait_restart" });
+  const reviewAt = new Date(Date.now() + 1200).toISOString();
+  await recordDecision(binding, "leave", {
+    progress: "The service asked us to wait.",
+    action: "Wait for the service retry boundary.",
+    wait: { condition: "the service retry boundary", reviewAt },
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
+    evidence: ["The server returned a retry deadline."],
+  }, root);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "done",
+    state_change_seq: 9,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(pi.messages.length, 0, "restart must not review unchanged settled evidence early");
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /review deadline elapsed/);
+  pi.events.get("session_shutdown")();
+});
+
 test("only the current automated review remains in model context", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
@@ -831,7 +884,7 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
   });
   assert.equal(prompts, 1);
   assert.equal(result.isError, false);
-  assert.match(result.content[0].text, /Steered w1:p2, but could not save the checkpoint/);
+  assert.match(result.content[0].text, /Continued w1:p2, but could not save the checkpoint/);
   assert.match(result.content[0].text, /Do not send the instruction again/);
 
   const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
@@ -884,7 +937,7 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   pi.events.get("session_shutdown")();
 });
 
-test("recovery resumes the exact session with one atomic continuation", async (t) => {
+test("continuing a stopped worker resumes the exact session atomically", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -911,7 +964,7 @@ test("recovery resumes the exact session with one atomic continuation", async (t
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const result = await pi.tools.get("supervisor_recover").execute("recover", {
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
   });
@@ -927,7 +980,7 @@ test("recovery resumes the exact session with one atomic continuation", async (t
   ]);
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Resumed the exact codex session/);
-  const repeated = await pi.tools.get("supervisor_recover").execute("recover-again", {
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
   });
@@ -958,7 +1011,7 @@ test("an accepted resume is not repeated when readiness checking fails", async (
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const result = await pi.tools.get("supervisor_recover").execute("recover", {
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
   });
@@ -967,7 +1020,7 @@ test("an accepted resume is not repeated when readiness checking fails", async (
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Herdr accepted the exact-session resume/);
   assert.match(result.content[0].text, /Do not resume it again/);
-  const repeated = await pi.tools.get("supervisor_recover").execute("recover-again", {
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
   });

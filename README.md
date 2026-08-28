@@ -12,8 +12,8 @@ The intended behavior is simple:
 4. The supervisor sleeps while the worker is making progress.
 5. A meaningful worker event wakes the supervisor.
 6. The supervisor reads current evidence and either leaves the worker alone,
-   steers the same worker, asks the human, recovers the worker, or accepts the
-   result.
+   continues the same worker, asks the human, or accepts the result. Continuing
+   automatically resumes the exact session when its process has exited.
 
 The supervisor and its workers prefer plain language for progress and results:
 they retain exact technical evidence, but explain what happened, why it matters,
@@ -88,23 +88,26 @@ observes only new evidence, and accepts without repeating the steer. A replaced
 pane occupant fails closed, and repeated ineffective steering causes the
 supervisor to ask the human instead of looping forever.
 
-Restart does not force a model turn for every healthy worker. It restores all
-bindings, refreshes their bounded review deadlines, and immediately reviews
-only workers whose fresh Herdr state needs attention. This keeps human input
-responsive as the number of concurrent goals grows.
+Restart does not force a model turn for every healthy worker. Concrete wait
+conditions and their exact review deadlines live in `current.json`; restart
+restores those deadlines and checks bounded native worker evidence before
+reviewing a settled wait early. Expired waits, new evidence, and real failures
+still wake immediately. This keeps human input responsive as the number of
+concurrent goals grows.
 
-The recovery path has also been verified end to end. When an exact Codex
-process stopped but its original Herdr pane remained, the supervisor resumed
-that native Codex session, sent one continuation, observed its new result, and
-accepted the goal. A missing pane or changed identity still fails closed. Herdr
-does not emit an event when a newly started agent becomes interactive, so this
-explicit recovery operation uses Herdr's bounded readiness handshake; normal
+The recovery path has also been verified end to end. The model chooses only to
+continue the goal. When an exact Codex process stopped but its original Herdr
+pane remained, execution code resumed that native Codex session and carried the
+continuation atomically; when the process was still present, the same action
+prompted it normally. A missing pane or changed identity still fails closed.
+Herdr does not emit an event when a newly started agent becomes interactive, so
+this automatic recovery branch uses Herdr's bounded readiness handshake; normal
 supervision remains event-driven and performs no readiness polling.
 
 Stage 5 removes the old shared binding file. The live extension now loads one
 directory per goal once at startup, keeps active projections and scheduling hints
 only in memory, and records every
-completed `leave`, `steer`, `ask_human`, `recover`, `accept`, or explicit stop in
+completed `leave`, `steer`, `ask_human`, `accept`, or explicit stop in
 the local checkpoint and audit. A live two-worker trial accepted independent
 Alpha and Beta results, and a restart trial resumed the same Pi conversation,
 same goal, same worker, and same Codex session without replaying its journal.

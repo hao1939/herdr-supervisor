@@ -41,10 +41,18 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
 
 test("refining a goal replaces its contract without replacing its worker", async () => {
   const directory = await root();
-  await registerSupervisedGoal(worker, {
+  const binding = await registerSupervisedGoal(worker, {
     objective: "Prepare the focused fix.",
     acceptance: ["The focused proof passes."],
   }, directory, { goalId: "g_test", at: "2026-08-28T10:00:00.000Z" });
+  await recordDecision(binding, "leave", {
+    progress: "Waiting for the earlier requirement.",
+    action: "Wait for the earlier requirement.",
+    wait: {
+      condition: "the earlier requirement",
+      reviewAt: "2026-08-28T11:00:00.000Z",
+    },
+  }, directory, () => "2026-08-28T10:01:00.000Z");
 
   const result = await refineSupervisorGoal("g_test", {
     objective: "Prepare and validate the focused fix.",
@@ -62,6 +70,7 @@ test("refining a goal replaces its contract without replacing its worker", async
   const goals = await loadSupervisorGoals(directory);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].goalId, "g_test");
+  assert.equal(goals.active[0].wait, undefined);
   assert.deepEqual(goals.active[0].constraints, ["Use an isolated worktree and one focused PR."]);
   const audit = await readAudit("g_test", directory);
   assert.equal(audit.at(-1).type, "goal_refined");
