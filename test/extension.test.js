@@ -133,7 +133,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   herdrSupervisor(pi);
   const result = await pi.tools.get("supervisor_start_goal").execute("start", {
     goal: "Fix the focused regression.",
+    context: ["Another worker is validating the same repository."],
     acceptance: ["The focused test passes.", "The change is reviewed."],
+    constraints: ["Make changes only in an isolated worktree."],
     placement: { mode: "new", label: "sample-project" },
     working_directory: "/app/projects/sample-project",
     direction: "down",
@@ -157,12 +159,18 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.equal(deliveredPrompts[0].bindingExists, false);
   assert.doesNotMatch(deliveredPrompts[0].prompt, /Fix the focused regression/);
   assert.match(deliveredPrompts[1].prompt, /Fix the focused regression/);
+  assert.match(deliveredPrompts[1].prompt, /Another worker is validating the same repository/);
   assert.match(deliveredPrompts[1].prompt, /The focused test passes/);
+  assert.match(deliveredPrompts[1].prompt, /Make changes only in an isolated worktree/);
+  assert.match(deliveredPrompts[1].prompt, /starting directory as a project and discovery root/);
+  assert.match(deliveredPrompts[1].prompt, /A goal may use multiple repositories or worktrees/);
   assert.equal(deliveredPrompts[1].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
+  assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
+  assert.deepEqual(goals.active[0].constraints, ["Make changes only in an isolated worktree."]);
   pi.events.get("session_shutdown")();
 });
 

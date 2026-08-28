@@ -26,12 +26,16 @@ pause, ask questions, stall, crash, or produce an incomplete result.
    its own tab and stable infrastructure directory; a worker never inherits
    the supervisor's directory. A human may still attach an
    already-running worker explicitly when needed.
-4. The worker continues independently. The supervisor is not consuming model
+4. The worker inspects that project root and owns the execution layout. For
+   change-producing Git work it uses isolated worktrees when concurrent work
+   or branch safety requires them. One goal may use several worktrees or
+   repositories; this does not create more supervisor goals.
+5. The worker continues independently. The supervisor is not consuming model
    turns while nothing meaningful is happening.
-5. Herdr events wake the supervisor when review is useful.
-6. The supervisor explains important progress, asks only necessary human
+6. Herdr events wake the supervisor when review is useful.
+7. The supervisor explains important progress, asks only necessary human
    questions, and steers the same worker when more work is possible.
-7. The supervisor stops supervising only after it verifies the acceptance
+8. The supervisor stops supervising only after it verifies the acceptance
    evidence or the human explicitly stops it.
 
 ## 3. Mental model
@@ -77,7 +81,7 @@ know that Herdr or a supervisor exists.
 
 - task trees, dependencies, queues, priorities, or project planning;
 - automatically decomposing one goal into a worker tree;
-- worktree creation, merging, deployment, or CI ownership;
+- supervisor-owned worktree creation, merging, deployment, or CI ownership;
 - replacing Herdr status detection;
 - parsing every terminal update with an LLM;
 - automatically approving permissions or destructive actions;
@@ -112,9 +116,29 @@ and does not turn the local socket into a public API.
 
 The dedicated container starts the supervisor from
 `HERDR_SUPERVISOR_DIRECTORY`, which defaults to `/app`. Worker creation always
-requires its own absolute working directory. This keeps supervisor conversation
+requires its own absolute starting directory. This keeps supervisor conversation
 state independent of whichever project a worker edits without adding project
-registries or directory inference.
+registries or directory inference. The starting directory is a discovery root;
+the worker remains responsible for inspecting the checkout and creating any
+isolated Git worktrees its goal needs.
+
+### Creating or continuing work
+
+There is no separate Task object or task-creation API. For each human request,
+the supervisor model first compares the intended outcome with the active goals.
+If one already represents the outcome, it continues that exact goal and worker.
+Otherwise one `supervisor_start_goal` call mechanically creates a pane, starts
+Codex, captures its native session, records the goal contract and binding, and
+delivers the goal. The model decides reuse, objective, relevant context,
+acceptance criteria, constraints, starting directory, and placement; code only
+validates and executes that decision. When the repository has concurrent
+workers, that fact and the isolated-worktree requirement belong in the goal
+contract so Codex does not have to infer unseen collaboration.
+
+Git topology stays below this boundary. After receiving the goal, Codex may use
+one or several worktrees or repositories. The supervisor reminds it to protect
+shared checkouts, but it neither assumes one worktree per goal nor persists a
+workspace registry.
 
 ## 6. Minimal durable state: contract, checkpoint, audit
 

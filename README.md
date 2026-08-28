@@ -119,6 +119,12 @@ Codex there, gives it the goal, and supervises it. It asks a focused question
 first only when the missing answer would materially change the work. Use
 `/supervised` to inspect active goals.
 
+This is also how new work is created: the supervisor first reuses an active goal
+with the same outcome; otherwise it creates one new goal and worker. There is no
+second task system. The worker starts at the selected project root and owns any
+Git worktree layout the outcome requires, including using several worktrees for
+one goal. The supervisor only reminds it not to modify an unsafe shared checkout.
+
 For exact operator control, `/supervise <pane> <goal>` still attaches an
 existing worker, and `/supervise <pane> --goal-id <id>` starts a copied portable
 contract on an existing worker. The standalone CLI can list workers with
