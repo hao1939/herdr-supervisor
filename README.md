@@ -135,6 +135,10 @@ Git worktree layout the outcome requires, including using several worktrees for
 one goal. The starting checkout and worktrees owned by other goals are read-only
 discovery sources. A worker creates another goal-owned worktree for baseline
 tests or generators rather than risking writes in somebody else's worktree.
+Likewise, a missing command or default credential helper is not automatically a
+human blocker. The worker first exhausts safe environment capabilities and
+separates missing convenience tooling from genuinely missing authority or
+information.
 
 The human may refine an active goal in ordinary conversation. The supervisor
 replaces that same goal's complete portable contract, records the change in its

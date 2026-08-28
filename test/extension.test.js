@@ -168,6 +168,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[1].prompt, /Make changes only in an isolated worktree/);
   assert.match(deliveredPrompts[1].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[1].prompt, /Create another goal-owned worktree/);
+  assert.match(deliveredPrompts[1].prompt, /distinguish missing convenience tooling/);
   assert.match(deliveredPrompts[1].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[1].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
@@ -309,6 +310,7 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /complete durable contract/);
   assert.match(prompts[0].prompt, /exact commit passes the ADO pipeline/);
   assert.match(prompts[0].prompt, /every other worker's worktree as read-only/);
+  assert.match(prompts[0].prompt, /genuinely missing capability, authority, or information/);
   assert.match(prompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal((await readAudit("g_test", root)).at(-1).type, "goal_refined");
   pi.events.get("session_shutdown")();

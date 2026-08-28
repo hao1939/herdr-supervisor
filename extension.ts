@@ -67,7 +67,7 @@ function codexLaunchArgs() {
   return args;
 }
 
-const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.";
+const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap. Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.";
 
 function workerNameForGoal(goalId: string) {
   const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
@@ -852,7 +852,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_ask_human",
     label: "Ask for a decision",
-    description: "Ask the human one concrete question when their authority or missing information is required. This ends the review turn without prompting the worker.",
+    description: "Ask the human one concrete question only when their authority or missing information is genuinely required. Missing convenience tooling, a default credential helper, or one failed approach is not enough: steer the worker to exhaust safe in-scope capabilities first. This ends the review turn without prompting the worker.",
     parameters: Type.Object({ pane_id: Pane, question: Type.String({ minLength: 1 }) }),
     executionMode: "sequential",
     async execute(_id, params) {

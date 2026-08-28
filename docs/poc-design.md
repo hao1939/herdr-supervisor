@@ -256,6 +256,13 @@ because their write behavior cannot be inferred safely from their names. A
 worker that needs a clean baseline creates another goal-owned worktree. This is
 a semantic worker contract, not command keyword matching in the infrastructure.
 
+Human attention is also an authority boundary, not a generic failure path. A
+worker and supervisor exhaust safe in-scope alternatives before asking the
+human, and distinguish missing convenience tooling or default credential
+wiring from genuinely missing capability, authority, or information. The LLM
+makes that semantic judgment; execution code does not infer it from command
+names or error keywords.
+
 The live supervisor scans goal directories once at startup, reports malformed
 entries without hiding healthy ones, and keeps only active goal projections in
 memory. Events and deadlines therefore scale with active workers, not years of
