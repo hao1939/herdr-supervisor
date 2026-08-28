@@ -210,11 +210,15 @@ completed history. Restart simply rebuilds this disposable cache from the goal
 directories; it is not another durable index.
 
 An unfinished goal always resumes the same worker and native session. Worker
-identity is immutable within that local execution. To run a goal elsewhere or
-again, copy its `goal.json` into a new goal directory and explicitly select a
-new worker. Old checkpoints and logs are neither required nor moved. Exact
-recovery of the original execution is a separate local operation that requires
-its original runtime and native session.
+identity is the native agent session; the Herdr pane is its routing slot and
+the terminal ID is a transient location checkpoint. When Herdr restores the
+same native session in the same pane after a restart, the supervisor refreshes
+that checkpoint instead of treating the new terminal process as a replacement.
+The native identity is immutable within that local execution. To run a goal
+elsewhere or again, copy its `goal.json` into a new goal directory and explicitly
+select a new worker. Old checkpoints and logs are neither required nor moved.
+Exact recovery of the original execution is a separate local operation that
+requires its original runtime and native session.
 
 Pending signals, review timers, and suppression of a repeated human question
 stay in memory. None of these files contains raw events, terminal output,

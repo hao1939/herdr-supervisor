@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   loadSupervisorGoals,
   recordDecision,
+  refreshWorkerLocation,
   registerSupervisedGoal,
   startInstalledGoal,
 } from "../src/goal-registry.js";
@@ -133,4 +134,20 @@ test("restart reloads concurrent goals independently and reconsiders fresh Herdr
   };
   assert.equal(shouldWake({ ...restarted.active[0], lastReviewStateChangeSeq: 0 }, alphaAgent, alphaAgent).wake, false);
   assert.equal(shouldWake({ ...restarted.active[1], lastReviewStateChangeSeq: 0 }, betaAgent, betaAgent).wake, true);
+});
+
+test("the same native session may refresh its transient terminal after restart", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Keep working after restart.",
+  }, directory, { goalId: "g_restart", at: "2026-08-28T10:00:00.000Z" });
+  const refreshed = await refreshWorkerLocation(binding, {
+    ...worker,
+    terminalId: "term_after_restart",
+  }, directory, () => "2026-08-28T10:01:00.000Z");
+
+  assert.equal(refreshed.terminalId, "term_after_restart");
+  const [stored] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(stored.terminalId, "term_after_restart");
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
 });

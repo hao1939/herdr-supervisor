@@ -93,7 +93,7 @@ test("working is quiet while settled and blocked states wake review", () => {
 test("replaced worker fails closed", () => {
   const current = binding();
   assert.equal(identityMismatch(current, agent()), undefined);
-  assert.match(identityMismatch(current, agent({ terminal_id: "term-2" })), /different terminal/);
+  assert.equal(identityMismatch(current, agent({ terminal_id: "term-2" })), undefined);
   assert.match(
     identityMismatch(current, agent({ agent_session: { ...agent().agent_session, value: "session-2" } })),
     /value changed/,

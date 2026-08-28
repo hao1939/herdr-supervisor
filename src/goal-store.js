@@ -315,8 +315,13 @@ export async function updateGoalState(goalId, change, root = defaultGoalsRoot(),
     if (next.goalId !== current.goalId || next.version !== current.version || next.createdAt !== current.createdAt) {
       throw new Error("a goal state update cannot change its identity");
     }
-    if (JSON.stringify(next.worker) !== JSON.stringify(current.worker)) {
-      throw new Error("a goal state update cannot replace its worker or native session");
+    if (
+      next.worker.paneId !== current.worker.paneId
+      || ["source", "agent", "kind", "value"].some(
+        (field) => next.worker.agentSession?.[field] !== current.worker.agentSession?.[field],
+      )
+    ) {
+      throw new Error("a goal state update cannot replace its worker pane or native session");
     }
     next.revision = current.revision + 1;
     next.updatedAt = now();

@@ -260,6 +260,6 @@ test("an active local execution keeps its exact worker and Codex session", async
   await assert.rejects(updateGoalState("g_test", (current) => {
     current.worker.agentSession.value = "replacement_session";
     return current;
-  }, root), /cannot replace its worker or native session/);
+  }, root), /cannot replace its worker pane or native session/);
   assert.equal((await loadGoalState("g_test", root)).worker.agentSession.value, "session_test");
 });

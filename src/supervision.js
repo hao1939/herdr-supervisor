@@ -23,7 +23,6 @@ export function identityMismatch(binding, agent, pane) {
   if (!agent && !pane) return "worker pane is no longer present";
   if (!agent && pane.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";
   if (!agent) return "worker agent process is no longer detected";
-  if (agent.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";
   const expected = binding.agentSession;
   const actual = agent.agent_session;
   if (!actual) return "worker has no native agent-session identity";

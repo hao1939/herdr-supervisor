@@ -47,7 +47,10 @@ function snapshot(agent = {}) {
     interactive_ready: true,
     ...agent,
   };
-  return { agents: agent === null ? [] : [current], panes: [{ pane_id: worker.paneId, terminal_id: worker.terminalId }] };
+  return {
+    agents: agent === null ? [] : [current],
+    panes: [{ pane_id: worker.paneId, terminal_id: agent === null ? worker.terminalId : current.terminal_id }],
+  };
 }
 
 async function waitFor(check) {
@@ -342,6 +345,32 @@ test("a missing native session cannot leave assigned work running unsupervised",
   assert.match(result.content[0].text, /goal was not delivered or registered/);
   assert.equal(prompts, 0);
   assert.equal((await loadSupervisorGoals(root)).active.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart adopts a new terminal for the same native session before review", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    terminal_id: "term_after_restart",
+    agent_status: "working",
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.terminalId, "term_after_restart");
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
+  assert.doesNotMatch(pi.messages[0].content, /different terminal|replacement identity/);
   pi.events.get("session_shutdown")();
 });
 

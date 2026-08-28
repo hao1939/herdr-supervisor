@@ -80,6 +80,21 @@ export async function startInstalledGoal(goalId, worker, root, options = {}) {
   return bindingFromRecord({ goalId, contract: installed.contract, state });
 }
 
+export async function refreshWorkerLocation(binding, worker, root, now) {
+  if (worker.paneId !== binding.paneId) throw new Error("the worker pane changed");
+  if (["source", "agent", "kind", "value"].some(
+    (field) => worker.agentSession?.[field] !== binding.agentSession?.[field],
+  )) {
+    throw new Error("the native agent session changed");
+  }
+  if (worker.terminalId === binding.terminalId) return binding;
+  const state = await updateGoalState(binding.goalId, (current) => {
+    current.worker.terminalId = worker.terminalId;
+    return current;
+  }, root, now);
+  return { ...binding, terminalId: state.worker.terminalId };
+}
+
 export async function recordDecision(binding, decision, input, root, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
