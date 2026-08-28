@@ -179,7 +179,9 @@ exact session restored after a container restart cannot stop at a second
 restores the exact native Codex session recorded by the goal checkpoint.
 Herdr's automatic session restore supplies one ordinary continuation turn, so
 the restored worker resumes useful work without waiting for the supervisor or
-the human to press a key.
+the human to press a key. A restored Codex worker also reuses the session's
+saved directory. This avoids an interactive directory-choice prompt when the
+worker entered a goal-owned worktree before the restart.
 
 ```sh
 docker compose up -d --build

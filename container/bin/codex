@@ -8,6 +8,7 @@ previous=""
 has_disabled_goals=0
 has_full_access=0
 has_hook_trust=0
+has_resume_cwd=0
 after_resume=0
 resume_argument_count=0
 for argument in "$@"; do
@@ -25,6 +26,14 @@ for argument in "$@"; do
   if [ "$argument" = "--dangerously-bypass-hook-trust" ]; then
     has_hook_trust=1
   fi
+  if { [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; } &&
+    case "$argument" in tui.resume_cwd=*) true ;; *) false ;; esac
+  then
+    has_resume_cwd=1
+  fi
+  case "$argument" in
+    -c=tui.resume_cwd=*|--config=tui.resume_cwd=*) has_resume_cwd=1 ;;
+  esac
   previous="$argument"
 done
 
@@ -38,6 +47,15 @@ fi
 
 if [ "$has_disabled_goals" -eq 0 ]; then
   set -- --disable goals "$@"
+fi
+
+# Codex otherwise asks which directory to use when Herdr restores a session
+# from a terminal whose current directory differs from the session's saved
+# directory. Workers commonly create and enter goal-owned worktrees, so keep
+# that exact session directory without waiting for a human confirmation. An
+# explicit caller choice remains authoritative.
+if [ "$after_resume" -eq 1 ] && [ "$has_resume_cwd" -eq 0 ]; then
+  set -- -c 'tui.resume_cwd="session"' "$@"
 fi
 
 if [ "${HERDR_SUPERVISOR_CODEX_FULL_ACCESS:-0}" = "1" ]; then
