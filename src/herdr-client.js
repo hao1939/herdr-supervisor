@@ -84,6 +84,15 @@ export class HerdrClient {
     });
   }
 
+  async createTab({ workspaceId, cwd, label, focus = false }) {
+    return this.request("tab.create", {
+      workspace_id: workspaceId,
+      cwd,
+      label,
+      focus,
+    });
+  }
+
   async startAgent({ name, kind, paneId, args = [] }) {
     return this.request("agent.start", {
       name,

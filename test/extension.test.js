@@ -71,13 +71,17 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
+  const previousFullAccess = process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
   process.env.HERDR_PANE_ID = "w1:p1";
+  process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS = "1";
   t.after(() => {
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
     if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
     else process.env.HERDR_PANE_ID = previousPane;
+    if (previousFullAccess === undefined) delete process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS;
+    else process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS = previousFullAccess;
   });
 
   const managed = {
@@ -87,13 +91,19 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     state_change_seq: 1,
     agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_managed" },
     interactive_ready: true,
+    tab_id: "w1:t2",
+    workspace_id: "w1",
   };
-  let splitRequest;
+  let createTabRequest;
   let startRequest;
   let initialPrompt;
-  t.mock.method(HerdrClient.prototype, "splitPane", async (request) => {
-    splitRequest = request;
-    return { type: "pane_info", pane: { pane_id: managed.pane_id } };
+  t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
+    createTabRequest = request;
+    return {
+      type: "tab_created",
+      tab: { tab_id: "w1:t2" },
+      root_pane: { pane_id: managed.pane_id, tab_id: "w1:t2" },
+    };
   });
   t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
     startRequest = request;
@@ -101,11 +111,16 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   });
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [managed],
-    panes: [{ pane_id: managed.pane_id, terminal_id: managed.terminal_id }],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, tab_id: "w1:t2", workspace_id: "w1" },
+    ],
+    tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "Supervisor" }],
   }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => {
     initialPrompt = prompt;
   });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -113,26 +128,122 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   const result = await pi.tools.get("supervisor_start_goal").execute("start", {
     goal: "Fix the focused regression.",
     acceptance: ["The focused test passes.", "The change is reviewed."],
+    tab_label: "sample-project",
     working_directory: "/app/projects/sample-project",
     direction: "down",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Started and supervised goal/);
-  assert.deepEqual(splitRequest, {
-    paneId: "w1:p1",
-    direction: "down",
+  assert.deepEqual(createTabRequest, {
+    workspaceId: "w1",
     cwd: "/app/projects/sample-project",
+    label: "sample-project",
     focus: false,
   });
   assert.equal(startRequest.kind, "codex");
   assert.equal(startRequest.paneId, managed.pane_id);
+  assert.deepEqual(startRequest.args, [
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+  ]);
   assert.match(initialPrompt, /Fix the focused regression/);
   assert.match(initialPrompt, /The focused test passes/);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
+  pi.events.get("session_shutdown")();
+});
+
+test("the supervisor can place related workers in the same tab", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-related-start-"));
+  const related = {
+    paneId: "w1:p2",
+    terminalId: "term_related",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_related" },
+  };
+  await registerSupervisedGoal(related, {
+    objective: "Prepare the related design.",
+    acceptance: ["The design is reviewable."],
+  }, root, { goalId: "g_related" });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  const previousFullAccess = process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  delete process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+    if (previousFullAccess === undefined) delete process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS;
+    else process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS = previousFullAccess;
+  });
+
+  const started = {
+    pane_id: "w1:p3",
+    terminal_id: "term_started",
+    agent_status: "working",
+    state_change_seq: 1,
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_started" },
+    interactive_ready: true,
+    tab_id: "w1:t2",
+    workspace_id: "w1",
+  };
+  const relatedAgent = {
+    pane_id: related.paneId,
+    terminal_id: related.terminalId,
+    agent_status: "working",
+    state_change_seq: 1,
+    agent_session: related.agentSession,
+    interactive_ready: true,
+    tab_id: "w1:t2",
+    workspace_id: "w1",
+  };
+  let splitRequest;
+  let startRequest;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [relatedAgent, started],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
+      { pane_id: related.paneId, terminal_id: related.terminalId, tab_id: "w1:t2", workspace_id: "w1" },
+      { pane_id: started.pane_id, terminal_id: started.terminal_id, tab_id: "w1:t2", workspace_id: "w1" },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "splitPane", async (request) => {
+    splitRequest = request;
+    return { type: "pane_info", pane: { pane_id: started.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    startRequest = request;
+    return started;
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => started);
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("start-related", {
+    goal: "Implement the related design.",
+    acceptance: ["The focused proof passes."],
+    related_worker_pane: related.paneId,
+    working_directory: "/app/projects/example",
+    direction: "right",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, false);
+  assert.deepEqual(splitRequest, {
+    paneId: related.paneId,
+    direction: "right",
+    cwd: "/app/projects/example",
+    focus: false,
+  });
+  assert.equal(startRequest.paneId, started.pane_id);
+  assert.deepEqual(startRequest.args, []);
   pi.events.get("session_shutdown")();
 });
 

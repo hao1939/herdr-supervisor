@@ -84,6 +84,40 @@ test("splitPane creates an unfocused sibling from an exact supervisor pane", asy
   }
 });
 
+test("createTab creates an unfocused related-work tab in one exact workspace", async () => {
+  let observed;
+  const fake = await fakeHerdr((request, socket) => {
+    observed = request;
+    socket.write(`${JSON.stringify({
+      id: request.id,
+      result: {
+        type: "tab_created",
+        tab: { tab_id: "w1:t2" },
+        root_pane: { pane_id: "w1:p3", tab_id: "w1:t2" },
+      },
+    })}\n`);
+  });
+  try {
+    const client = new HerdrClient({ socketPath: fake.socketPath });
+    const result = await client.createTab({
+      workspaceId: "w1",
+      cwd: "/app/projects/example",
+      label: "work: example",
+      focus: false,
+    });
+    assert.equal(result.root_pane.pane_id, "w1:p3");
+    assert.equal(observed.method, "tab.create");
+    assert.deepEqual(observed.params, {
+      workspace_id: "w1",
+      cwd: "/app/projects/example",
+      label: "work: example",
+      focus: false,
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
 test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () => {
   let launched = false;
   let checks = 0;

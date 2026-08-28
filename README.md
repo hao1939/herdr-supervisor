@@ -96,9 +96,11 @@ human choice was pending, regenerated the concrete question, delivered the
 answer to the same worker once, and accepted its resulting evidence.
 
 The supervisor can now accept a goal conversationally as well: it forms
-completion criteria, creates an unfocused sibling pane, starts Codex, records
-the exact binding, and sends the goal. Manual pane creation and `/supervise` are
-retained only as explicit operator controls.
+completion criteria, keeps its own tab focused, chooses whether the goal joins
+an active related-work tab or starts a new unfocused tab, starts Codex there,
+records the exact binding, and sends the goal. Multiple related workers may
+share one tab. Manual pane creation and `/supervise` are retained only as
+explicit operator controls.
 
 ## Try it
 
@@ -109,9 +111,10 @@ pi --no-builtin-tools -e /app/projects/herdr-supervisor/extension.ts --superviso
 ```
 
 Then describe the outcome normally. The supervisor forms explicit completion
-criteria, creates an unfocused sibling pane, starts Codex, gives it the goal,
-and supervises it. It asks a focused question first only when the missing answer
-would materially change the work. Use `/supervised` to inspect active goals.
+criteria, chooses a related worker tab or creates a new unfocused one, starts
+Codex there, gives it the goal, and supervises it. It asks a focused question
+first only when the missing answer would materially change the work. Use
+`/supervised` to inspect active goals.
 
 For exact operator control, `/supervise <pane> <goal>` still attaches an
 existing worker, and `/supervise <pane> --goal-id <id>` starts a copied portable
@@ -157,12 +160,16 @@ pi --no-builtin-tools \
   --supervisor-mode live
 ```
 
-Talk to that Pi session normally. It creates Codex worker panes as goals are
-accepted. Detaching from the container's Herdr client does not stop the server,
-supervisor, or workers. Reattach with `docker compose exec herdr herdr`. API
-keys present in the shell that starts Compose are passed into the container;
-mounting an existing agent home is an optional operator choice and is
-intentionally not part of the default setup.
+Talk to that Pi session normally. It keeps the supervisor in its current tab
+and groups related Codex workers in other tabs as goals are accepted. Container
+launches pass Codex `--dangerously-bypass-approvals-and-sandbox` and
+`--dangerously-bypass-hook-trust`, because the container is the security
+boundary. Set `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=0` before starting Compose to
+restore Codex prompts and sandboxing. Detaching from the container's Herdr
+client does not stop the server, supervisor, or workers. Reattach with
+`docker compose exec herdr herdr`. API keys present in the shell that starts
+Compose are passed into the container; mounting an existing agent home is an
+optional operator choice and is intentionally not part of the default setup.
 
 Herdr 0.8.x does not expose a web UI or HTTP server. Its supported remote
 interface is the terminal UI over SSH (`herdr --remote <ssh-host>`), while its

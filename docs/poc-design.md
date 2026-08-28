@@ -19,9 +19,11 @@ pause, ask questions, stall, crash, or produce an incomplete result.
 2. The supervisor uses the conversation to form one explicit goal and concrete
    acceptance evidence. It asks one focused question only when a missing answer
    would materially change the work.
-3. The supervisor creates an unfocused sibling pane, starts one Codex worker,
-   records the exact worker binding, and gives it the goal. A human may still
-   attach an already-running worker explicitly when needed.
+3. The supervisor decides whether the goal belongs with active related work.
+   It either adds a pane to that worker tab or creates a new unfocused tab,
+   starts one Codex worker, records the exact worker binding, and gives it the
+   goal. The supervisor stays in its own tab. A human may still attach an
+   already-running worker explicitly when needed.
 4. The worker continues independently. The supervisor is not consuming model
    turns while nothing meaningful is happening.
 5. Herdr events wake the supervisor when review is useful.
@@ -683,11 +685,16 @@ stores or displays copied live status as goal truth.
 ### Stage 6: conversational goal start
 
 - **Implemented:** a direct human request lets the supervisor form one explicit
-  goal and concrete acceptance criteria, create an unfocused sibling pane, start
-  Codex there, record its exact identity, and deliver the goal.
+  goal and concrete acceptance criteria, decide whether it joins an active
+  related worker tab or needs a new unfocused tab, start Codex there, record its
+  exact identity, and deliver the goal. No grouping heuristics or group registry
+  are involved; the model supplies the exact related worker or the new label.
 - **Implemented:** the start operation defaults to the supervisor's current
   directory and mechanically reuses an active goal with the exact same
   objective instead of creating another worker.
+- **Implemented:** container startup explicitly enables Codex's approval,
+  sandbox, and hook-trust bypass flags. Native Codex protections remain the
+  default outside that externally isolated container boundary.
 - **Implemented:** the executor refuses to start a worker from inside an
   event-driven review. Reviews still only observe and decide about their exact
   existing worker.
