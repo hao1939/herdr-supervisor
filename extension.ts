@@ -29,10 +29,11 @@ import {
 } from "./src/supervision.js";
 
 const Pane = Type.String({ description: "Exact Herdr pane ID, for example w1:p2" });
-const Evidence = Type.Optional(Type.Array(
+const EvidenceItems = Type.Array(
   Type.String({ minLength: 1, maxLength: 4000 }),
   { minItems: 1, maxItems: 8 },
-));
+);
+const Evidence = Type.Optional(EvidenceItems);
 const client = new HerdrClient();
 const supervisorTools = [
   "supervisor_start_goal",
@@ -983,7 +984,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     parameters: Type.Object({
       pane_id: Pane,
       summary: Type.String({ minLength: 1 }),
-      evidence: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+      evidence: EvidenceItems,
     }),
     executionMode: "sequential",
     async execute(_id, params, _signal, _onUpdate, ctx) {
