@@ -15,6 +15,10 @@ The intended behavior is simple:
    steers the same worker, asks the human, recovers the worker, or accepts the
    result.
 
+The supervisor and its workers prefer plain language for progress and results:
+they retain exact technical evidence, but explain what happened, why it matters,
+and what comes next.
+
 The proof of concept uses one Pi session as the supervisor and talks directly
 to Herdr's local socket. Workers remain ordinary Herdr agents and may use Codex,
 Claude Code, Pi, OpenCode, or another supported CLI.

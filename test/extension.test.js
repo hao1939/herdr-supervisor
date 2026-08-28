@@ -165,6 +165,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[1].prompt, /Make changes only in an isolated worktree/);
   assert.match(deliveredPrompts[1].prompt, /starting directory as a project and discovery root/);
   assert.match(deliveredPrompts[1].prompt, /A goal may use multiple repositories or worktrees/);
+  assert.match(deliveredPrompts[1].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[1].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
@@ -304,6 +305,7 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.equal(prompts[0].paneId, worker.paneId);
   assert.match(prompts[0].prompt, /complete durable contract/);
   assert.match(prompts[0].prompt, /exact commit passes the ADO pipeline/);
+  assert.match(prompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal((await readAudit("g_test", root)).at(-1).type, "goal_refined");
   pi.events.get("session_shutdown")();
 });

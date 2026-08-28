@@ -150,6 +150,12 @@ commit, the model writes those facts into constraints and acceptance criteria.
 Capacity throttling can delay such a criterion but cannot waive it unless the
 human later refines the contract.
 
+Communication style is a small global behavior rather than goal-specific
+workflow policy. Both initial and refined worker prompts request plain-language
+progress and results while preserving exact evidence. The supervisor translates
+worker evidence for the human, explains impact and next action, and defines
+uncommon acronyms instead of exposing internal process jargon.
+
 Git topology stays below this boundary. After receiving the goal, Codex may use
 one or several worktrees or repositories. The supervisor reminds it to protect
 shared checkouts, but it neither assumes one worktree per goal nor persists a
