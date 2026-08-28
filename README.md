@@ -72,6 +72,10 @@ The reviewed worker remains the only source of completion evidence for its
 goal. When its next step depends on another supervised worker, the supervisor
 can read the existing all-worker status and relay known progress instead of
 asking the human to coordinate panes. This adds no relay service or new state.
+If that worker is already settled, the same leave action can record one
+concrete peer or external wait and schedule a bounded recheck without prompting
+the worker merely to wait. Shared scarce resources retain one active owner, so
+peer workers do not all repeat the same capacity probe.
 
 The same session also supports a genuine human decision without another task or
 queue: one review can observe and ask a concrete question while leaving the

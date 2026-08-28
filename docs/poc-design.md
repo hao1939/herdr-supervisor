@@ -431,6 +431,14 @@ arguments, authority, identity, evidence requirements, and the one-decision
 turn boundary, performs the operation, records one concise audit entry after
 the outcome is known, and atomically updates the current goal context.
 
+`supervisor_leave` also covers a settled worker whose next step has one concrete
+peer or external condition. The model supplies that condition as structured
+input; the extension records it and schedules the existing bounded review
+without prompting the worker merely to wait. A settled worker without such a
+condition is still rejected. When several goals share scarce capacity, the
+supervisor keeps one worker responsible for probing it and parks peers this way
+instead of adding a resource scheduler or letting every worker retry.
+
 `leave` must be explicit. Ordinary model prose is not a completed decision,
 because the runtime must distinguish a deliberate choice from a malformed,
 interrupted, or purely narrative response. If a turn settles without one valid
