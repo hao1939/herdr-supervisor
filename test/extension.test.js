@@ -617,7 +617,14 @@ test("restart preserves a pending human decision without asking again", async (t
   await firstPi.tools.get("supervisor_ask_human").execute("ask", {
     pane_id: worker.paneId,
     question: "May this worker use shared capacity?",
+    evidence: ["The worker exhausted local alternatives and needs the capacity owner's approval."],
   });
+  const [waiting] = (await loadSupervisorGoals(root)).active;
+  assert.deepEqual(waiting.evidence, [
+    "The worker exhausted local alternatives and needs the capacity owner's approval.",
+  ]);
+  const waitingAudit = await readAudit("g_test", root);
+  assert.deepEqual(waitingAudit.at(-1).evidence, waiting.evidence);
   firstPi.events.get("session_shutdown")();
 
   const secondPi = fakePi();
@@ -668,9 +675,16 @@ test("an idle worker cannot be left working and may be steered in the same revie
   const steer = await pi.tools.get("supervisor_steer").execute("steer", {
     pane_id: worker.paneId,
     message: "Continue the restored goal from current evidence.",
+    evidence: ["The restored worker is idle and the focused proof is still missing."],
   });
   assert.equal(steer.isError, false);
   assert.equal(prompts, 1);
+  const [continued] = (await loadSupervisorGoals(root)).active;
+  assert.deepEqual(continued.evidence, [
+    "The restored worker is idle and the focused proof is still missing.",
+  ]);
+  const continuedAudit = await readAudit("g_test", root);
+  assert.deepEqual(continuedAudit.at(-1).evidence, continued.evidence);
   pi.events.get("session_shutdown")();
 });
 

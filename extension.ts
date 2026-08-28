@@ -29,6 +29,10 @@ import {
 } from "./src/supervision.js";
 
 const Pane = Type.String({ description: "Exact Herdr pane ID, for example w1:p2" });
+const Evidence = Type.Optional(Type.Array(
+  Type.String({ minLength: 1, maxLength: 4000 }),
+  { minItems: 1, maxItems: 8 },
+));
 const client = new HerdrClient();
 const supervisorTools = [
   "supervisor_start_goal",
@@ -789,7 +793,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Type.Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker." })),
-      evidence: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+      evidence: Evidence,
       review_at: Type.Optional(Type.String({ minLength: 1, description: "Required with waiting_for: an ISO 8601 timestamp no more than 24 hours ahead. Use the exact known retry boundary, or choose a low-frequency safety review for an event-driven peer wait." })),
     }),
     executionMode: "sequential",
@@ -844,7 +848,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     name: "supervisor_steer",
     label: "Continue worker",
     description: "Give the same supervised worker one useful next action. If its exact registered process exited but the pane is unchanged, the runtime resumes that session automatically; the model does not choose a transport.",
-    parameters: Type.Object({ pane_id: Pane, message: Type.String({ minLength: 1 }) }),
+    parameters: Type.Object({
+      pane_id: Pane,
+      message: Type.String({ minLength: 1 }),
+      evidence: Evidence,
+    }),
     executionMode: "sequential",
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
@@ -911,7 +919,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               ? "The exact native session was resumed and asked to continue."
               : `The worker was steered to continue: ${params.message.trim()}`,
             action: params.message.trim(),
-            evidence: continuedBinding.evidence,
+            evidence: params.evidence || continuedBinding.evidence,
             observationCursor: runtimeFor(continuedBinding).pendingCursor,
           });
           cacheCheckpoint(continuedBinding, result.state);
@@ -935,7 +943,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     name: "supervisor_ask_human",
     label: "Ask for a decision",
     description: "Ask the human one concrete question only when their authority or missing information is genuinely required. Missing convenience tooling, a default credential helper, or one failed approach is not enough: steer the worker to exhaust safe in-scope capabilities first. This ends the review turn without prompting the worker.",
-    parameters: Type.Object({ pane_id: Pane, question: Type.String({ minLength: 1 }) }),
+    parameters: Type.Object({
+      pane_id: Pane,
+      question: Type.String({ minLength: 1 }),
+      evidence: Evidence,
+    }),
     executionMode: "sequential",
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
@@ -947,7 +959,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const result = await recordDecision(binding, "ask_human", {
           progress: `Human input is required: ${params.question.trim()}`,
           action: params.question.trim(),
-          evidence: binding.evidence,
+          evidence: params.evidence || binding.evidence,
           observationCursor: runtimeFor(binding).pendingCursor,
         });
         cacheCheckpoint(binding, result.state);
