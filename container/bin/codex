@@ -10,11 +10,8 @@ has_full_access=0
 has_hook_trust=0
 has_resume_cwd=0
 after_resume=0
-resume_argument_count=0
 for argument in "$@"; do
-  if [ "$after_resume" -eq 1 ]; then
-    resume_argument_count=$((resume_argument_count + 1))
-  elif [ "$argument" = "resume" ]; then
+  if [ "$argument" = "resume" ]; then
     after_resume=1
   fi
   if [ "$previous" = "--disable" ] && [ "$argument" = "goals" ]; then
@@ -36,14 +33,6 @@ for argument in "$@"; do
   esac
   previous="$argument"
 done
-
-# Herdr restores a persisted Codex agent as `codex resume SESSION_ID`. With
-# native goals disabled, add one ordinary turn so the exact session continues
-# instead of reopening silently at an idle prompt. An explicit recovery may
-# already provide its own goal-aware prompt after the session ID.
-if [ "$after_resume" -eq 1 ] && [ "$resume_argument_count" -eq 1 ]; then
-  set -- "$@" "Continue working on the current supervised goal from the existing session context. Report useful progress or the exact blocker in plain language."
-fi
 
 if [ "$has_disabled_goals" -eq 0 ]; then
   set -- --disable goals "$@"

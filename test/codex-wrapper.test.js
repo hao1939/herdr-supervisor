@@ -23,7 +23,7 @@ function run(script, args) {
   return result.stdout.trim().split("\n");
 }
 
-test("restored Codex sessions resume in their saved directory without a prompt", async () => {
+test("restored Codex sessions resume idle in their saved directory without a prompt", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["resume", "session-1"]), [
     "-c",
@@ -32,7 +32,6 @@ test("restored Codex sessions resume in their saved directory without a prompt",
     "goals",
     "resume",
     "session-1",
-    "Continue working on the current supervised goal from the existing session context. Report useful progress or the exact blocker in plain language.",
   ]);
 });
 

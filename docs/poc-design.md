@@ -277,9 +277,11 @@ that checkpoint instead of treating the new terminal process as a replacement.
 Supervised Codex processes disable Codex's separate native goal feature. The
 Herdr goal contract remains the single durable authority, so restoring the
 exact session cannot introduce a second interactive "resume goal" gate.
-An automatic Herdr restore includes one plain continuation turn. Explicit
-supervisor recovery carries its goal-aware continuation in the same resume
-command, so recovery cannot split into a successful resume and a lost prompt.
+An automatic Herdr restore reopens the exact session without starting another
+worker turn. The supervisor decides from the goal checkpoint whether useful
+work should continue. Explicit supervisor recovery carries its goal-aware
+continuation in the resume command, so recovery cannot split into a successful
+resume and a lost prompt.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.

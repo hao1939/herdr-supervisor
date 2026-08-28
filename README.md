@@ -177,11 +177,10 @@ authority. The container disables Codex's separate native goal feature so an
 exact session restored after a container restart cannot stop at a second
 "resume goal" confirmation. This does not disable session reuse: Herdr still
 restores the exact native Codex session recorded by the goal checkpoint.
-Herdr's automatic session restore supplies one ordinary continuation turn, so
-the restored worker resumes useful work without waiting for the supervisor or
-the human to press a key. A restored Codex worker also reuses the session's
-saved directory. This avoids an interactive directory-choice prompt when the
-worker entered a goal-owned worktree before the restart.
+The restored worker opens idle and lets the supervisor decide whether another
+turn is useful. A restored Codex worker also reuses the session's saved
+directory, avoiding an interactive choice when it entered a goal-owned
+worktree before the restart.
 If the supervisor was waiting for a human decision, that wait is restored from
 the goal checkpoint; worker events and restarts do not repeat the question.
 
