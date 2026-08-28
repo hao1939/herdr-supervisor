@@ -62,7 +62,7 @@ export function shouldWake(binding, agent, pane) {
   const mismatch = identityMismatch(binding, agent, pane);
   if (mismatch) return { wake: true, reason: mismatch, sequence: undefined, key: `identity:${mismatch}` };
   const sequence = Number(agent.state_change_seq || 0);
-  if (sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {
+  if (sequence > 0 && sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {
     return { wake: false, reason: "transition already reviewed", sequence, key: `state:${sequence}` };
   }
   if (agent.agent_status === "working") {

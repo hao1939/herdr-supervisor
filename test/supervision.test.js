@@ -90,6 +90,14 @@ test("working is quiet while settled and blocked states wake review", () => {
   assert.equal(shouldWake(current, agent({ agent_status: "blocked", state_change_seq: 12 }), pane).wake, false);
 });
 
+test("a restored idle worker with no transition sequence is reviewed once", () => {
+  const current = binding({ lastReviewStateChangeSeq: 0 });
+  const currentPane = findPane(snapshot(), "w1:p2");
+  const decision = shouldWake(current, agent({ agent_status: "idle", state_change_seq: 0 }), currentPane);
+  assert.equal(decision.wake, true);
+  assert.equal(decision.key, "state:0:idle");
+});
+
 test("replaced worker fails closed", () => {
   const current = binding();
   assert.equal(identityMismatch(current, agent()), undefined);
