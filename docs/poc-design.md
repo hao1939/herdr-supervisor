@@ -541,7 +541,8 @@ stores or displays copied live status as goal truth.
 - **Implemented:** register existing workers and update one binding per pane.
 - **Implemented:** arm non-blocking Herdr lifecycle subscriptions.
 - **Implemented:** show fresh state and meaningful transitions.
-- **Implemented:** exact terminal and native agent-session identity fencing.
+- **Implemented:** immutable native agent-session fencing, with the Herdr pane
+  as its routing slot and the current terminal as a refreshable local checkpoint.
 - **Verified:** passive mode starts no model calls and performs no worker
   mutation.
 
@@ -627,8 +628,11 @@ stores or displays copied live status as goal truth.
   evidence; the minimal correction now permits a safe human question or
   evidence-backed stop without exposing replacement output.
 - **Verified:** the socket fixture reports readiness once and reports a dropped
-  ready subscription once. A shared-server restart is intentionally not used as
-  a PoC test because it would disrupt unrelated live workers.
+  ready subscription once.
+- **Verified live:** replacing the dedicated container restored the same Pi
+  supervisor, goal, worker pane, and native Codex session. Herdr assigned a new
+  terminal process ID; the supervisor refreshed that transient location and
+  continued supervision without asking the human to repair or replace work.
 - **Implemented:** distinguish a stopped agent process in an existing pane from
   a missing pane or replacement occupant. Only the first case is eligible for
   exact-session recovery.
@@ -710,9 +714,10 @@ stores or displays copied live status as goal truth.
   related worker tab or needs a new unfocused tab, start Codex there, record its
   exact identity, and deliver the goal. No grouping heuristics or group registry
   are involved; the model supplies the exact related worker or the new label.
-- **Implemented:** the start operation defaults to the supervisor's current
-  directory and mechanically reuses an active goal with the exact same
-  objective instead of creating another worker.
+- **Implemented:** every start requires an explicit absolute worker directory;
+  it never inherits the supervisor's current directory. An active goal with the
+  exact same objective is mechanically reused instead of creating another
+  worker.
 - **Implemented:** container startup explicitly enables Codex's approval,
   sandbox, and hook-trust bypass flags. Native Codex protections remain the
   default outside that externally isolated container boundary.
@@ -726,12 +731,17 @@ stores or displays copied live status as goal truth.
 - **Implemented:** uncertain initial prompt delivery leaves one visible,
   supervised worker for later reconciliation and explicitly forbids creating a
   replacement merely because transport confirmation failed.
+- **Implemented:** a neutral, file-safe first turn initializes Codex's native
+  session before the goal is bound and delivered. If identity capture fails,
+  retrying the same goal reuses the pending pane instead of creating another.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
   Codex worker, persists one goal contract and checkpoint, sends both the goal
   and acceptance criteria, and keeps human focus on the supervisor pane.
-- **Next live proof:** ask the deployed supervisor for one disposable goal and
-  verify the entire conversation-to-worker-to-review path without manual pane
-  setup or `/supervise`.
+- **Verified live:** the deployed supervisor created a disposable read-only
+  goal without manual pane setup or `/supervise`. Herdr automatically reported
+  native session `redacted-native-session`; the worker reported
+  `Python 3.11.2` from pane `w1:pA`, made no workspace changes, and the
+  supervisor observed and accepted the evidence.
 
 ## 17. Acceptance criteria
 
