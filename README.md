@@ -125,6 +125,14 @@ second task system. The worker starts at the selected project root and owns any
 Git worktree layout the outcome requires, including using several worktrees for
 one goal. The supervisor only reminds it not to modify an unsafe shared checkout.
 
+The human may refine an active goal in ordinary conversation. The supervisor
+replaces that same goal's complete portable contract, records the change in its
+journal, and informs the same worker; it does not create a sibling goal or rely
+on temporary steering. Project-specific requirements remain explicit contract
+content. For example, a code-changing AKS goal can require an isolated branch
+and worktree, one focused clean PR with overlaps reconciled, and an appropriate
+ADO pipeline pass tied to the exact proposed commit before acceptance.
+
 For exact operator control, `/supervise <pane> <goal>` still attaches an
 existing worker, and `/supervise <pane> --goal-id <id>` starts a copied portable
 contract on an existing worker. The standalone CLI can list workers with

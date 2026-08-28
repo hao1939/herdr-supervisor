@@ -7,6 +7,7 @@ import {
   loadGoalContract,
   newGoalId,
   startGoal,
+  updateGoalContract,
   updateGoalState,
 } from "./goal-store.js";
 
@@ -40,14 +41,10 @@ export async function loadSupervisorGoals(root) {
   };
 }
 
-export async function registerSupervisedGoal(worker, input, root, options = {}) {
+export async function installSupervisorGoal(input, root, options = {}) {
   const goals = await loadSupervisorGoals(root);
   if (goals.errors.length) {
-    throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
-  }
-  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
-  if (existing) {
-    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
+    throw new Error(`repair unreadable goals before installing another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
   }
   const goalId = options.goalId || newGoalId();
   const acceptance = input.acceptance?.length ? input.acceptance : [DEFAULT_ACCEPTANCE];
@@ -58,6 +55,19 @@ export async function registerSupervisedGoal(worker, input, root, options = {}) 
     constraints: input.constraints || [],
   });
   await installGoal(goalId, contract, root);
+  return { goalId, contract };
+}
+
+export async function registerSupervisedGoal(worker, input, root, options = {}) {
+  const goals = await loadSupervisorGoals(root);
+  if (goals.errors.length) {
+    throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+  }
+  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
+  if (existing) {
+    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
+  }
+  const { goalId, contract } = await installSupervisorGoal(input, root, options);
   const state = await startGoal(goalId, worker, root, { at: options.at });
   return bindingFromRecord({ goalId, contract, state });
 }
@@ -78,6 +88,48 @@ export async function startInstalledGoal(goalId, worker, root, options = {}) {
   }
   const state = await startGoal(goalId, worker, root, { at: options.at });
   return bindingFromRecord({ goalId, contract: installed.contract, state });
+}
+
+export async function refineSupervisorGoal(goalId, input, root, options = {}) {
+  const goals = await loadSupervisorGoals(root);
+  if (goals.errors.length) {
+    throw new Error(`repair unreadable goals before refining another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+  }
+  const current = goals.active.find((binding) => binding.goalId === goalId);
+  if (!current) throw new Error(`active goal ${goalId} was not found`);
+  const contract = createGoalContract({
+    objective: input.objective,
+    context: input.context || [],
+    acceptance: input.acceptance,
+    constraints: input.constraints || [],
+  });
+  const updated = await updateGoalContract(goalId, () => contract, root);
+  const binding = {
+    ...current,
+    goal: updated.objective,
+    context: [...updated.context],
+    acceptance: [...updated.acceptance],
+    constraints: [...updated.constraints],
+  };
+  const at = options.at || new Date().toISOString();
+  let auditError;
+  try {
+    const record = (await listGoalRecords(root)).find((item) => item.goalId === goalId);
+    await appendAudit({
+      v: 1,
+      id: `audit_${randomUUID()}`,
+      at,
+      type: "goal_refined",
+      goalId,
+      goalRevision: record.state.revision,
+      summary: input.summary,
+      action: "Replaced the portable goal contract and kept the same worker.",
+      evidence: [],
+    }, root);
+  } catch (error) {
+    auditError = error;
+  }
+  return { binding, contract: updated, auditError };
 }
 
 export async function refreshWorkerLocation(binding, worker, root, now) {

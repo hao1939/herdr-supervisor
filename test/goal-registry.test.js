@@ -6,11 +6,12 @@ import test from "node:test";
 import {
   loadSupervisorGoals,
   recordDecision,
+  refineSupervisorGoal,
   refreshWorkerLocation,
   registerSupervisedGoal,
   startInstalledGoal,
 } from "../src/goal-registry.js";
-import { createGoalContract, installGoal } from "../src/goal-store.js";
+import { createGoalContract, installGoal, readAudit } from "../src/goal-store.js";
 import { shouldWake } from "../src/supervision.js";
 
 const worker = {
@@ -36,6 +37,35 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
   await assert.rejects(registerSupervisedGoal(worker, {
     objective: "A different goal.",
   }, directory), /already pursues goal g_test/);
+});
+
+test("refining a goal replaces its contract without replacing its worker", async () => {
+  const directory = await root();
+  await registerSupervisedGoal(worker, {
+    objective: "Prepare the focused fix.",
+    acceptance: ["The focused proof passes."],
+  }, directory, { goalId: "g_test", at: "2026-08-28T10:00:00.000Z" });
+
+  const result = await refineSupervisorGoal("g_test", {
+    objective: "Prepare and validate the focused fix.",
+    context: ["Another worker owns the adjacent component."],
+    acceptance: ["The focused proof passes.", "The exact commit passes ADO."],
+    constraints: ["Use an isolated worktree and one focused PR."],
+    summary: "Added exact-commit ADO and collaboration requirements.",
+  }, directory, { at: "2026-08-28T10:02:00.000Z" });
+
+  assert.equal(result.auditError, undefined);
+  assert.equal(result.binding.paneId, worker.paneId);
+  assert.equal(result.binding.agentSession.value, worker.agentSession.value);
+  assert.equal(result.binding.goal, "Prepare and validate the focused fix.");
+  assert.deepEqual(result.binding.acceptance, ["The focused proof passes.", "The exact commit passes ADO."]);
+  const goals = await loadSupervisorGoals(directory);
+  assert.equal(goals.active.length, 1);
+  assert.equal(goals.active[0].goalId, "g_test");
+  assert.deepEqual(goals.active[0].constraints, ["Use an isolated worktree and one focused PR."]);
+  const audit = await readAudit("g_test", directory);
+  assert.equal(audit.at(-1).type, "goal_refined");
+  assert.equal(audit.at(-1).summary, "Added exact-commit ADO and collaboration requirements.");
 });
 
 test("a terminal decision removes only that goal from active supervision", async () => {

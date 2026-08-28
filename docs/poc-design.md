@@ -135,6 +135,21 @@ validates and executes that decision. When the repository has concurrent
 workers, that fact and the isolated-worktree requirement belong in the goal
 contract so Codex does not have to infer unseen collaboration.
 
+The same rule applies when the human changes an active goal. The model first
+identifies the fitting existing goal, constructs its complete revised contract,
+and calls one `supervisor_update_goal` operation. Code validates and atomically
+replaces `goal.json`, refreshes the active projection, journals the material
+change, checks the exact worker identity, and sends the revised contract to that
+same worker. A refinement never creates a sibling goal and durable requirements
+are never represented only by a transient steering message.
+
+Workflow policy is contract data, not keyword logic in the extension. If a
+project requires code changes to use isolated worktrees, focused clean PRs,
+overlap reconciliation, and an ADO pipeline run against the exact proposed
+commit, the model writes those facts into constraints and acceptance criteria.
+Capacity throttling can delay such a criterion but cannot waive it unless the
+human later refines the contract.
+
 Git topology stays below this boundary. After receiving the goal, Codex may use
 one or several worktrees or repositories. The supervisor reminds it to protect
 shared checkouts, but it neither assumes one worktree per goal nor persists a
@@ -738,6 +753,10 @@ stores or displays copied live status as goal truth.
   related worker tab or needs a new unfocused tab, start Codex there, record its
   exact identity, and deliver the goal. No grouping heuristics or group registry
   are involved; the model supplies the exact related worker or the new label.
+- **Implemented:** a human refinement replaces the complete portable contract
+  of one active goal, journals the change, and informs the exact same worker.
+  The operation cannot run inside an event review, create another goal, or
+  silently steer a replacement native session.
 - **Implemented:** every start requires an explicit absolute worker directory;
   it never inherits the supervisor's current directory. An active goal with the
   exact same objective is mechanically reused instead of creating another
@@ -761,6 +780,10 @@ stores or displays copied live status as goal truth.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
   Codex worker, persists one goal contract and checkpoint, sends both the goal
   and acceptance criteria, and keeps human focus on the supervisor pane.
+- **Verified:** an isolated refinement test adds exact-commit ADO and focused-PR
+  requirements to one running goal, preserves its worker identity and active
+  goal count, updates `goal.json`, appends `goal_refined` audit history, and
+  sends the complete revised contract to that same worker.
 - **Verified live:** the deployed supervisor created a disposable read-only
   goal without manual pane setup or `/supervise`. Herdr automatically reported
   an exact native session identity; the worker reported the expected runtime
