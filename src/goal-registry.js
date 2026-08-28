@@ -27,6 +27,7 @@ export function bindingFromRecord(record) {
     evidence: [...record.state.evidence],
     progress: record.state.progress,
     lastDecision: record.state.lastDecision,
+    awaitingHuman: record.state.lastDecision?.decision === "ask_human",
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
   };
@@ -113,12 +114,18 @@ export async function refineSupervisorGoal(goalId, input, root, options = {}) {
     constraints: [...updated.constraints],
   };
   const at = options.at || new Date().toISOString();
-  if (binding.wait) {
+  const answeredPreviousQuestion = binding.lastDecision?.decision === "ask_human";
+  if (binding.wait || answeredPreviousQuestion) {
     await updateGoalState(goalId, (state) => {
       delete state.wait;
+      if (answeredPreviousQuestion) delete state.lastDecision;
       return state;
     }, root, () => at);
     delete binding.wait;
+    if (answeredPreviousQuestion) {
+      delete binding.lastDecision;
+      binding.awaitingHuman = false;
+    }
   }
   let auditError;
   try {

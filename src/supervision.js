@@ -100,11 +100,12 @@ export function formatWorker({ binding, agent, mismatch }) {
   const state = processStopped ? "process stopped" : mismatch ? "identity changed" : agent.agent_status;
   const name = `${binding.agentSession.agent} ${binding.paneId}`;
   const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
+  const awaitingHuman = binding.awaitingHuman || binding.lastDecision?.decision === "ask_human";
   const lines = [`${name} · ${state}`, `  ${goalLabel}: ${binding.goal}`];
   if (binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${binding.progress}`);
-  if (binding.awaitingHuman) lines.push("  Needs you: answer the supervisor's latest question");
-  if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
+  if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
+  else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
   else if (mismatch) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (agent.agent_status === "working") lines.push("  Next: review when the worker settles or blocks");
   else lines.push(`  Next: supervisor should review current evidence`);

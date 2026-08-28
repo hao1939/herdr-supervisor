@@ -635,7 +635,7 @@ test("restart preserves a pending human decision without asking again", async (t
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(secondPi.messages.length, 0);
   const status = await secondPi.tools.get("supervisor_status").execute("status", {});
-  assert.match(status.content[0].text, /Needs you: answer the supervisor's latest question/);
+  assert.match(status.content[0].text, /Next: answer the supervisor's question above/);
   secondPi.events.get("session_shutdown")();
 });
 

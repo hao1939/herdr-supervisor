@@ -143,6 +143,20 @@ test("stopped process is shown as recoverable supervision work, not changed iden
   );
 });
 
+test("a persisted human question is the next action shown after restart", () => {
+  const current = binding({
+    progress: "Human input is required: may this worker use shared capacity?",
+    lastDecision: {
+      decision: "ask_human",
+      at: "2026-08-28T10:00:00.000Z",
+      action: "May this worker use shared capacity?",
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
+  assert.match(output, /Next: answer the supervisor's question above/);
+  assert.doesNotMatch(output, /review current evidence/);
+});
+
 test("review notice explains the goal and signal in plain language", () => {
   const current = binding({
     goal: "Fix cancellation",

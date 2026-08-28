@@ -77,6 +77,28 @@ test("refining a goal replaces its contract without replacing its worker", async
   assert.equal(audit.at(-1).summary, "Added exact-commit ADO and collaboration requirements.");
 });
 
+test("refining a goal resolves its previous human question", async () => {
+  const directory = await root();
+  const current = await registerSupervisedGoal(worker, {
+    objective: "Prepare the focused fix.",
+    acceptance: ["The focused proof passes."],
+  }, directory, { goalId: "g_test", at: "2026-08-28T10:00:00.000Z" });
+  await recordDecision(current, "ask_human", {
+    progress: "Human input is required: should the proof include the slow suite?",
+    action: "Should the proof include the slow suite?",
+  }, directory, () => "2026-08-28T10:01:00.000Z");
+
+  await refineSupervisorGoal("g_test", {
+    objective: "Prepare and validate the focused fix with the slow suite.",
+    acceptance: ["The focused and slow suites pass."],
+    summary: "The human added the slow suite requirement.",
+  }, directory, { at: "2026-08-28T10:02:00.000Z" });
+
+  const [refined] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(refined.awaitingHuman, false);
+  assert.equal(refined.lastDecision, undefined);
+});
+
 test("a terminal decision removes only that goal from active supervision", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
