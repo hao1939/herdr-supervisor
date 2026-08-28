@@ -650,6 +650,9 @@ test("an idle worker cannot be left working and may be steered in the same revie
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
+  const status = await pi.tools.get("supervisor_status").execute("status", {});
+  assert.equal(status.isError, false);
+  assert.match(status.content[0].text, /Finish the exact goal/);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,

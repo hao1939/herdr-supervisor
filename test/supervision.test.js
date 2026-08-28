@@ -151,8 +151,9 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Why review now\n  worker is idle; Herdr reports idle/);
   assert.match(message, /Worker acceptance criteria\n- focused test passes/);
   assert.match(message, /Observe this exact worker/);
+  assert.match(message, /supervisor_status to read current recorded peer progress/);
+  assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
-  assert.doesNotMatch(message, /supervisor_observe/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {

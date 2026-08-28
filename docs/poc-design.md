@@ -470,11 +470,14 @@ includes:
 - allowed decisions and safety limits.
 
 The model may use relevant earlier session history, including relationships the
-human established between goals and its own previous action for this worker. It
-must not treat another worker's evidence as evidence for the current worker. We
-first trust the model to follow the explicit worker scope in each request.
-Acceptance criteria are explicitly labeled as worker criteria; the supervisor's
-own response cannot satisfy them.
+human established between goals and its own previous action for this worker. If
+the worker depends on a peer, the model may read the existing all-worker status
+and use recorded peer progress for coordination. It must not treat another
+worker's evidence as proof that the current worker is complete. We first trust
+the model to make that semantic distinction from the explicit review request;
+no relay service or cross-goal state is added. Acceptance criteria are
+explicitly labeled as worker criteria; the supervisor's own response cannot
+satisfy them.
 
 The supervisor normally resumes the same Pi session after failure so useful
 conversation history remains available. `goal.json` and `current.json` make
