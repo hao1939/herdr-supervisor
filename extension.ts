@@ -273,7 +273,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   async function status(paneId?: string) {
     const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
     const bindings = paneId ? goals.active.filter((worker) => worker.paneId === paneId) : goals.active;
-    const lines = bindings.map((binding) => formatWorker(liveWorker(binding, snapshot)));
+    const lines = bindings.map((binding) => formatWorker(
+      liveWorker(binding, snapshot),
+      { detailed: Boolean(paneId) },
+    ));
     if (!lines.length) lines.push(paneId ? `${paneId} is not supervised.` : "No supervised workers.");
     if (!paneId && goals.unstarted.length) {
       lines.push(`${goals.unstarted.length} portable goal contract(s) have no local worker yet.`);
@@ -737,7 +740,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_status",
     label: "Supervised workers",
-    description: "Show supervised goals against fresh Herdr worker state. During a focused review, use the all-worker view when peer progress may resolve coordination; peer progress is context, not completion evidence for the focused goal.",
+    description: "Show supervised goals against fresh Herdr worker state. The all-worker view is bounded; pass pane_id for that goal's full contract. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
     parameters: Type.Object({ pane_id: Type.Optional(Pane) }),
     executionMode: "parallel",
     async execute(_id, params, _signal, _onUpdate, ctx) {

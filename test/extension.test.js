@@ -660,6 +660,9 @@ test("an idle worker cannot be left working and may be steered in the same revie
   const status = await pi.tools.get("supervisor_status").execute("status", {});
   assert.equal(status.isError, false);
   assert.match(status.content[0].text, /Finish the exact goal/);
+  assert.doesNotMatch(status.content[0].text, /Accept when:/);
+  const detail = await pi.tools.get("supervisor_status").execute("status-detail", { pane_id: worker.paneId });
+  assert.match(detail.content[0].text, /Accept when: The focused proof passes/);
   const peerStatus = await pi.tools.get("supervisor_status").execute("status", { pane_id: "w1:p3" });
   assert.equal(peerStatus.isError, false);
   assert.match(peerStatus.content[0].text, /w1:p3 is not supervised/);

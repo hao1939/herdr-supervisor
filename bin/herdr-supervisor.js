@@ -24,7 +24,10 @@ try {
   } else if (command === "status") {
     const [goals, snapshot] = await Promise.all([loadSupervisorGoals(), client.snapshot()]);
     if (!goals.active.length) console.log("No supervised workers.");
-    else console.log(goals.active.map((binding) => formatWorker(liveWorker(binding, snapshot))).join("\n\n"));
+    else console.log(goals.active.map((binding) => formatWorker(
+      liveWorker(binding, snapshot),
+      { detailed: false },
+    )).join("\n\n"));
     if (goals.unstarted.length) console.log(`\n${goals.unstarted.length} portable goal contract(s) have no local worker yet.`);
     if (goals.errors.length) console.log(`\nNeeds repair: ${goals.errors.map((record) => record.goalId).join(", ")}.`);
   } else {

@@ -95,15 +95,21 @@ export function recoveryRequest(binding, snapshot) {
   };
 }
 
-export function formatWorker({ binding, agent, mismatch }) {
+function compact(value, limit) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
+}
+
+export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const state = processStopped ? "process stopped" : mismatch ? "identity changed" : agent.agent_status;
   const name = `${binding.agentSession.agent} ${binding.paneId}`;
   const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
   const awaitingHuman = binding.awaitingHuman || binding.lastDecision?.decision === "ask_human";
-  const lines = [`${name} · ${state}`, `  ${goalLabel}: ${binding.goal}`];
-  if (binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
-  if (binding.progress) lines.push(`  Progress: ${binding.progress}`);
+  const goal = detailed ? binding.goal : compact(binding.goal, 240);
+  const lines = [`${name} · ${state}`, `  ${goalLabel}: ${goal}`];
+  if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
+  if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
   else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");

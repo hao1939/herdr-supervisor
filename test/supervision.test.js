@@ -157,6 +157,24 @@ test("a persisted human question is the next action shown after restart", () => 
   assert.doesNotMatch(output, /review current evidence/);
 });
 
+test("the all-worker view stays bounded while one-worker detail stays complete", () => {
+  const current = binding({
+    goal: `Review the system ${"goal detail ".repeat(80)}`,
+    acceptance: ["The complete acceptance evidence remains available in detail."],
+    progress: `Current finding ${"progress detail ".repeat(80)}`,
+  });
+  const live = liveWorker(current, snapshot());
+  const summary = formatWorker(live, { detailed: false });
+  const detail = formatWorker(live);
+
+  assert.ok(summary.length < 1000);
+  assert.match(summary, /Review the system goal detail/);
+  assert.doesNotMatch(summary, /Accept when:/);
+  assert.match(summary, /…/);
+  assert.match(detail, /Accept when: The complete acceptance evidence remains available in detail/);
+  assert.ok(detail.length > summary.length);
+});
+
 test("changed worker identity takes priority over an earlier human question", () => {
   const current = binding({
     lastDecision: {
