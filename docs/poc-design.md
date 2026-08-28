@@ -695,6 +695,10 @@ stores or displays copied live status as goal truth.
 - **Implemented:** container startup explicitly enables Codex's approval,
   sandbox, and hook-trust bypass flags. Native Codex protections remain the
   default outside that externally isolated container boundary.
+- **Implemented:** the dedicated container links the supervisor into Pi's
+  normal extension directory and selects live mode through the environment.
+  Herdr may therefore restore the built-in Pi session as plain `pi` without
+  losing supervisor tools or requiring a special resume command.
 - **Implemented:** the executor refuses to start a worker from inside an
   event-driven review. Reviews still only observe and decide about their exact
   existing worker.

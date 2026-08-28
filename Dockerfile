@@ -33,4 +33,5 @@ USER node
 WORKDIR /app
 ENV HERDR_SUPERVISOR_GOALS=/home/node/.local/state/herdr-supervisor/goals
 
+ENTRYPOINT ["/opt/herdr-supervisor/bin/container-entrypoint.sh"]
 CMD ["herdr", "server"]

@@ -155,12 +155,13 @@ HERDR_WORKSPACE=/app docker compose up -d --build
 In the Herdr UI, open one pane for the supervisor and run:
 
 ```sh
-pi --no-builtin-tools \
-  -e /opt/herdr-supervisor/extension.ts \
-  --supervisor-mode live
+pi
 ```
 
-Talk to that Pi session normally. It keeps the supervisor in its current tab
+The dedicated container installs the extension into Pi's normal extension
+directory on every start and selects live mode through the environment. This
+also survives Herdr restoring the Pi session as plain `pi`; no special resume
+command is required. Talk to that Pi session normally. It keeps the supervisor in its current tab
 and groups related Codex workers in other tabs as goals are accepted. Container
 launches pass Codex `--dangerously-bypass-approvals-and-sandbox` and
 `--dangerously-bypass-hook-trust`, because the container is the security
