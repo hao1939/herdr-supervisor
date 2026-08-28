@@ -144,16 +144,27 @@ test("stopped process is shown as recoverable supervision work, not changed iden
 });
 
 test("review notice explains the goal and signal in plain language", () => {
-  const current = binding({ goal: "Fix cancellation", acceptance: ["focused test passes"] });
+  const current = binding({
+    goal: "Fix cancellation",
+    acceptance: ["focused test passes"],
+    evidence: ["The server supplied retry boundary 2026-08-29T00:00:00Z."],
+    wait: {
+      condition: "the server retry boundary",
+      reviewAt: "2026-08-29T00:00:00Z",
+    },
+  });
   const message = reviewMessage(current, agent({ agent_status: "idle" }), "worker is idle");
   assert.match(message, /Worker review · codex w1:p2/);
   assert.match(message, /Goal\n  Fix cancellation/);
   assert.match(message, /Why review now\n  worker is idle; Herdr reports idle/);
   assert.match(message, /Worker acceptance criteria\n- focused test passes/);
+  assert.match(message, /Current wait\n  the server retry boundary\n  Review at: 2026-08-29T00:00:00Z/);
+  assert.match(message, /Current evidence\n- The server supplied retry boundary/);
   assert.match(message, /Observe this exact worker/);
   assert.match(message, /supervisor_status to read current recorded peer progress/);
   assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
+  assert.match(message, /If a wait deadline elapsed, continue the due work/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {
