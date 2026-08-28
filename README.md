@@ -85,8 +85,9 @@ event resumes normal review.
 Restart and failure-edge trials are also passing. If Pi stops while a steered
 worker runs, resuming the same Pi session reloads the binding checkpoint,
 observes only new evidence, and accepts without repeating the steer. A replaced
-pane occupant fails closed, and repeated ineffective steering causes the
-supervisor to ask the human instead of looping forever.
+pane occupant fails closed. In the live refusal trial, preserved review history
+let the model recognize repeated ineffective steering and ask the human. Code
+enforces one action per review; it does not add a semantic retry counter.
 
 Restart does not force a model turn for every healthy worker. Concrete wait
 conditions and their exact review deadlines live in `current.json`; restart
