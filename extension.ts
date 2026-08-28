@@ -67,6 +67,8 @@ function codexLaunchArgs() {
   return args;
 }
 
+const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.";
+
 function workerNameForGoal(goalId: string) {
   const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
   return `goal-${suffix.slice(0, 27)}`;
@@ -540,7 +542,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       ...contract.acceptance.map((item) => `- ${item}`),
       "",
       ...(contract.constraints.length ? ["Constraints:", ...contract.constraints.map((item) => `- ${item}`), ""] : []),
-      "You own the execution workspace. Treat the starting directory as a project and discovery root, not as permission to modify a shared checkout. Before making changes in a Git repository, inspect its current checkout and use isolated worktree(s) when concurrent work or branch safety requires them. A goal may use multiple repositories or worktrees; create and manage the smallest layout needed for the outcome.",
+      workerExecutionBoundary,
       "",
       "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
       "",
@@ -670,6 +672,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             ...result.contract.acceptance.map((item) => `- ${item}`),
             "",
             ...(result.contract.constraints.length ? ["Constraints:", ...result.contract.constraints.map((item) => `- ${item}`)] : []),
+            "",
+            workerExecutionBoundary,
             "",
             "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
           ].join("\n");

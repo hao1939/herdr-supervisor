@@ -248,6 +248,14 @@ is deliberately written to `goal.json`; ordinary progress remains local in
 Independent size bounds reject unbounded context instead of silently growing
 every review prompt.
 
+Execution ownership follows the goal, not the repository. A worker may create
+and use one or more worktrees for its goal, but the starting checkout and every
+other goal's worktree are read-only discovery sources. This includes commands
+described as tests, generators, formatters, installers, or baseline checks,
+because their write behavior cannot be inferred safely from their names. A
+worker that needs a clean baseline creates another goal-owned worktree. This is
+a semantic worker contract, not command keyword matching in the infrastructure.
+
 The live supervisor scans goal directories once at startup, reports malformed
 entries without hiding healthy ones, and keeps only active goal projections in
 memory. Events and deadlines therefore scale with active workers, not years of

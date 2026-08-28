@@ -132,7 +132,9 @@ This is also how new work is created: the supervisor first reuses an active goal
 with the same outcome; otherwise it creates one new goal and worker. There is no
 second task system. The worker starts at the selected project root and owns any
 Git worktree layout the outcome requires, including using several worktrees for
-one goal. The supervisor only reminds it not to modify an unsafe shared checkout.
+one goal. The starting checkout and worktrees owned by other goals are read-only
+discovery sources. A worker creates another goal-owned worktree for baseline
+tests or generators rather than risking writes in somebody else's worktree.
 
 The human may refine an active goal in ordinary conversation. The supervisor
 replaces that same goal's complete portable contract, records the change in its
