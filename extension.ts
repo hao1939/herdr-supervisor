@@ -763,7 +763,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker working",
-    description: "Record that the worker is making acceptable progress and sleep until its next event or a bounded review deadline.",
+    description: "When Herdr confirms the worker is currently working, record acceptable progress and sleep until its next event or a bounded review deadline. An idle or stopped worker needs another action.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
@@ -774,8 +774,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const binding = await bindingForPane(params.pane_id);
+      const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+      const agent = findAgent(snapshot, params.pane_id);
+      const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
+      if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
+      if (agent.agent_status !== "working") {
+        return text(`Cannot leave ${params.pane_id} working because it is ${agent.agent_status}. Choose a real next action for this idle worker.`, true);
+      }
       let warning = "";
       if (mode() === "live") {
         const result = await recordDecision(binding, "leave", {
