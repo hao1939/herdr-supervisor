@@ -1,0 +1,19 @@
+services:
+  herdr:
+    build:
+      context: .
+    init: true
+    stdin_open: true
+    tty: true
+    environment:
+      ANTHROPIC_API_KEY:
+      GEMINI_API_KEY:
+      OPENAI_API_KEY:
+      HERDR_SUPERVISOR_MODE: ${HERDR_SUPERVISOR_MODE:-observe}
+    volumes:
+      - herdr-home:/home/node
+      - ${HERDR_WORKSPACE:-herdr-workspace}:/app
+
+volumes:
+  herdr-home:
+  herdr-workspace:
