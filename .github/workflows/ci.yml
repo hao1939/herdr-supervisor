@@ -68,3 +68,26 @@ jobs:
           # Verify Herdr binary is present and executable
           docker run --rm herdr-supervisor:ci \
             herdr --version
+
+      - name: Integration test
+        run: |
+          # Start Herdr server in the background
+          docker run -d --name herdr-integration herdr-supervisor:ci \
+            herdr server
+          sleep 3
+
+          # Verify Herdr server is running and the socket is live
+          docker exec herdr-integration \
+            herdr status
+
+          # Verify goal storage is initialized and accessible
+          docker exec herdr-integration \
+            node --experimental-strip-types -e "
+              import { loadSupervisorGoals } from '/opt/herdr-supervisor/src/goal-registry.ts';
+              const goals = await loadSupervisorGoals();
+              if (!Array.isArray(goals.active)) process.exit(1);
+              console.log('goal store: ok');
+            "
+
+          docker stop herdr-integration
+          docker rm herdr-integration
