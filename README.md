@@ -147,6 +147,12 @@ and on manual dispatch to execute:
 - `npm run health:auto`
 - `npm outdated` (non-blocking dependency drift report)
 
+Each run also updates a single open issue titled **Automated health report** so
+maintainers and contributors can leave suggestions in one place.
+
+Dependabot watches npm and GitHub Actions dependencies daily, and Docker base
+image dependencies weekly.
+
 ## Documents
 
 - [Changelog](CHANGELOG.md)

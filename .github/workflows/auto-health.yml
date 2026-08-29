@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: automated-health-${{ github.ref }}
@@ -24,17 +25,68 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
-      - run: npm run health:auto
+      - id: health
+        continue-on-error: true
+        run: npm run health:auto
       - name: Dependency drift report
-        run: npm outdated || true
+        id: outdated
+        continue-on-error: true
+        run: npm outdated > npm-outdated.txt || true
       - name: Health summary
         if: always()
         run: |
           {
             echo "## Automated health run"
             echo ""
-            echo "- Ran: \`npm run health:auto\`"
+            echo "- health:auto: ${{ steps.health.outcome }}"
             echo "- Ran: \`npm outdated\` (non-blocking report)"
             echo ""
             echo "Use this run to keep check/test/security-audit status current without waiting for manual execution."
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish maintenance issue for suggestions
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const title = "Automated health report";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const outdated = fs.existsSync("npm-outdated.txt")
+              ? fs.readFileSync("npm-outdated.txt", "utf8").trim()
+              : "";
+            const body = [
+              `Latest run: ${runUrl}`,
+              ``,
+              `Health status: **${{ steps.health.outcome }}**`,
+              ``,
+              `Dependency drift snapshot (\`npm outdated\`):`,
+              "```text",
+              outdated || "No outdated npm dependencies reported.",
+              "```",
+              ``,
+              "Please add suggestions in comments on this issue.",
+            ].join("\n");
+
+            const { data: search } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${title}"`,
+              per_page: 1,
+            });
+            const existing = search.items.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+      - name: Fail workflow if health checks failed
+        if: steps.health.outcome != 'success'
+        run: exit 1

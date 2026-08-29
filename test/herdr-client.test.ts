@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HerdrClient, MAX_MESSAGE_BUFFER_BYTES } from "../src/herdr-client.ts";
+import { HerdrClient } from "../src/herdr-client.ts";
 
 async function fakeHerdr(handler) {
   const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
@@ -204,39 +204,35 @@ test("subscription reports one disconnect after it was ready", async () => {
 });
 
 test("request fails closed when the response stream never yields a complete line", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
-  const socketPath = join(directory, "herdr.sock");
-  const server = net.createServer((socket) => {
-    socket.write("x".repeat(MAX_MESSAGE_BUFFER_BYTES + 1));
+  const bufferLimit = 32;
+  const fake = await fakeHerdr((request, socket) => {
+    socket.write(`${JSON.stringify({ id: "unrelated", result: {} })}\n${"x".repeat(bufferLimit + 1)}`);
   });
-  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-  const client = new HerdrClient({ socketPath, timeoutMs: 30_000 });
+  const client = new HerdrClient({ socketPath: fake.socketPath, timeoutMs: 30_000, maxMessageBufferBytes: bufferLimit });
   try {
     await assert.rejects(
       () => client.snapshot(),
       /response stream exceeded/,
     );
   } finally {
-    await new Promise((resolve) => server.close(resolve));
+    await fake.close();
   }
 });
 
 test("subscription fails closed when stream data never yields a complete line", async () => {
+  const bufferLimit = 32;
   let disconnectResolve;
   const disconnected = new Promise((resolve) => { disconnectResolve = resolve; });
-  const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
-  const socketPath = join(directory, "herdr.sock");
-  const server = net.createServer((socket) => {
-    socket.write("x".repeat(MAX_MESSAGE_BUFFER_BYTES + 1));
+  const fake = await fakeHerdr((request, socket) => {
+    socket.write(`${JSON.stringify({ id: request.id, result: { type: "subscription_started" } })}\n${"x".repeat(bufferLimit + 1)}`);
   });
-  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-  const client = new HerdrClient({ socketPath });
+  const client = new HerdrClient({ socketPath: fake.socketPath, maxMessageBufferBytes: bufferLimit });
   const stop = client.subscribe([], () => {}, (error) => disconnectResolve(error));
   try {
     const error = await disconnected as Error;
     assert.match(error.message, /subscription stream exceeded/);
   } finally {
     stop();
-    await new Promise((resolve) => server.close(resolve));
+    await fake.close();
   }
 });

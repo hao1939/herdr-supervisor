@@ -17,11 +17,13 @@ function responseError(message) {
 export class HerdrClient {
   socketPath: string;
   timeoutMs: number;
+  maxMessageBufferBytes: number;
   nextId: number;
 
-  constructor({ socketPath = defaultSocketPath(), timeoutMs = 3000 } = {}) {
+  constructor({ socketPath = defaultSocketPath(), timeoutMs = 3000, maxMessageBufferBytes = MAX_MESSAGE_BUFFER_BYTES } = {}) {
     this.socketPath = socketPath;
     this.timeoutMs = timeoutMs;
+    this.maxMessageBufferBytes = maxMessageBufferBytes;
     this.nextId = 0;
   }
 
@@ -57,8 +59,8 @@ export class HerdrClient {
           if (message.error) finish(responseError(message));
           else finish(undefined, message.result);
         }
-        if (buffer.length > MAX_MESSAGE_BUFFER_BYTES) {
-          finish(new Error(`Herdr ${method} response stream exceeded ${MAX_MESSAGE_BUFFER_BYTES} bytes without a complete message`));
+        if (!settled && buffer.length > this.maxMessageBufferBytes) {
+          finish(new Error(`Herdr ${method} response stream exceeded ${this.maxMessageBufferBytes} bytes without a complete message`));
         }
       });
     });
@@ -174,8 +176,8 @@ export class HerdrClient {
           onEvent(message);
         }
       }
-      if (buffer.length > MAX_MESSAGE_BUFFER_BYTES) {
-        disconnect(new Error(`Herdr subscription stream exceeded ${MAX_MESSAGE_BUFFER_BYTES} bytes without a complete message`));
+      if (!stopped && !disconnected && buffer.length > this.maxMessageBufferBytes) {
+        disconnect(new Error(`Herdr subscription stream exceeded ${this.maxMessageBufferBytes} bytes without a complete message`));
       }
     });
     socket.on("error", disconnect);
