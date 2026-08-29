@@ -3,6 +3,13 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.1](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.0...herdr-supervisor-v0.2.1) (2026-08-29)
+
+
+### Performance Improvements
+
+* skip evidence-free working reviews ([73ba044](https://github.com/hao1939/herdr-supervisor/commit/73ba044397ee63d6c49a071fa2662edee0fdb819))
+
 ## [0.2.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.1.0...herdr-supervisor-v0.2.0) (2026-08-29)
 
 
