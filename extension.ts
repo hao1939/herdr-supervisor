@@ -73,7 +73,7 @@ type RuntimeGoal = {
 };
 
 function text(value: string, isError = false) {
-  return { content: [{ type: "text" as const, text: value }], isError };
+  return { content: [{ type: "text" as const, text: value }], isError, details: undefined };
 }
 
 function codexLaunchArgs() {
@@ -1412,7 +1412,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.on("context", (event) => {
     let latestReview = -1;
     for (let index = event.messages.length - 1; index >= 0; index -= 1) {
-      if ([reviewMessageType, globalReviewMessageType].includes(event.messages[index].customType)) {
+      if ([reviewMessageType, globalReviewMessageType].includes((event.messages[index] as any).customType)) {
         latestReview = index;
         break;
       }
@@ -1422,7 +1422,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     let insideOldReview = false;
     return {
       messages: event.messages.filter((message, index) => {
-        if ([reviewMessageType, globalReviewMessageType].includes(message.customType)) {
+        if ([reviewMessageType, globalReviewMessageType].includes((message as any).customType)) {
           insideOldReview = index !== latestReview;
           return index === latestReview;
         }
