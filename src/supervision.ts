@@ -1,11 +1,26 @@
 export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
 export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
-const ISO_8601_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_8601_WITH_TIMEZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function validCalendarTime(match) {
+  const [, year, month, day, hour, minute, second] = match;
+  const value = new Date(0);
+  value.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  value.setUTCHours(Number(hour), Number(minute), Number(second), 0);
+  return value.getUTCFullYear() === Number(year)
+    && value.getUTCMonth() === Number(month) - 1
+    && value.getUTCDate() === Number(day)
+    && value.getUTCHours() === Number(hour)
+    && value.getUTCMinutes() === Number(minute)
+    && value.getUTCSeconds() === Number(second);
+}
 
 export function reviewDeadline(reviewAt, now = Date.now()) {
+  const match = ISO_8601_WITH_TIMEZONE.exec(reviewAt);
   const deadline = Date.parse(reviewAt);
   if (
-    !ISO_8601_WITH_TIMEZONE.test(reviewAt)
+    !match
+    || !validCalendarTime(match)
     || !Number.isFinite(deadline)
     || deadline < now + 1000
     || deadline > now + MAX_REVIEW_DELAY_MS
