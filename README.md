@@ -126,9 +126,10 @@ steering. For operator control, `/supervise <pane> <goal>` attaches an existing
 worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 
 When a worker creates or updates a pull request, its native Goal asks it to add
-a small `Supervision` block to the description containing the exact goal ID,
-native worker-session ID, and Herdr pane ID. The PR title and summary stay about
-the change; the IDs only make the originating supervised work easy to trace.
+a small `Supervision` block to the description containing the readable goal,
+exact goal ID, Herdr worker name, native Codex session ID, and Herdr pane ID.
+The PR title and main summary stay about the change; the metadata only makes the
+originating supervised work easy to trace.
 
 ### Current limitations
 
@@ -156,4 +157,3 @@ npm test         # node:test suite
 Herdr owns runtime truth. The supervisor owns judgment about whether a
 registered worker is still moving toward its stated goal. It must not copy
 Herdr's lifecycle into a parallel queue, task graph, or status database.
-test

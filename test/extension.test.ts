@@ -171,8 +171,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
   assert.match(deliveredPrompts[0].prompt, /Supervision section/);
-  assert.match(deliveredPrompts[0].prompt, /Goal \"g_[a-zA-Z0-9_-]+\"/);
-  assert.match(deliveredPrompts[0].prompt, new RegExp(`Worker ${JSON.stringify(managed.agent_session.value)}`));
+  assert.match(deliveredPrompts[0].prompt, /Goal \"Fix the focused regression\.\" \(\"g_[a-zA-Z0-9_-]+\"\)/);
+  assert.match(deliveredPrompts[0].prompt, /Worker \"goal-[a-z0-9_-]+\"/);
+  assert.match(deliveredPrompts[0].prompt, new RegExp(`Codex session ${JSON.stringify(managed.agent_session.value)}`));
   assert.match(deliveredPrompts[0].prompt, new RegExp(`Pane ${JSON.stringify(managed.pane_id)}`));
   assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[0].bindingExists, true);

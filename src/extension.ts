@@ -95,14 +95,15 @@ const workerExecutionBoundary = "You own only execution spaces that you explicit
 const workerInitializationPrompt = "Initialize this worker session only. Do not inspect or change files. Wait for the goal.";
 
 function nativeGoalPrompt(binding) {
-  const { goalId, paneId, agentSession } = binding;
+  const { goalId, goal, paneId, agentSession } = binding;
   const contract = resolve(goalPaths(goalId).contract);
+  const workerName = workerNameForGoal(goalId);
   const objective = [
     `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
     "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
     workerExecutionBoundary,
     "Work proactively from current evidence. Keep independent useful paths moving when one path waits. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
-    `When you create or update a pull request for this goal, include a short Supervision section in its description with these exact traceability values: Goal ${JSON.stringify(goalId)}, Worker ${JSON.stringify(agentSession.value)}, Pane ${JSON.stringify(paneId)}. Keep the human-readable PR title and summary focused on the change; this metadata identifies its originating supervised work but is not completion evidence.`,
+    `When you create or update a pull request for this goal, include a short Supervision section in its description with this exact traceability metadata: Goal ${JSON.stringify(goal)} (${JSON.stringify(goalId)}); Worker ${JSON.stringify(workerName)} (Codex session ${JSON.stringify(agentSession.value)}); Pane ${JSON.stringify(paneId)}. Keep the PR title and main summary focused on the code change; this metadata identifies its originating supervised work but is not completion evidence.`,
     "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
   ].join(" ");
   if (objective.length > 4000) throw new Error("the native Codex Goal objective exceeds 4,000 characters");
