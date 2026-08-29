@@ -108,20 +108,14 @@ exact conflicting operation.
 
 For exact operator control, `/supervise <pane> <goal>` still attaches an
 existing worker, and `/supervise <pane> --goal-id <id>` starts a copied portable
-contract on an existing worker. The standalone CLI can list workers with
-`node bin/herdr-supervisor.js workers`.
+contract on an existing worker.
 
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
 supervisor model review events without applying its decisions. The extension
 also disables non-supervisor tools itself; `--no-builtin-tools` makes that
 boundary explicit at launch. `live` is the only mode that may prompt a
-registered worker.
-
-The standalone CLI is read-only:
-
-```sh
-node bin/herdr-supervisor.js status
-```
+registered worker. Use `/supervised` inside the supervisor pane to inspect
+active goals and worker state.
 
 ## Run in a container
 

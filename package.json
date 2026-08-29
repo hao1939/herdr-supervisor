@@ -20,12 +20,9 @@
     "pi-coding-agent"
   ],
   "type": "module",
-  "bin": {
-    "herdr-supervisor": "bin/herdr-supervisor.js"
-  },
   "scripts": {
     "test": "node --test 'test/**/*.test.ts'",
-    "check": "tsc --noEmit && node --check bin/herdr-supervisor.js && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
+    "check": "tsc --noEmit && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
   },
   "engines": {
     "node": ">=22"

@@ -27,15 +27,13 @@ RUN mkdir -p /app /opt/herdr-supervisor \
     && chown node:node /app
 
 COPY --chown=node:node package.json /opt/herdr-supervisor/
-COPY --chown=node:node bin /opt/herdr-supervisor/bin
 COPY --chown=node:node container /opt/herdr-supervisor/container
 COPY --chown=node:node src /opt/herdr-supervisor/src
 RUN chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
     && mv /usr/local/bin/codex /usr/local/bin/codex-agent \
     && mv /usr/local/bin/pi /usr/local/bin/pi-agent \
     && ln -s /opt/herdr-supervisor/container/bin/codex /usr/local/bin/codex \
-    && ln -s /opt/herdr-supervisor/container/bin/pi /usr/local/bin/pi \
-    && ln -s /opt/herdr-supervisor/bin/herdr-supervisor.js /usr/local/bin/herdr-supervisor
+    && ln -s /opt/herdr-supervisor/container/bin/pi /usr/local/bin/pi
 
 USER node
 WORKDIR /app
