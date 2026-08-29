@@ -30,6 +30,7 @@ export function bindingFromRecord(record) {
     awaitingHuman: record.state.lastDecision?.decision === "ask_human",
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
+    updatedAt: record.state.updatedAt,
   };
 }
 

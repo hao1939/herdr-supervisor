@@ -7,6 +7,7 @@ import herdrSupervisor from "../extension.ts";
 import { loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.js";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.js";
 import { HerdrClient } from "../src/herdr-client.js";
+import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.js";
 
 const worker = {
   paneId: "w1:p2",
@@ -14,7 +15,7 @@ const worker = {
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
 
-function fakePi({ reviewMs = "600000" } = {}) {
+function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}) {
   const commands = new Map();
   const tools = new Map();
   const events = new Map();
@@ -28,6 +29,7 @@ function fakePi({ reviewMs = "600000" } = {}) {
     getFlag(name) {
       if (name === "supervisor-mode") return "live";
       if (name === "supervisor-review-ms") return reviewMs;
+      if (name === "supervisor-global-review-ms") return globalReviewMs;
     },
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
@@ -1317,5 +1319,158 @@ test("an accepted resume is not repeated when readiness checking fails", async (
   });
   assert.equal(resumes, 1);
   assert.match(repeated.content[0].text, /already applied/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a due global review routes findings through ordinary focused reviews", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.equal(pi.messages[0].customType, "herdr-supervisor-global-review");
+  assert.match(pi.messages[0].content, /"goalId": "g_test"/);
+  assert.doesNotMatch(pi.messages[0].content, /journal|native messages|terminal output/);
+
+  const result = await pi.tools.get("supervisor_global_result").execute("global", {
+    summary: "The worker state conflicts with its recorded progress.",
+    findings: [{
+      problem: "The goal needs a focused evidence check",
+      evidence: ["Current worker state and checkpoint need reconciliation"],
+      affected_goal_ids: ["g_test"],
+    }],
+    reconsider: [],
+  });
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /Queued focused reviews for g_test/);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
+  const focused = pi.messages.find((message) => message.customType === "herdr-supervisor-review");
+  assert.match(focused.content, /global supervision review found/);
+  const stored = await loadGlobalReviewState(root);
+  assert.ok(Date.parse(stored.nextReviewAt) > Date.now());
+  pi.events.get("session_shutdown")();
+});
+
+test("focused worker review runs before a due global review", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "blocked" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker can continue with one focused check.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.equal(pi.messages[0].customType, "herdr-supervisor-review");
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Run the remaining focused check.",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.equal(pi.messages[1].customType, "herdr-supervisor-global-review");
+  pi.events.get("session_shutdown")();
+});
+
+test("an invalid global result has no partial routing", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
+    summary: "One reference is invalid.",
+    findings: [{ problem: "Check both", evidence: ["one is unknown"], affected_goal_ids: ["g_test", "g_unknown"] }],
+    reconsider: [],
+  });
+  assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+
+  const valid = await pi.tools.get("supervisor_global_result").execute("valid", {
+    summary: "No cross-goal fault remains.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(valid.isError, false);
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart respects a persisted future global review", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await saveGlobalReviewState({
+    version: 1,
+    lastReviewedAt: new Date().toISOString(),
+    nextReviewAt: new Date(Date.now() + 60_000).toISOString(),
+    snapshotHash: "snapshot",
+    lastFindingHash: undefined,
+  }, root);
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("a completed global review arms its next in-process deadline", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_global_result").execute("first", {
+    summary: "Healthy.",
+    findings: [],
+    reconsider: [],
+  });
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 2);
   pi.events.get("session_shutdown")();
 });

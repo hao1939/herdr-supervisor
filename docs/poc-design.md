@@ -566,10 +566,23 @@ temporary scheduling hints, not durable goal truth:
 4. Let the explicit review decision choose the bounded next interval.
 5. Recompute the nearest deadline.
 
-Do not run a global polling scan. A stale review reads current Herdr state and
-bounded native messages before deciding because an event may have been missed
-or delayed. The next deadline starts after the review turn settles, so a slow
-model turn cannot enqueue another review behind itself.
+Do not continuously poll workers or replay their logs globally. Focused stale
+reviews still read current Herdr state and bounded native messages because an
+event may have been missed or delayed. In addition, one deliberately
+low-frequency global review receives only the compact current projection across
+goals. It catches circular waits, several goals affected by one runtime fault,
+and a stuck supervision path that no single goal can explain. It only names
+affected goals; code queues their normal focused reviews. The next focused
+deadline starts after its review turn settles, so a slow model turn cannot
+enqueue another review behind itself.
+
+The global signal coalesces to one pending review and runs after human and
+focused work. It uses the same Pi session and must end with one structured
+`supervisor_global_result`. Its checkpoint stores the last and next review
+times plus snapshot and finding hashes under `goals/.supervisor/`; it is not a
+Task or portable goal state. Restart runs an overdue review immediately.
+Identical findings are displayed at most once. A failed or incomplete global
+turn receives one bounded retry and never partially routes unknown goal IDs.
 
 A goal waiting for the human keeps a bounded deadline. When it expires, the
 supervisor checks whether the answer is still necessary, whether the blocker can
@@ -699,6 +712,7 @@ stores or displays copied live status as goal truth.
   workers. The shared supervisor reviewed Alpha, Beta, and Gamma sequentially,
   used only each worker's exact native-session evidence, accepted all three,
   and left no goal binding behind. No worker was starved or reviewed twice.
+
 - **Finding:** the first live run made correctly scoped decisions but sometimes
   echoed a bare worker completion token afterward. The ambiguous `Accept when`
   heading was replaced by explicit worker acceptance criteria, and the role
@@ -708,6 +722,25 @@ stores or displays copied live status as goal truth.
 - Keep testing with longer histories and related goals before enabling live
   steering broadly; add isolated model contexts only if those trials expose a
   concrete context-switch failure.
+
+### Stage 2d: compact global recovery review
+
+- **Implemented:** one low-frequency timer coalesces a compact review across
+  current goal checkpoints, Herdr worker states, waits, and supervisor health.
+  Human turns and focused reviews always drain first.
+- **Implemented:** one structured global result validates every affected goal
+  before any routing, then queues the existing focused review path for each
+  valid goal. It never reads worker logs or acts on several workers itself.
+- **Implemented:** a small atomic checkpoint restores the next deadline after
+  restart, retries one missing decision, and suppresses unchanged findings.
+- **Verified:** focused tests cover compact context, priority, atomic reference
+  validation, focused fan-out, persisted restart deadlines, finding coalescing,
+  and in-process timer re-arming.
+- **Verified live:** the first MLVM restart reconciled due idle goals before one
+  global turn, which found no additional systemic fault, routed no unnecessary
+  work, persisted its one-hour deadline, and left later Herdr events to normal
+  focused reviews. A second restart preserved that future deadline instead of
+  repeating the global model call.
 
 ### Stage 3: bounded live steering
 
@@ -890,8 +923,9 @@ The PoC is successful when all of these are demonstrated:
    creating another goal or worker.
 8. Replacing a pane occupant fails closed instead of steering the wrong agent.
 9. Herdr remains the sole source of live worker state.
-10. With no due registered goal, idle operation performs no LLM call and no
-    global terminal scan.
+10. Idle operation performs no continuous scan or terminal-log read. The only
+    cross-goal LLM call is a low-frequency compact health review, which routes
+    any finding through ordinary focused reviews.
 11. Sequential reviews of two different workers remain correctly scoped while
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn

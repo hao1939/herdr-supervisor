@@ -56,6 +56,16 @@ still run concurrently. Signals for other workers coalesce in memory until the
 current review settles; no separate model session, context store, or durable
 review queue is introduced unless testing proves it necessary.
 
+Stage 2d adds a low-frequency global safety net for failures that only become
+visible across goals. About once an hour, and once after an overdue restart,
+the same supervisor receives one compact snapshot of current goal checkpoints,
+worker states, waits, and runtime health. It identifies affected goals but does
+not inspect full logs or act on several workers. Execution code coalesces the
+signal and queues each affected goal through the existing focused review path.
+Focused reviews and human turns remain higher priority. The small checkpoint in
+`goals/.supervisor/global-review.json` stores only review times and hashes; it
+is runtime state, not a goal, queue, or second supervisor.
+
 A live three-worker trial confirmed that this shared session kept Alpha, Beta,
 and Gamma evidence separate, reviewed every worker, and removed all three goal
 bindings after acceptance. Worker messages are evidence, not supervisor
