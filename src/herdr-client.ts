@@ -14,19 +14,23 @@ function responseError(message) {
 }
 
 export class HerdrClient {
+  socketPath: string;
+  timeoutMs: number;
+  nextId: number;
+
   constructor({ socketPath = defaultSocketPath(), timeoutMs = 3000 } = {}) {
     this.socketPath = socketPath;
     this.timeoutMs = timeoutMs;
     this.nextId = 0;
   }
 
-  request(method, params = {}) {
+  request(method, params = {}): Promise<any> {
     const id = `herdr-supervisor:${process.pid}:${++this.nextId}`;
     return new Promise((resolve, reject) => {
       let buffer = "";
       let settled = false;
       const socket = net.createConnection(this.socketPath);
-      const finish = (error, value) => {
+      const finish = (error?, value?) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
@@ -130,7 +134,7 @@ export class HerdrClient {
     }
   }
 
-  subscribe(subscriptions, onEvent, onDisconnect = () => {}, onReady = () => {}) {
+  subscribe(subscriptions, onEvent, onDisconnect: (error?) => void = () => {}, onReady = () => {}) {
     const id = `herdr-supervisor:subscribe:${process.pid}:${++this.nextId}`;
     let buffer = "";
     let stopped = false;

@@ -18,7 +18,7 @@ import {
   updateGoalState,
   validateGoalContract,
   validateGoalState,
-} from "../src/goal-store.js";
+} from "../src/goal-store.ts";
 
 const worker = {
   paneId: "w1:p2",

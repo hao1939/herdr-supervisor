@@ -12,7 +12,7 @@ import {
   recoveryRequest,
   reviewMessage,
   shouldWake,
-} from "../src/supervision.js";
+} from "../src/supervision.ts";
 
 function agent(overrides = {}) {
   return {

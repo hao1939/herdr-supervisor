@@ -19,7 +19,7 @@ export function captureIdentity(agent) {
   };
 }
 
-export function identityMismatch(binding, agent, pane) {
+export function identityMismatch(binding, agent, pane?) {
   if (!agent && !pane) return "worker pane is no longer present";
   if (!agent && pane.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";
   if (!agent) return "worker agent process is no longer detected";

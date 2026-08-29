@@ -1,4 +1,9 @@
 export class ReviewTurnFence {
+  paneId: string | undefined;
+  observing = false;
+  observed = false;
+  closed = false;
+
   constructor() {
     this.end();
   }
@@ -17,7 +22,7 @@ export class ReviewTurnFence {
     this.closed = false;
   }
 
-  guard(paneId) {
+  guard(paneId?) {
     if (!this.paneId) return;
     if (this.closed) {
       return "This review decision is already applied. End this turn and wait for Herdr's next event; do not poll.";
@@ -54,7 +59,7 @@ export class ReviewTurnFence {
     if (!this.observed) return `Observe ${this.paneId} once before deciding.`;
   }
 
-  close(paneId) {
+  close(paneId?) {
     if (!this.paneId && paneId) this.paneId = paneId;
     if (this.paneId) this.closed = true;
   }

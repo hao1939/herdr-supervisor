@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReviewTurnFence } from "../src/review-turn.js";
+import { ReviewTurnFence } from "../src/review-turn.ts";
 
 test("an automated review can observe only its exact worker once", () => {
   const turn = new ReviewTurnFence();

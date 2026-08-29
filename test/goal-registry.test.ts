@@ -10,9 +10,9 @@ import {
   refreshWorkerLocation,
   registerSupervisedGoal,
   startInstalledGoal,
-} from "../src/goal-registry.js";
-import { createGoalContract, installGoal, readAudit } from "../src/goal-store.js";
-import { shouldWake } from "../src/supervision.js";
+} from "../src/goal-registry.ts";
+import { createGoalContract, installGoal, readAudit } from "../src/goal-store.ts";
+import { shouldWake } from "../src/supervision.ts";
 
 const worker = {
   paneId: "w1:p2",
@@ -139,7 +139,7 @@ test("the supervisor starts a copied contract through its single writer", async 
     at: "2026-08-28T10:00:00.000Z",
   });
   assert.equal(binding.goal, "Run the copied goal.");
-  assert.equal(binding.worker, undefined);
+  assert.equal((binding as any).worker, undefined);
   assert.equal(binding.paneId, "w1:p2");
   await assert.rejects(startInstalledGoal("g_copied", worker, directory), /already pursues goal/);
 });

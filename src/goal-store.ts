@@ -266,7 +266,7 @@ export async function updateGoalContract(goalId, change, root = defaultGoalsRoot
   });
 }
 
-export async function startGoal(goalId, worker, root = defaultGoalsRoot(), options = {}) {
+export async function startGoal(goalId, worker, root = defaultGoalsRoot(), options: any = {}) {
   await loadGoalContract(goalId, root);
   const paths = goalPaths(goalId, root);
   if (!(await missing(paths.current))) throw new Error(`goal ${goalId} already has local execution state`);

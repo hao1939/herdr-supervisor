@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import herdrSupervisor from "../extension.ts";
-import { loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.js";
-import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.js";
-import { HerdrClient } from "../src/herdr-client.js";
-import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.js";
+import { loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
+import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
+import { HerdrClient } from "../src/herdr-client.ts";
+import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 
 const worker = {
   paneId: "w1:p2",
@@ -15,7 +15,7 @@ const worker = {
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
 
-function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}) {
+function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const commands = new Map();
   const tools = new Map();
   const events = new Map();

@@ -8,7 +8,7 @@ import {
   observeWorker,
   readCodexMessages,
   resolveCodexSessionFile,
-} from "../src/observation.js";
+} from "../src/observation.ts";
 
 function record(role, text, phase = "commentary", timestamp = "2026-08-28T01:00:00Z") {
   return JSON.stringify({

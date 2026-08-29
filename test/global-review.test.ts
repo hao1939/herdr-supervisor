@@ -9,7 +9,7 @@ import {
   globalFindingHash,
   loadGlobalReviewState,
   saveGlobalReviewState,
-} from "../src/global-review.js";
+} from "../src/global-review.ts";
 
 const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session_one" };
 

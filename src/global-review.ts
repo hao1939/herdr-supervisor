@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { open, mkdir, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { defaultGoalsRoot } from "./goal-store.js";
-import { findAgent, findPane, identityMismatch } from "./supervision.js";
+import { defaultGoalsRoot } from "./goal-store.ts";
+import { findAgent, findPane, identityMismatch } from "./supervision.ts";
 
 export const DEFAULT_GLOBAL_REVIEW_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_GLOBAL_STATE_BYTES = 64 * 1024;

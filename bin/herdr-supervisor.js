@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { HerdrClient } from "../src/herdr-client.js";
-import { loadSupervisorGoals } from "../src/goal-registry.js";
-import { formatWorker, liveWorker } from "../src/supervision.js";
+import { HerdrClient } from "../src/herdr-client.ts";
+import { loadSupervisorGoals } from "../src/goal-registry.ts";
+import { formatWorker, liveWorker } from "../src/supervision.ts";
 
 function usage(error) {
   if (error) console.error(`Error: ${error}\n`);

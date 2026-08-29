@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HerdrClient } from "../src/herdr-client.js";
+import { HerdrClient } from "../src/herdr-client.ts";
 
 async function fakeHerdr(handler) {
   const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
@@ -17,7 +17,7 @@ async function fakeHerdr(handler) {
       if (newline >= 0) handler(JSON.parse(buffer.slice(0, newline)), socket);
     });
   });
-  await new Promise((resolve) => server.listen(socketPath, resolve));
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   return { socketPath, close: () => new Promise((resolve) => server.close(resolve)) };
 }
 
@@ -174,7 +174,7 @@ test("subscription returns immediately and forwards events", async () => {
   try {
     await ready;
     assert.equal(readyCount, 1);
-    assert.equal((await received).data.agent_status, "idle");
+    assert.equal((await received as any).data.agent_status, "idle");
   } finally {
     stop();
     await fake.close();

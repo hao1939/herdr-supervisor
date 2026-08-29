@@ -71,7 +71,7 @@ function boundMessages(messages, maxMessages, maxChars) {
 
 export async function readCodexMessages(
   path,
-  cursor,
+  cursor?,
   { maxBytes = 512 * 1024, maxMessages = 12, maxChars = 24_000 } = {},
 ) {
   const file = await open(path, "r");
@@ -112,7 +112,7 @@ export async function readCodexMessages(
   }
 }
 
-export async function observeWorker(binding, herdrClient, options = {}) {
+export async function observeWorker(binding, herdrClient, options: any = {}) {
   let nativeObservation;
   if (binding.agentSession.agent === "codex") {
     const path = await resolveCodexSessionFile(binding.agentSession, options.codexSessionsRoot);
