@@ -135,7 +135,17 @@ worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 npm install
 npm run check    # tsc --noEmit + shell syntax
 npm test         # 95 tests
+npm run health:quick   # check + test
+npm run health:auto    # check + test + high-severity audit
 ```
+
+### Automatic health checks
+
+The repository includes `.github/workflows/auto-health.yml`, which runs weekly
+and on manual dispatch to execute:
+
+- `npm run health:auto`
+- `npm outdated` (non-blocking dependency drift report)
 
 ## Documents
 

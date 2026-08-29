@@ -1,0 +1,40 @@
+name: Automated Health
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * 1" # Monday 08:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: automated-health-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  health:
+    if: github.repository == 'hao1939/herdr-supervisor'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - run: npm run health:auto
+      - name: Dependency drift report
+        run: npm outdated || true
+      - name: Health summary
+        if: always()
+        run: |
+          {
+            echo "## Automated health run"
+            echo ""
+            echo "- Ran: \`npm run health:auto\`"
+            echo "- Ran: \`npm outdated\` (non-blocking report)"
+            echo ""
+            echo "Use this run to keep check/test/security-audit status current without waiting for manual execution."
+          } >> "$GITHUB_STEP_SUMMARY"

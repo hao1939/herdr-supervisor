@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+export const MAX_MESSAGE_BUFFER_BYTES = 1_048_576;
 
 export function defaultSocketPath(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
@@ -55,6 +56,9 @@ export class HerdrClient {
           if (message.id !== id) continue;
           if (message.error) finish(responseError(message));
           else finish(undefined, message.result);
+        }
+        if (buffer.length > MAX_MESSAGE_BUFFER_BYTES) {
+          finish(new Error(`Herdr ${method} response stream exceeded ${MAX_MESSAGE_BUFFER_BYTES} bytes without a complete message`));
         }
       });
     });
@@ -169,6 +173,9 @@ export class HerdrClient {
         } else if (message.event) {
           onEvent(message);
         }
+      }
+      if (buffer.length > MAX_MESSAGE_BUFFER_BYTES) {
+        disconnect(new Error(`Herdr subscription stream exceeded ${MAX_MESSAGE_BUFFER_BYTES} bytes without a complete message`));
       }
     });
     socket.on("error", disconnect);

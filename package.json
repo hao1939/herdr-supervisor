@@ -22,7 +22,9 @@
   "type": "module",
   "scripts": {
     "test": "node --test 'test/**/*.test.ts'",
-    "check": "tsc --noEmit && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
+    "check": "tsc --noEmit && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi",
+    "health:quick": "npm run check && npm test",
+    "health:auto": "npm run health:quick && npm audit --audit-level=high"
   },
   "engines": {
     "node": ">=26"

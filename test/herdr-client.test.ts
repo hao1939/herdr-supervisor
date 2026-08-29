@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HerdrClient } from "../src/herdr-client.ts";
+import { HerdrClient, MAX_MESSAGE_BUFFER_BYTES } from "../src/herdr-client.ts";
 
 async function fakeHerdr(handler) {
   const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
@@ -200,5 +200,43 @@ test("subscription reports one disconnect after it was ready", async () => {
   } finally {
     stop();
     await fake.close();
+  }
+});
+
+test("request fails closed when the response stream never yields a complete line", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
+  const socketPath = join(directory, "herdr.sock");
+  const server = net.createServer((socket) => {
+    socket.write("x".repeat(MAX_MESSAGE_BUFFER_BYTES + 1));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  const client = new HerdrClient({ socketPath, timeoutMs: 30_000 });
+  try {
+    await assert.rejects(
+      () => client.snapshot(),
+      /response stream exceeded/,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("subscription fails closed when stream data never yields a complete line", async () => {
+  let disconnectResolve;
+  const disconnected = new Promise((resolve) => { disconnectResolve = resolve; });
+  const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
+  const socketPath = join(directory, "herdr.sock");
+  const server = net.createServer((socket) => {
+    socket.write("x".repeat(MAX_MESSAGE_BUFFER_BYTES + 1));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  const client = new HerdrClient({ socketPath });
+  const stop = client.subscribe([], () => {}, (error) => disconnectResolve(error));
+  try {
+    const error = await disconnected as Error;
+    assert.match(error.message, /subscription stream exceeded/);
+  } finally {
+    stop();
+    await new Promise((resolve) => server.close(resolve));
   }
 });
