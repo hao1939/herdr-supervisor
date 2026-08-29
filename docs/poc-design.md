@@ -347,6 +347,11 @@ Retrying the same goal reuses that pane instead of creating another. This makes
 integration failure visible without creating orphan work. The dedicated image
 includes the runtime required by Herdr's managed Codex hook.
 
+When the operator explicitly enables unattended full-access container mode,
+the same launch trusts only the worker's selected starting directory through
+Codex's project trust setting. This prevents an interactive trust screen from
+blocking native session creation without globally trusting unrelated paths.
+
 Herdr event or stale deadline
   -> coalesce latest signal for that worker
   -> read a fresh Herdr snapshot
@@ -938,6 +943,9 @@ stores or displays copied live status as goal truth.
   bound and delivered only after that identity exists. If identity capture
   fails, retrying the same goal reuses the pending pane instead of creating
   another.
+- **Implemented:** unattended full-access launches mark the exact selected
+  worker directory trusted, avoiding a project-trust gate while leaving other
+  paths unchanged.
 - **Implemented:** after binding, the executor sets one native Codex `/goal`
   whose objective points to the canonical `goal.json`. Native Goals remain
   enabled on new and restored sessions. Contract refinements update the same

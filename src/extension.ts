@@ -77,13 +77,16 @@ function text(value: string, isError = false) {
   return { content: [{ type: "text" as const, text: value }], isError, details: undefined };
 }
 
-function codexLaunchArgs() {
+function codexLaunchArgs(cwd?: string) {
   const args: string[] = [];
   if (process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS === "1") {
-    args.unshift(
+    args.push(
       "--dangerously-bypass-approvals-and-sandbox",
       "--dangerously-bypass-hook-trust",
     );
+    if (cwd) {
+      args.push("-c", `projects.${JSON.stringify(resolve(cwd))}.trust_level="trusted"`);
+    }
   }
   return args;
 }
@@ -724,7 +727,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             name: workerName,
             kind: "codex",
             paneId,
-            args: [...codexLaunchArgs(), workerInitializationPrompt],
+            args: [...codexLaunchArgs(cwd), workerInitializationPrompt],
           });
         } catch (error) {
           throw new Error(`Created worker pane ${paneId}, but Codex did not initialize: ${error.message}. Retry this same goal; do not create another worker.`);
