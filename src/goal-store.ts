@@ -32,7 +32,9 @@ const waitFields = new Set(["condition", "reviewAt", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
-const decisions = new Set(["leave", "steer", "ask_human", "accept", "stop"]);
+// `recover` was written by an earlier v1 implementation. It remains readable
+// for checkpoint compatibility, but current review tools never produce it.
+const decisions = new Set(["leave", "steer", "ask_human", "recover", "accept", "stop"]);
 const writes = new Map();
 
 function serializeWrite(key, operation) {

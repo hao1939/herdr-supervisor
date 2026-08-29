@@ -86,6 +86,21 @@ test("the local checkpoint rejects contract and unknown fields", async () => {
   assert.throws(() => validateGoalState(current), /goal worker contains unsupported field agent_status/);
 });
 
+test("v1 checkpoints retain read compatibility with the legacy recover decision", async () => {
+  const root = await goalsRoot();
+  await runningGoal(root);
+  await updateGoalState("g_test", (current) => {
+    current.lastDecision = {
+      decision: "recover",
+      at: "2026-08-28T10:05:00.000Z",
+      action: "Resumed the exact worker session.",
+    };
+    return current;
+  }, root, () => "2026-08-28T10:05:00.000Z");
+
+  assert.equal((await loadGoalState("g_test", root)).lastDecision.decision, "recover");
+});
+
 test("copying goal.json is sufficient to start fresh in another instance", async () => {
   const source = await goalsRoot();
   const target = await goalsRoot();

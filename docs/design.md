@@ -101,6 +101,11 @@ binding, concise progress, retained evidence, observation cursor, last
 decision, optional wait, and optional terminal result. It does not copy live
 worker status; that always comes from Herdr.
 
+The v1 reader still accepts the retired `recover` decision in an existing
+checkpoint. New reviews never produce it; recovery is now transport inside
+`steer`. This keeps restart compatibility without restoring a fifth model
+decision.
+
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
 recovery; an invalid goal or checkpoint fails closed.

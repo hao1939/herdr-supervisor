@@ -31,6 +31,7 @@ export type GoalLoadError = {
 
 export type ReviewDecision = "leave" | "steer" | "ask_human" | "accept";
 export type RecordedDecision = ReviewDecision | "stop";
+export type LegacyRecordedDecision = RecordedDecision | "recover";
 
 export type GoalWait = {
   condition: string;
@@ -39,7 +40,7 @@ export type GoalWait = {
 };
 
 export type LastDecision = {
-  decision: RecordedDecision;
+  decision: LegacyRecordedDecision;
   at: string;
   action: string;
 };

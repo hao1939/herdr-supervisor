@@ -112,11 +112,11 @@ exactly one decision:
   preserving an exact time when that instruction must be checked again
 - **ask_human** — a concrete question when your authority or information is needed
 - **accept** — goal met with convincing evidence
-- **stop** — end supervision without stopping the worker
 
-Exact-session resume is not another model decision. When the model chooses
-**steer** for a stopped Codex process, the executor resumes that same session
-and paused native Goal before delivering the instruction.
+Two operations sit outside those review decisions. **stop** is explicit operator
+control that ends supervision without stopping the worker. Exact-session resume
+is transport inside **steer**: for a stopped Codex process, the executor resumes
+that same session and paused native Goal before delivering the instruction.
 
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
 (execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is

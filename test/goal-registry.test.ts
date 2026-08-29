@@ -96,7 +96,6 @@ test("refining a goal resolves its previous human question", async () => {
 
   const [refined] = (await loadSupervisorGoals(directory)).active;
   assert.equal(refined.lastDecision, undefined);
-  assert.equal(refined.lastDecision, undefined);
 });
 
 test("a terminal decision removes only that goal from active supervision", async () => {
