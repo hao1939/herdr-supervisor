@@ -20,8 +20,10 @@ they retain exact technical evidence, but explain what happened, why it matters,
 and what comes next.
 
 The proof of concept uses one Pi session as the supervisor and talks directly
-to Herdr's local socket. Workers remain ordinary Herdr agents and may use Codex,
-Claude Code, Pi, OpenCode, or another supported CLI.
+to Herdr's local socket. Workers are ordinary Herdr agents. This implementation
+starts, observes, and recovers **Codex** workers specifically: worker startup,
+message-level evidence, and exact-session recovery are all Codex-aware today.
+Other Herdr-supported CLIs are a planned extension, not a current capability.
 
 The next refinement gives every goal one stable directory with three small,
 separate files. `goal.json` is the portable goal contract, `current.json` is the

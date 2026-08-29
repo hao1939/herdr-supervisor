@@ -2,6 +2,23 @@
   "name": "herdr-supervisor",
   "version": "0.1.0",
   "private": true,
+  "description": "One Pi agent that supervises existing Herdr workers against explicit goals, without adding a second task system.",
+  "license": "MIT",
+  "author": "Hao Yuan",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hao1939/herdr-supervisor.git"
+  },
+  "homepage": "https://github.com/hao1939/herdr-supervisor#readme",
+  "bugs": {
+    "url": "https://github.com/hao1939/herdr-supervisor/issues"
+  },
+  "keywords": [
+    "herdr",
+    "codex",
+    "agent-supervision",
+    "pi-coding-agent"
+  ],
   "type": "module",
   "bin": {
     "herdr-supervisor": "bin/herdr-supervisor.js"
@@ -12,5 +29,11 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.84.2"
   }
 }
