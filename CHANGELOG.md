@@ -3,6 +3,61 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.1.0...herdr-supervisor-v0.2.0) (2026-08-29)
+
+
+### Features
+
+* add compact global supervision review ([9d0b900](https://github.com/hao1939/herdr-supervisor/commit/9d0b90054dc4012f4bd2bf8f2790693a84c57a1f))
+* reassess goals when progress stalls ([0017998](https://github.com/hao1939/herdr-supervisor/commit/0017998eaad71ea9f3e431e6c64de97ed6e92090))
+* refine active goals durably ([a9c4416](https://github.com/hao1939/herdr-supervisor/commit/a9c441695ee40dffed2b3622bb57a09d6b2ee9ad))
+
+
+### Bug Fixes
+
+* allow peer status during reviews ([99b7416](https://github.com/hao1939/herdr-supervisor/commit/99b74160598edf264f6fe3a9ad26542d192922fb))
+* bind workers before delivering goals ([62a29d9](https://github.com/hao1939/herdr-supervisor/commit/62a29d9942f94da60155a16489e9914ad4e11299))
+* bootstrap native Codex identity safely ([1111b36](https://github.com/hao1939/herdr-supervisor/commit/1111b3617f37ad14e722f36e2b27f81c47ead382))
+* bound all preserved decision evidence ([228f8e8](https://github.com/hao1939/herdr-supervisor/commit/228f8e8a21ce41c5a78d618036ad20fc79f71911))
+* bound restart-safe worker names ([0172998](https://github.com/hao1939/herdr-supervisor/commit/0172998f8ba9d948267243e6ee3268219ca6e3a7))
+* compare retries against explicit review time ([df51cf0](https://github.com/hao1939/herdr-supervisor/commit/df51cf06d8ac17d69e59818fa0afb815702b73ee))
+* continue restored workers automatically ([318381f](https://github.com/hao1939/herdr-supervisor/commit/318381fcbafd90478b606d2c2fe34347ecae8988))
+* coordinate shared worker waits ([9b45c55](https://github.com/hao1939/herdr-supervisor/commit/9b45c553d0574f3375444aa07da1350554b65eb1))
+* distinguish goal state from worker state ([a8b1be2](https://github.com/hao1939/herdr-supervisor/commit/a8b1be28f83bfb64d834023eb0cef227ffbe79ad))
+* isolate execution worktrees by goal ([14f90ce](https://github.com/hao1939/herdr-supervisor/commit/14f90cefb3372fa5e95b6e8ff623920c7c3add0e))
+* keep broad goals open beyond milestones ([0a1bdc8](https://github.com/hao1939/herdr-supervisor/commit/0a1bdc8b271db1278299df5dd44c84497b31e01b))
+* keep retry evidence in review context ([7965231](https://github.com/hao1939/herdr-supervisor/commit/7965231781f6426d75e06031da5f2bd8dbde9cc3))
+* keep waiting goals moving ([817bfda](https://github.com/hao1939/herdr-supervisor/commit/817bfda79a450376a71e78859589330206e01b9b))
+* let supervisor coordinate peer goals ([d3cf559](https://github.com/hao1939/herdr-supervisor/commit/d3cf5595b2829e3281aa29118ef2ffd5ed488fb7))
+* let supervisor resume goal work selectively ([0b0f2f8](https://github.com/hao1939/herdr-supervisor/commit/0b0f2f81dcb669a010cf41c165eb364bcedaeca2))
+* make Codex sandboxing the container default ([bebd8dc](https://github.com/hao1939/herdr-supervisor/commit/bebd8dc181f69f9b6e695fec2f8fd91b8a7f8fed))
+* preserve bounded waits with invalid peer hints ([c6370f4](https://github.com/hao1939/herdr-supervisor/commit/c6370f43f064f38c1b9c8f61b84b1fdb4f967fd7))
+* preserve current evidence for supervisor decisions ([6cdb13c](https://github.com/hao1939/herdr-supervisor/commit/6cdb13cbff6d73b632450725838d62e99814eda8))
+* preserve pending human decisions on restart ([e5d6147](https://github.com/hao1939/herdr-supervisor/commit/e5d6147b09ec2c7d882b018f359053f711998d2e))
+* preserve supervision across runtime restart ([2e73138](https://github.com/hao1939/herdr-supervisor/commit/2e73138287b66635499fa61ce7a9238fe6cbce4e))
+* prioritize worker identity in status ([598eda5](https://github.com/hao1939/herdr-supervisor/commit/598eda57ac06556bb3b0cb7afaf3f2f21154f833))
+* reconsider all workers affected by new evidence ([a6b8204](https://github.com/hao1939/herdr-supervisor/commit/a6b8204a5d5510ed1a3e327246be0ea29db20162))
+* refuse to leave idle workers working ([fc6f272](https://github.com/hao1939/herdr-supervisor/commit/fc6f272b700215ffbeee48731a13de519d360664))
+* remove $schema from release-please manifest ([08e55c4](https://github.com/hao1939/herdr-supervisor/commit/08e55c4ad85241aa7c8aeddfcdee63814505f8ae))
+* require deadlines for settled worker waits ([f6d2c3d](https://github.com/hao1939/herdr-supervisor/commit/f6d2c3ddd690e78f08976e46166af91ff0be5d26))
+* require fresh evidence at expired waits ([b455ca3](https://github.com/hao1939/herdr-supervisor/commit/b455ca333b12664651fbc64d121764b5b4d9a290))
+* reserve human input for real authority gaps ([17133a1](https://github.com/hao1939/herdr-supervisor/commit/17133a1499ddd143ea3409632506aa55ae579e53))
+* restart the supervisor after runtime failure ([14cdda9](https://github.com/hao1939/herdr-supervisor/commit/14cdda9bc506917f587f0e62bd53219c42254cb5))
+* restore waits and continue workers reliably ([e130683](https://github.com/hao1939/herdr-supervisor/commit/e130683fc48c4aeee0a883584b451cbebbe5f8d7))
+* resume supervised workers unattended ([f9d0d33](https://github.com/hao1939/herdr-supervisor/commit/f9d0d338bfcefd47a9d108985a971f18cdcabf11))
+* resume workers in their session directory ([944d12c](https://github.com/hao1939/herdr-supervisor/commit/944d12c29791426952a492fc91139ee783f240af))
+* retain human steering during worker reviews ([788a3b5](https://github.com/hao1939/herdr-supervisor/commit/788a3b5d629462409be9bf9a6310eac47c29a657))
+* review restored idle workers once ([5a118a4](https://github.com/hao1939/herdr-supervisor/commit/5a118a4cd4fdda81b25a8ce1a420429d95bf86b2))
+* show and resolve persisted human waits ([95161e7](https://github.com/hao1939/herdr-supervisor/commit/95161e7de10d9e552acb3b03580e85c6b082c1ab))
+* show concrete waits in worker status ([1100463](https://github.com/hao1939/herdr-supervisor/commit/1100463450610c84a31276801b9299e1fd6c64c6))
+
+
+### Performance Improvements
+
+* bound all-worker status context ([1c02362](https://github.com/hao1939/herdr-supervisor/commit/1c0236211dcf907584a330c1d8c183cbe0cdb614))
+* bound automated review context ([dbec2b9](https://github.com/hao1939/herdr-supervisor/commit/dbec2b943696003604927592e5417da6975c547b))
+* keep healthy workers quiet on restart ([dfc5783](https://github.com/hao1939/herdr-supervisor/commit/dfc578317b778e07cf0504678b35b7a3efa081cf))
+
 ## [0.1.0] — 2026-08-29
 
 Initial public release.
