@@ -619,6 +619,29 @@ test("human reconsideration is retained while its focused review is preparing", 
   const settling = pi.events.get("agent_settled")();
   await waitFor(() => snapshotCalls === 1);
 
+  const startDuringPreparation = await pi.tools.get("supervisor_start_goal").execute("start-during-preparation", {
+    goal: "Start unrelated work.",
+    context: [],
+    acceptance: ["The unrelated work is complete."],
+    constraints: [],
+    mode: "new",
+    label: "unrelated",
+    cwd: "/tmp",
+  });
+  assert.equal(startDuringPreparation.isError, true);
+  assert.match(startDuringPreparation.content[0].text, /Finish preparing or reviewing/);
+
+  const updateDuringPreparation = await pi.tools.get("supervisor_update_goal").execute("update-during-preparation", {
+    pane_id: worker.paneId,
+    goal: "Change the goal while its review is preparing.",
+    context: [],
+    acceptance: ["The changed goal is complete."],
+    constraints: [],
+    summary: "This update must wait for the current review.",
+  });
+  assert.equal(updateDuringPreparation.isError, true);
+  assert.match(updateDuringPreparation.content[0].text, /Finish preparing or reviewing/);
+
   const retained = await pi.tools.get("supervisor_reconsider").execute("during-preparation", {
     pane_ids: [worker.paneId],
     reason: "a newer fact arrived during preparation",

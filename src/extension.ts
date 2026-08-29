@@ -638,8 +638,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function startWorkerForGoal(params) {
-    if (reviewTurn.isActive()) {
-      throw new Error(`Finish the current review of ${reviewTurn.paneId} before starting another goal.`);
+    if (reviewTurn.isBusy()) {
+      throw new Error(`Finish preparing or reviewing ${reviewTurn.paneId} before starting another goal.`);
     }
     const goals = await activeBindings();
     const objective = params.goal.trim();
@@ -851,8 +851,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }),
     executionMode: "sequential",
     async execute(_id, params) {
-      if (reviewTurn.isActive()) {
-        return text(`Finish the current event review of ${reviewTurn.paneId} before updating a goal contract.`, true);
+      if (reviewTurn.isBusy()) {
+        return text(`Finish preparing or reviewing ${reviewTurn.paneId} before updating a goal contract.`, true);
       }
       try {
         const binding = await bindingForPane(params.pane_id);
