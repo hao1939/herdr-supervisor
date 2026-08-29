@@ -1923,6 +1923,17 @@ test("an invalid global result has no partial routing", async (t) => {
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
 
+  const ambiguousDeadline = new Date(Date.now() + 60_000).toISOString().replace(/Z$/, "");
+  const invalidDeadline = await pi.tools.get("supervisor_global_result").execute("invalid-deadline", {
+    summary: "The next review time is ambiguous.",
+    findings: [],
+    reconsider: [],
+    next_review_at: ambiguousDeadline,
+  });
+  assert.equal(invalidDeadline.isError, true);
+  assert.match(invalidDeadline.content[0].text, /timezone-bearing ISO 8601/);
+  assert.match(invalidDeadline.content[0].text, /No focused reviews were queued/);
+
   const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
     summary: "One reference is invalid.",
     findings: [{ problem: "Check both", evidence: ["one is unknown"], affected_goal_ids: ["g_test", "g_unknown"] }],

@@ -983,8 +983,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         || new Date(now.getTime() + (globalReviewIntervalMs() ?? DEFAULT_GLOBAL_REVIEW_INTERVAL_MS)).toISOString();
       try {
         reviewDeadline(nextReviewAt, now.getTime());
-      } catch {
-        return text("next_review_at must be a future ISO timestamp no more than 24 hours ahead. No focused reviews were queued.", true);
+      } catch (error) {
+        return text(`Invalid next_review_at: ${error.message}. No focused reviews were queued.`, true);
       }
       const findings = params.findings.map((finding) => ({
         problem: finding.problem.trim(),
