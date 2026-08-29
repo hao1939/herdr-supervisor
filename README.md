@@ -272,21 +272,22 @@ supervision, and retrying the same goal reuses the pending pane. This also
 survives Herdr restoring the Pi session
 as plain `pi`; no special resume
 command is required. Talk to that Pi session normally. It keeps the supervisor in its current tab
-and groups related Codex workers in other tabs as goals are accepted. Container
-launches pass Codex `--dangerously-bypass-approvals-and-sandbox` and
-`--dangerously-bypass-hook-trust`, because the container is the security
-boundary. Set `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=0` before starting Compose to
-restore Codex prompts and sandboxing. Detaching from the container's Herdr
+and groups related Codex workers in other tabs as goals are accepted. Codex runs
+sandboxed with its normal approval prompts by default. Set
+`HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1` before starting Compose to pass
+`--dangerously-bypass-approvals-and-sandbox` and `--dangerously-bypass-hook-trust`,
+which lets workers run unattended when you have decided the container is an
+adequate security boundary. Detaching from the container's Herdr
 client does not stop the server, supervisor, or workers. Reattach with
 `docker compose exec herdr herdr`. API keys present in the shell that starts
 Compose are passed into the container; mounting an existing agent home is an
 optional operator choice and is intentionally not part of the default setup.
 
 > **Security:** full-access mode lets Codex modify every writable path visible
-> in the container, including a bind-mounted host workspace. Mount only the
-> workspace you intend agents to change, do not expose the Herdr socket, and
-> use `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=0` when the container is not an
-> adequate trust boundary. Keep API keys in the local environment or another
+> in the container, including a bind-mounted host workspace. It is opt-in for
+> that reason. Before setting `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1`, mount only
+> the workspace you intend agents to change and do not expose the Herdr socket.
+> Keep API keys in the local environment or another
 > secret store; never commit them to this repository.
 
 Herdr 0.8.x does not expose a web UI or HTTP server. Its supported remote
