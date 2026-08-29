@@ -469,18 +469,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }
       : currentDecision;
     const runtime = runtimeFor(binding);
+    const progressAge = Date.now() - Date.parse(binding.updatedAt || "");
     if (
       signal?.deadline
       && !binding.wait
       && agent?.agent_status === "working"
       && !identityMismatch(binding, agent, pane)
+      && Number.isFinite(progressAge)
+      && progressAge < reviewIntervalMs() * 2
     ) {
       try {
         const observation = await observeWorker(binding, client);
         if (!observation.messages.length) {
-          // A routine focused review has no new evidence to judge. Keep the
-          // worker moving and let the low-frequency global review catch a
-          // process that remains "working" for an implausibly long time.
+          // One quiet interval is not enough evidence to interrupt active
+          // work. The durable progress age stops this suppression after the
+          // next interval even when global review is disabled.
           runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
           runtime.lastNoticeKey = decision.key;
           scheduleReview(binding);

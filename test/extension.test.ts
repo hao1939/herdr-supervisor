@@ -1146,6 +1146,9 @@ test("a routine deadline stays quiet when a working worker has no new evidence",
   assert.equal(pi.messages.length, 0, "a routine deadline without new evidence must not spend a model review");
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.progress, "The long-running validation is active.");
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
 });
 
