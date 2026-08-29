@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck bin/container-entrypoint.sh container/bin/codex container/bin/pi
+      - run: shellcheck container/container-entrypoint.sh container/bin/codex container/bin/pi
 
   docker:
     runs-on: ubuntu-latest

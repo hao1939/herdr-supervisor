@@ -30,7 +30,7 @@ COPY --chown=node:node extension.ts package.json /opt/herdr-supervisor/
 COPY --chown=node:node bin /opt/herdr-supervisor/bin
 COPY --chown=node:node container /opt/herdr-supervisor/container
 COPY --chown=node:node src /opt/herdr-supervisor/src
-RUN chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi \
+RUN chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
     && mv /usr/local/bin/codex /usr/local/bin/codex-agent \
     && mv /usr/local/bin/pi /usr/local/bin/pi-agent \
     && ln -s /opt/herdr-supervisor/container/bin/codex /usr/local/bin/codex \
@@ -42,5 +42,5 @@ WORKDIR /app
 ENV HERDR_SUPERVISOR_GOALS=/home/node/.local/state/herdr-supervisor/goals
 ENV HERDR_SUPERVISOR_DIRECTORY=/app
 
-ENTRYPOINT ["/opt/herdr-supervisor/bin/container-entrypoint.sh"]
+ENTRYPOINT ["/opt/herdr-supervisor/container/container-entrypoint.sh"]
 CMD ["herdr", "server"]
