@@ -303,9 +303,11 @@ single portable authority; the native Goal is the worker's persisted execution
 loop and points back to that file. Codex therefore owns ordinary
 work-check-continue behavior, while the Supervisor owns cross-worker judgment,
 stale recovery, human escalation, and independent acceptance. An automatic
-Herdr restore reopens the exact session and its native Goal. When the process
-has exited, one Supervisor `steer` decision resumes that exact session and
-carries current evidence with it. Transport is not a model decision.
+Herdr restore reopens the exact session and explicitly resumes its paused
+native Goal; unattended workers never stop at Codex's interactive
+`Resume paused goal?` choice. When the process has exited, one Supervisor
+`steer` decision first resumes that Goal, then queues the evidence-backed
+instruction on the same exact session. Transport is not a model decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
@@ -835,9 +837,9 @@ stores or displays copied live status as goal truth.
   a missing pane or replacement occupant. A single `steer` operation prompts a
   present process or resumes the exact session in the first case.
 - **Verified:** after the registered Codex process stopped, the supervisor
-  resumed its exact native session in the same terminal, sent one continuation,
-  observed the exact `RECOVERY_POC_OK` result on the next event, and accepted the
-  goal. No replacement worker or goal was created.
+  resumed its exact native session and paused Goal in the same terminal, sent
+  one continuation, observed the exact `RECOVERY_POC_OK` result on the next
+  event, and accepted the goal. No replacement worker or goal was created.
 - **Verified:** continuing a stopped worker resumes its exact session, while
   continuing a `done` worker whose process is still present prompts it normally;
   the model cannot select the wrong transport or start a duplicate process.
@@ -992,8 +994,9 @@ The PoC is successful when all of these are demonstrated:
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn
     triggered by fresh Herdr state.
-13. Continuing a stopped supported process resumes its exact native session in
-    the same terminal; a missing pane or changed identity fails closed.
+13. Continuing a stopped supported process resumes its exact native session and
+    paused Goal in the same terminal without an interactive prompt; a missing
+    pane or changed identity fails closed.
 14. Every automatic review ends in one explicit decision; prose alone cannot
     advance a checkpoint or hide an incomplete review.
 15. Restart recovery loads every unfinished goal directly and reconsiders it from current

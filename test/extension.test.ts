@@ -1462,14 +1462,14 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   });
 
   assert.equal(resumes, 1);
-  assert.equal(prompts, 0);
+  assert.equal(prompts, 1);
   assert.deepEqual(resumeRequest.args, [
     "resume",
     worker.agentSession.value,
-    "Continue from current goal evidence.",
+    "/goal resume",
   ]);
   assert.equal(result.isError, false);
-  assert.match(result.content[0].text, /Resumed the exact codex session/);
+  assert.match(result.content[0].text, /Resumed the exact codex session and native Goal/);
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",

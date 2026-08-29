@@ -30,6 +30,7 @@ test("restored Codex sessions resume idle in their saved directory without a pro
     'tui.resume_cwd="session"',
     "resume",
     "session-1",
+    "/goal resume",
   ]);
 });
 
@@ -38,6 +39,17 @@ test("an explicit Codex resume-directory choice remains authoritative", async ()
   assert.deepEqual(run(script, ["-c", 'tui.resume_cwd="current"', "resume", "session-1", "Continue now."]), [
     "-c",
     'tui.resume_cwd="current"',
+    "resume",
+    "session-1",
+    "Continue now.",
+  ]);
+});
+
+test("a caller-supplied resume prompt remains authoritative", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["resume", "session-1", "Continue now."]), [
+    "-c",
+    'tui.resume_cwd="session"',
     "resume",
     "session-1",
     "Continue now.",

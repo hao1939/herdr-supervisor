@@ -1219,7 +1219,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         let resumed = false;
         if (canResume) {
           const request = recoveryRequest(binding, snapshot);
-          request.args = [...codexLaunchArgs(), ...request.args, params.message.trim()];
+          // An interrupted native Codex Goal is paused by design. Resume that
+          // lifecycle explicitly before queuing the supervisor's fresh
+          // steering; otherwise Codex waits at an interactive "Resume goal?"
+          // gate and the apparently recovered worker never moves.
+          request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
           let resumeAccepted = false;
           let resumedAgent;
           try {
@@ -1240,6 +1244,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
+          try {
+            await client.promptAgent(params.pane_id, params.message.trim());
+          } catch (error) {
+            scheduleReview(continuedBinding);
+            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${error.message}.\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+          }
         } else {
           try {
             await client.promptAgent(params.pane_id, params.message.trim());
@@ -1268,7 +1278,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           scheduleReview(continuedBinding);
           const warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
           const resultText = resumed
-            ? `Resumed the exact ${binding.agentSession.agent} session in ${params.pane_id} and asked it to continue.`
+            ? `Resumed the exact ${binding.agentSession.agent} session and native Goal in ${params.pane_id}, then asked it to continue.`
             : `Steered ${params.pane_id}: ${params.message.trim()}`;
           return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {

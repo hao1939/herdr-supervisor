@@ -110,7 +110,8 @@ exactly one decision:
 - **leave** — healthy progress, sleep until the next event
 - **steer** — send one goal-aware instruction to the same worker
 - **ask_human** — a concrete question when your authority or information is needed
-- **recover** — resume the exact Codex session when the process has exited
+- **recover** — resume the exact Codex session and paused native Goal when the
+  process has exited, without waiting at an interactive confirmation
 - **accept** — goal met with convincing evidence
 - **stop** — end supervision without stopping the worker
 
