@@ -37,110 +37,13 @@ and has passed concurrent-worker, restart, portability, and idle smoke trials.
 
 ## Current status
 
-Stage 1 is implemented. It can bind goals to existing workers, show their live
-state, fence worker identity, and observe lifecycle transitions without model
-calls or worker mutation.
+The supervisor can bind goals to Codex workers, observe their progress through
+native session messages, make bounded review decisions (leave, steer, ask_human,
+recover, accept, stop), and survive Pi and worker restarts by reloading durable
+goal checkpoints. Goals are created conversationally or via `/supervise`.
+A low-frequency global review catches failures visible only across goals.
 
-Stage 2a uses the worker's ordinary native agent messages as review evidence.
-The worker does not know about Herdr or the supervisor. A small observation
-adapter resolves the exact native session supplied by Herdr and returns only
-new assistant messages; terminal output is a bounded fallback, not the normal
-contract. The Pi session exposes only supervisor tools, so it cannot become a
-second worker by reading or modifying the worker's workspace.
-
-Stage 2b adds one nearest-deadline timer across all bindings. It is a recovery
-safety net, not a polling loop: only due workers wake, and signals received
-during a review coalesce until that review settles.
-
-Stage 2c keeps the model side equally simple: one persistent Pi supervisor
-session receives one explicitly scoped worker-review request at a time. Workers
-still run concurrently. Signals for other workers coalesce in memory until the
-current review settles; no separate model session, context store, or durable
-review queue is introduced unless testing proves it necessary.
-
-Stage 2d adds a low-frequency global safety net for failures that only become
-visible across goals. About once an hour, and once after an overdue restart,
-the same supervisor receives one compact snapshot of current goal checkpoints,
-worker states, waits, and runtime health. It identifies affected goals but does
-not inspect full logs or act on several workers. Execution code coalesces the
-signal and queues each affected goal through the existing focused review path.
-Focused reviews and human turns remain higher priority. The small checkpoint in
-`goals/.supervisor/global-review.json` stores only review times and hashes; it
-is runtime state, not a goal, queue, or second supervisor.
-
-A live three-worker trial confirmed that this shared session kept Alpha, Beta,
-and Gamma evidence separate, reviewed every worker, and removed all three goal
-bindings after acceptance. Worker messages are evidence, not supervisor
-instructions; the supervisor keeps its own voice when reporting a decision.
-
-Stage 3 has now been exercised in live mode. Each Herdr signal starts one
-bounded review turn: observe the exact worker once, then leave it alone or apply
-one decision. Steering ends the turn. A later worker event starts a fresh turn,
-so the supervisor cannot poll while waiting for the worker. A controlled run
-verified `observe -> steer`, followed by a later `observe -> finish` with exact
-result evidence.
-
-The reviewed worker remains the only source of completion evidence for its
-goal. When its next step depends on another supervised worker, the supervisor
-can read the existing all-worker status and relay known progress instead of
-asking the human to coordinate panes. This adds no relay service or new state.
-If that worker is already settled, the same leave action can record one
-concrete peer or external wait and schedule a bounded recheck without prompting
-the worker merely to wait. A direct peer wait records that exact worker, so its
-next change immediately wakes the dependent goal. Shared capacity may have one
-active user or probe, but an idle or externally blocked worker does not reserve
-unused capacity while other goals could move.
-
-The same session also supports a genuine human decision without another task or
-queue: one review can observe and ask a concrete question while leaving the
-worker untouched; the human's reply steers that worker once, and its next Herdr
-event resumes normal review. The question retains a bounded review time, so the
-supervisor later checks whether the answer is still necessary or useful work
-can proceed without it.
-
-Restart and failure-edge trials are also passing. If Pi stops while a steered
-worker runs, resuming the same Pi session reloads the binding checkpoint,
-observes only new evidence, and accepts without repeating the steer. A replaced
-pane occupant fails closed. In the live refusal trial, preserved review history
-let the model recognize repeated ineffective steering and ask the human. Code
-enforces one action per review; it does not add a semantic retry counter.
-
-Restart does not force a model turn for every healthy worker. Concrete wait
-conditions and their exact review deadlines live in `current.json`; restart
-restores those deadlines and checks bounded native worker evidence before
-reviewing a settled wait early. Expired waits, linked-worker changes, new
-evidence, and real failures wake immediately. Each due review reconfirms the
-blocker, seeks a safe mitigation, and continues independent useful work before
-waiting again. This keeps human input responsive as the number of concurrent
-goals grows.
-
-The recovery path has also been verified end to end. The model chooses only to
-continue the goal. When an exact Codex process stopped but its original Herdr
-pane remained, execution code resumed that native Codex session and carried the
-continuation atomically; when the process was still present, the same action
-prompted it normally. A missing pane or changed identity still fails closed.
-Herdr does not emit an event when a newly started agent becomes interactive, so
-this automatic recovery branch uses Herdr's bounded readiness handshake; normal
-supervision remains event-driven and performs no readiness polling.
-
-Stage 5 removes the old shared binding file. The live extension now loads one
-directory per goal once at startup, keeps active projections and scheduling hints
-only in memory, and records every
-completed `leave`, `steer`, `ask_human`, `accept`, or explicit stop in
-the local checkpoint and audit. A live two-worker trial accepted independent
-Alpha and Beta results, and a restart trial resumed the same Pi conversation,
-same goal, same worker, and same Codex session without replaying its journal.
-With no active goal, the supervisor remained idle with no state transition or
-model turn during the observation window. A separate trial restarted while a
-human choice was pending, regenerated the concrete question, delivered the
-answer to the same worker once, and accepted its resulting evidence.
-
-The supervisor can now accept a goal conversationally as well: it forms
-completion criteria, keeps its own tab focused, chooses whether the goal joins
-an active related-work tab or starts a new unfocused tab, starts Codex there,
-records the exact binding, and sends the goal. Multiple related workers may
-share one tab. Manual pane creation and `/supervise` are retained only as
-explicit operator controls.
+See [CHANGELOG.md](CHANGELOG.md) for the full development history.
 
 ## Try it
 
@@ -300,6 +203,7 @@ host or cluster boundary and keep the Herdr socket private.
 
 ## Documents
 
+- [Changelog](CHANGELOG.md)
 - [Research landscape](docs/research.md)
 - [Proof-of-concept design](docs/poc-design.md)
 
