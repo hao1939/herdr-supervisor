@@ -155,6 +155,7 @@ test("state updates atomically replace the current view and advance its revision
   await runningGoal(root);
   const updated = await updateGoalState("g_test", (current) => {
     current.progress = "The focused proof passes; live behavior remains.";
+    current.reviewAt = "2026-08-28T10:10:00.000Z";
     current.evidence.push("test output: 12/12 passed");
     current.lastDecision = {
       decision: "steer",
@@ -166,8 +167,18 @@ test("state updates atomically replace the current view and advance its revision
   }, root, () => "2026-08-28T10:05:00.000Z");
 
   assert.equal(updated.revision, 2);
+  assert.equal(updated.reviewAt, "2026-08-28T10:10:00.000Z");
   assert.equal((await loadGoalState("g_test", root)).progress, "The focused proof passes; live behavior remains.");
   assert.equal(JSON.parse(await readFile(goalPaths("g_test", root).current, "utf8")).revision, 2);
+});
+
+test("the local checkpoint rejects a malformed exact review time", async () => {
+  const root = await goalsRoot();
+  await runningGoal(root);
+  await assert.rejects(updateGoalState("g_test", (current) => {
+    current.reviewAt = "later";
+    return current;
+  }, root), /reviewAt must be an ISO timestamp/);
 });
 
 test("concurrent local updates for one goal are serialized", async () => {

@@ -502,9 +502,13 @@ review interval.
 `reviewAt` is an absolute ISO timestamp bounded to the next 24 hours. Execution
 code supplies the normal review interval when the model omits it; the model
 copies a later time only when current evidence provides a real exact retry
-boundary. A linked peer event may wake the goal earlier. The condition and
-deadline are checkpointed and restored after restart. A bounded native-evidence check suppresses restored
-no-change lifecycle noise; new evidence and real failures still wake promptly.
+boundary. The same field can accompany a `steer` decision when a worker should
+continue now but one named operation must be checked at an exact later time.
+A linked peer event may wake the goal earlier. Exact deadlines are checkpointed,
+restored after restart, and never suppressed as routine activity. A bounded
+native-evidence check suppresses routine working/no-change model turns; new
+evidence, exact deadlines, settled workers, and real failures still wake
+promptly.
 Every review states its exact current UTC time so the model compares like-for-like
 timestamps rather than guessing from the conversation date.
 
@@ -598,10 +602,12 @@ a supervisor review. It is a recovery safety net, not a claim that the worker
 made no progress and not merely an idle terminal.
 
 A live worker that is still working remains working. Its next useful checkpoint
-belongs in progress, not in a wait condition. A wait is recorded only after the
+belongs in progress, not in a wait condition. If current evidence gives an
+exact retry boundary, the decision also records `reviewAt`; this is scheduling,
+not a claim that the whole worker is waiting. A wait is recorded only after the
 worker settles on a concrete external or peer condition that can resume it.
-This keeps the human view truthful and lets quiet-working review suppression
-apply normally.
+This keeps the human view truthful and lets routine quiet-working checks remain
+cheap without losing known retry boundaries.
 
 Use one nearest-deadline timer for all registered workers. Deadlines are
 temporary scheduling hints, not durable goal truth:

@@ -108,7 +108,8 @@ Herdr event or review deadline wakes it, then observes the worker once and makes
 exactly one decision:
 
 - **leave** — healthy progress, sleep until the next event
-- **steer** — send one goal-aware instruction to the same worker
+- **steer** — send one goal-aware instruction to the same worker, optionally
+  preserving an exact time when that instruction must be checked again
 - **ask_human** — a concrete question when your authority or information is needed
 - **recover** — resume the exact Codex session and paused native Goal when the
   process has exited, without waiting at an interactive confirmation

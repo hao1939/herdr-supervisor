@@ -26,6 +26,7 @@ export function bindingFromRecord(record) {
     constraints: [...record.contract.constraints],
     evidence: [...record.state.evidence],
     progress: record.state.progress,
+    reviewAt: record.state.reviewAt,
     lastDecision: record.state.lastDecision,
     awaitingHuman: record.state.lastDecision?.decision === "ask_human",
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
@@ -116,13 +117,15 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
   };
   const at = options.at || new Date().toISOString();
   const answeredPreviousQuestion = binding.lastDecision?.decision === "ask_human";
-  if (binding.wait || answeredPreviousQuestion) {
+  if (binding.wait || binding.reviewAt || answeredPreviousQuestion) {
     await updateGoalState(goalId, (state) => {
       delete state.wait;
+      delete state.reviewAt;
       if (answeredPreviousQuestion) delete state.lastDecision;
       return state;
     }, root, () => at);
     delete binding.wait;
+    delete binding.reviewAt;
     if (answeredPreviousQuestion) {
       delete binding.lastDecision;
       binding.awaitingHuman = false;
@@ -170,6 +173,8 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);
     current.lastDecision = { decision, at, action: input.action };
+    if (input.reviewAt) current.reviewAt = input.reviewAt;
+    else delete current.reviewAt;
     if (input.wait) current.wait = structuredClone(input.wait);
     else delete current.wait;
     if (input.terminal) current.terminal = { ...input.terminal, at };

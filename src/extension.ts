@@ -154,7 +154,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     let runtime = runtimeGoals.get(binding.goalId);
     if (!runtime) {
       runtime = {
-        nextReviewAt: binding.wait?.reviewAt,
+        nextReviewAt: binding.wait?.reviewAt || binding.reviewAt,
         lastReviewStateChangeSeq: 0,
         awaitingHuman: binding.lastDecision?.decision === "ask_human",
         missingDecisionRetries: 0,
@@ -218,6 +218,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       updatedAt: state.updatedAt,
       evidence: [...state.evidence],
       progress: state.progress,
+      reviewAt: state.reviewAt,
       lastDecision: state.lastDecision,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
@@ -497,21 +498,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }
       : currentDecision;
     const runtime = runtimeFor(binding);
-    const progressAge = Date.now() - Date.parse(binding.updatedAt || "");
     if (
       signal?.deadline
       && !binding.wait
+      && !binding.reviewAt
       && agent?.agent_status === "working"
       && !identityMismatch(binding, agent, pane)
-      && Number.isFinite(progressAge)
-      && progressAge < reviewIntervalMs() * 2
     ) {
       try {
         const observation = await observeWorker(binding, client);
         if (!observation.messages.length) {
-          // One quiet interval is not enough evidence to interrupt active
-          // work. The durable progress age stops this suppression after the
-          // next interval even when global review is disabled.
+          // A routine health deadline with no new evidence is not worth a
+          // focused model turn. The low-frequency global review remains the
+          // independent safety net for a worker that only appears healthy.
           runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
           runtime.lastNoticeKey = decision.key;
           scheduleReview(binding);
@@ -1152,7 +1151,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const reviewAt = params.review_at?.trim()
         || (waitingFor ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
       const reviewDeadline = Date.parse(reviewAt || "");
-      if (reviewAt && (reviewDeadline < Date.now() + 1000 || reviewDeadline > Date.now() + 86_400_000)) {
+      if (reviewAt && (!Number.isFinite(reviewDeadline) || reviewDeadline < Date.now() + 1000 || reviewDeadline > Date.now() + 86_400_000)) {
         return text(`Cannot schedule review_at ${reviewAt}; it must be between one second and 24 hours from now.`, true);
       }
       const progress = waitingFor
@@ -1169,6 +1168,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             reviewAt,
             ...(effectiveWaitingOnPane ? { paneId: effectiveWaitingOnPane } : {}),
           } : undefined,
+          reviewAt: waitingFor ? undefined : params.review_at?.trim(),
           evidence: params.evidence || binding.evidence,
           observationCursor: runtimeFor(binding).pendingCursor,
         });
@@ -1193,6 +1193,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       message: Type.String({ minLength: 1 }),
       evidence: Evidence,
+      review_at: Type.Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 time, no more than 24 hours ahead, when this instruction must be reconsidered even if the worker still appears busy. Omit it for routine event-driven supervision." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1201,6 +1202,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       try {
         const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+        const reviewAt = params.review_at?.trim();
+        const reviewDeadline = Date.parse(reviewAt || "");
+        if (reviewAt && (!Number.isFinite(reviewDeadline) || reviewDeadline < Date.now() + 1000 || reviewDeadline > Date.now() + 86_400_000)) {
+          return text(`Cannot schedule review_at ${reviewAt}; it must be between one second and 24 hours from now.`, true);
+        }
         const agent = findAgent(snapshot, params.pane_id);
         const pane = findPane(snapshot, params.pane_id);
         const mismatch = identityMismatch(
@@ -1272,10 +1278,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             action: params.message.trim(),
             evidence: params.evidence || continuedBinding.evidence,
             observationCursor: runtimeFor(continuedBinding).pendingCursor,
+            reviewAt,
           });
           cacheCheckpoint(continuedBinding, result.state);
           runtimeFor(continuedBinding).pendingCursor = undefined;
-          scheduleReview(continuedBinding);
+          scheduleReview(continuedBinding, reviewAt ? reviewDeadline - Date.now() : reviewIntervalMs());
           const warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
           const resultText = resumed
             ? `Resumed the exact ${binding.agentSession.agent} session and native Goal in ${params.pane_id}, then asked it to continue.`

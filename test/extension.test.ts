@@ -1138,7 +1138,77 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   pi.events.get("session_shutdown")();
 });
 
-test("a routine deadline stays quiet when a working worker has no new evidence", async (t) => {
+test("an exact steering review survives restart and cannot be suppressed as quiet work", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-steer-review-"));
+  const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
+  const sessionFile = join(sessions, "worker.jsonl");
+  const line = `${JSON.stringify({
+    timestamp: "2026-08-29T14:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Retry at the exact boundary." }] },
+  })}\n`;
+  await writeFile(sessionFile, line);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  await registerSupervisedGoal(exactWorker, {
+    objective: "Complete one retry after its exact boundary.",
+    acceptance: ["The retry succeeds."],
+  }, root, { goalId: "g_exact_steer_review" });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let agentStatus = "idle";
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: agentStatus,
+    state_change_seq: agentStatus === "working" ? 3 : 2,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const reviewAt = new Date(Date.now() + 1400).toISOString();
+  const firstPi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(firstPi);
+  await firstPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => firstPi.messages.length === 1);
+  await firstPi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  agentStatus = "working";
+  const invalid = await firstPi.tools.get("supervisor_steer").execute("invalid-steer", {
+    pane_id: worker.paneId,
+    message: "Do not send this malformed schedule.",
+    review_at: "later",
+  });
+  assert.equal(invalid.isError, true);
+  assert.equal(prompts, 0, "an invalid deadline must fail before prompting the worker");
+  const steer = await firstPi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Retry once at the exact boundary.",
+    review_at: reviewAt,
+  });
+  assert.equal(steer.isError, false);
+  assert.equal(prompts, 1);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.reviewAt, reviewAt);
+  firstPi.events.get("session_shutdown")();
+
+  const secondPi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(secondPi);
+  await secondPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(secondPi.messages.length, 0, "the exact boundary must survive without firing early");
+  await waitFor(() => secondPi.messages.length === 1);
+  assert.match(secondPi.messages[0].content, /review deadline elapsed/);
+  secondPi.events.get("session_shutdown")();
+});
+
+test("routine deadlines stay quiet while a working worker has no new evidence", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-working-quiet-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
   const sessionFile = join(sessions, "worker.jsonl");
@@ -1183,13 +1253,12 @@ test("a routine deadline stays quiet when a working worker has no new evidence",
   assert.equal(pi.messages.length, 0, "a routine deadline without new evidence must not spend a model review");
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.progress, "The long-running validation is active.");
-  await new Promise((resolve) => setTimeout(resolve, 900));
-  await waitFor(() => pi.messages.length === 1);
-  assert.match(pi.messages[0].content, /review deadline elapsed/);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal(pi.messages.length, 0, "a second unchanged health check must not spend a model review");
   pi.events.get("session_shutdown")();
 });
 
-test("a live checkpoint refreshes quiet-review age in memory", async (t) => {
+test("a live checkpoint keeps later unchanged working checks quiet", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-live-checkpoint-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
   const sessionFile = join(sessions, "worker.jsonl");
@@ -1241,9 +1310,8 @@ test("a live checkpoint refreshes quiet-review age in memory", async (t) => {
 
   await new Promise((resolve) => setTimeout(resolve, 1150));
   assert.equal(pi.messages.length, 1, "the fresh live checkpoint must suppress one quiet review interval");
-  await new Promise((resolve) => setTimeout(resolve, 900));
-  await waitFor(() => pi.messages.length === 2);
-  assert.match(pi.messages[1].content, /review deadline elapsed/);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal(pi.messages.length, 1, "unchanged working evidence remains a cheap check rather than a model review");
   pi.events.get("session_shutdown")();
 });
 

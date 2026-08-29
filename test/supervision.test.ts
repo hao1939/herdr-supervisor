@@ -219,6 +219,17 @@ test("a settled future wait shows its condition and review time", () => {
   assert.doesNotMatch(output, /review current evidence/);
 });
 
+test("a working goal shows its exact promised review time", () => {
+  const current = binding({
+    progress: "The worker is advancing independent work before the retry.",
+    reviewAt: "2026-08-29T09:53:30.000Z",
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "working" }))));
+  assert.match(output, /Next: review when the worker settles or blocks/);
+  assert.match(output, /Supervisor rechecks at: 2026-08-29T09:53:30.000Z/);
+  assert.doesNotMatch(output, /waiting/);
+});
+
 test("changed worker identity takes priority over an earlier human question", () => {
   const current = binding({
     lastDecision: {

@@ -19,6 +19,7 @@ const stateFields = new Set([
   "worker",
   "evidence",
   "progress",
+  "reviewAt",
   "lastDecision",
   "wait",
   "terminal",
@@ -140,6 +141,12 @@ export function validateGoalState(state) {
   stringArray(state.evidence, "goal state evidence");
   if (state.progress !== undefined && typeof state.progress !== "string") {
     throw new Error("goal state progress must be a string");
+  }
+  if (state.reviewAt !== undefined) {
+    requiredString(state.reviewAt, "goal state reviewAt");
+    if (!Number.isFinite(Date.parse(state.reviewAt))) {
+      throw new Error("goal state reviewAt must be an ISO timestamp");
+    }
   }
   if (state.lastDecision !== undefined) {
     if (!state.lastDecision || typeof state.lastDecision !== "object") {
