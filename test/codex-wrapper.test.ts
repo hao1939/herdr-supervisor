@@ -28,8 +28,6 @@ test("restored Codex sessions resume idle in their saved directory without a pro
   assert.deepEqual(run(script, ["resume", "session-1"]), [
     "-c",
     'tui.resume_cwd="session"',
-    "--disable",
-    "goals",
     "resume",
     "session-1",
   ]);
@@ -38,8 +36,6 @@ test("restored Codex sessions resume idle in their saved directory without a pro
 test("an explicit Codex resume-directory choice remains authoritative", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["-c", 'tui.resume_cwd="current"', "resume", "session-1", "Continue now."]), [
-    "--disable",
-    "goals",
     "-c",
     'tui.resume_cwd="current"',
     "resume",
@@ -50,5 +46,10 @@ test("an explicit Codex resume-directory choice remains authoritative", async ()
 
 test("new Codex sessions do not receive a resume-directory override", async () => {
   const script = await wrapper();
-  assert.deepEqual(run(script, ["Start work."]), ["--disable", "goals", "Start work."]);
+  assert.deepEqual(run(script, ["Start work."]), ["Start work."]);
+});
+
+test("the wrapper preserves native Codex Goals", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["--enable", "goals", "Start work."]), ["--enable", "goals", "Start work."]);
 });

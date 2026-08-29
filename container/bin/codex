@@ -1,11 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Herdr Supervisor owns the durable goal lifecycle. Keeping Codex's separate
-# goal feature enabled would add a second authority and can leave a restored
-# worker waiting at an interactive "resume goal" prompt.
 previous=""
-has_disabled_goals=0
 has_full_access=0
 has_hook_trust=0
 has_resume_cwd=0
@@ -13,9 +9,6 @@ after_resume=0
 for argument in "$@"; do
   if [ "$argument" = "resume" ]; then
     after_resume=1
-  fi
-  if [ "$previous" = "--disable" ] && [ "$argument" = "goals" ]; then
-    has_disabled_goals=1
   fi
   if [ "$argument" = "--dangerously-bypass-approvals-and-sandbox" ]; then
     has_full_access=1
@@ -33,10 +26,6 @@ for argument in "$@"; do
   esac
   previous="$argument"
 done
-
-if [ "$has_disabled_goals" -eq 0 ]; then
-  set -- --disable goals "$@"
-fi
 
 # Codex otherwise asks which directory to use when Herdr restores a session
 # from a terminal whose current directory differs from the session's saved

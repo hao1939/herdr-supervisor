@@ -5,7 +5,7 @@ without replacing Herdr or introducing another task system.
 
 1. You describe an outcome to the supervisor.
 2. The supervisor forms the goal and acceptance criteria, starts one Codex worker
-   for it, and sleeps.
+   with a native `/goal` for it, and sleeps.
 3. A meaningful Herdr event wakes the supervisor.
 4. The supervisor reads current evidence and either leaves the worker alone,
    continues it, asks you, or accepts the result.
@@ -102,7 +102,8 @@ the supervisor cannot become a second worker.
 
 The supervisor creates goals conversationally. It forms explicit completion
 criteria, places a Codex worker in a new or related tab, records the binding,
-and delivers the goal. Workers run independently. The supervisor sleeps until a
+and projects the canonical contract into that worker's native Codex Goal.
+Codex owns the ordinary work-check-continue loop. The supervisor sleeps until a
 Herdr event or review deadline wakes it, then observes the worker once and makes
 exactly one decision:
 

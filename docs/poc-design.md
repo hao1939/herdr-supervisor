@@ -1,7 +1,7 @@
 # Proof-of-concept design
 
-**Status:** Stages 1-5 implemented and verified, including live goal-backed restart
-**Date:** 2026-08-28
+**Status:** Implemented; native Codex Goal execution is in live validation
+**Date:** 2026-08-29
 
 ## 1. Purpose
 
@@ -30,8 +30,9 @@ pause, ask questions, stall, crash, or produce an incomplete result.
    change-producing Git work it uses isolated worktrees when concurrent work
    or branch safety requires them. One goal may use several worktrees or
    repositories; this does not create more supervisor goals.
-5. The worker continues independently. The supervisor is not consuming model
-   turns while nothing meaningful is happening.
+5. The worker runs the contract as a native Codex Goal and continues its own
+   work-check loop. The supervisor is not the worker's continuation engine and
+   consumes no model turns while nothing meaningful is happening.
 6. Herdr events wake the supervisor when review is useful.
 7. The supervisor explains important progress, asks only necessary human
    questions, and steers the same worker when more work is possible.
@@ -45,7 +46,7 @@ There are only three active roles:
 | Role       | Responsibility                                                |
 | ---------- | ------------------------------------------------------------- |
 | Human      | States goals, provides decisions, and retains final authority |
-| Worker     | Executes one goal in one ordinary Herdr pane                  |
+| Worker     | Pursues one contract as a native Codex Goal in a Herdr pane   |
 | Supervisor | Reviews evidence and helps that worker continue               |
 
 Herdr remains the runtime:
@@ -57,8 +58,8 @@ Herdr remains the runtime:
 
 A goal binding is not another task. It does not have its own pending/running/
 waiting lifecycle. It only attaches human intent and acceptance criteria to one
-worker identity. The worker receives that goal normally and does not need to
-know that Herdr or a supervisor exists.
+worker identity. The worker receives that canonical contract through its native
+Codex Goal and never calls Herdr or Supervisor APIs.
 
 ## 4. Boundary
 
@@ -129,19 +130,22 @@ the supervisor model first compares the intended outcome with the active goals.
 If one already represents the outcome, it continues that exact goal and worker.
 Otherwise one `supervisor_start_goal` call mechanically creates a pane, starts
 Codex, captures its native session, records the goal contract and binding, and
-delivers the goal. The model decides reuse, objective, relevant context,
-acceptance criteria, constraints, starting directory, and placement; code only
-validates and executes that decision. When the repository has concurrent
-workers, that fact and the isolated-worktree requirement belong in the goal
-contract so Codex does not have to infer unseen collaboration.
+sets a native `/goal` that points to that canonical contract. The model decides
+reuse, objective, relevant context, acceptance criteria, constraints, starting
+directory, and placement; code only validates and executes that decision. When
+the repository has concurrent workers, that fact and the isolated-worktree
+requirement belong in the goal contract so Codex does not have to infer unseen
+collaboration.
 
 The same rule applies when the human changes an active goal. The model first
 identifies the fitting existing goal, constructs its complete revised contract,
 and calls one `supervisor_update_goal` operation. Code validates and atomically
 replaces `goal.json`, refreshes the active projection, journals the material
-change, checks the exact worker identity, and sends the revised contract to that
-same worker. A refinement never creates a sibling goal and durable requirements
-are never represented only by a transient steering message.
+change, checks the exact worker identity, and tells that same worker to re-read
+the contract. The native Goal keeps the stable contract path; it is an execution
+projection, not another authority. A refinement never creates a sibling goal
+and durable requirements are never represented only by a transient steering
+message.
 
 Workflow policy is contract data, not keyword logic in the extension. If a
 project requires code changes to use isolated worktrees, focused clean PRs,
@@ -294,15 +298,14 @@ identity is the native agent session; the Herdr pane is its routing slot and
 the terminal ID is a transient location checkpoint. When Herdr restores the
 same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
-Supervised Codex processes disable Codex's separate native goal feature. The
-Herdr goal contract remains the single durable authority, so restoring the
-exact session cannot introduce a second interactive "resume goal" gate.
-An automatic Herdr restore reopens the exact session without starting another
-worker turn. The supervisor decides from the goal checkpoint whether useful
-work should continue. The model chooses one `steer` decision; execution code
-prompts a present process or carries the continuation atomically in an
-exact-session resume when that process has exited. Transport is not a model
-decision.
+Supervised Codex processes keep native Goals enabled. `goal.json` remains the
+single portable authority; the native Goal is the worker's persisted execution
+loop and points back to that file. Codex therefore owns ordinary
+work-check-continue behavior, while the Supervisor owns cross-worker judgment,
+stale recovery, human escalation, and independent acceptance. An automatic
+Herdr restore reopens the exact session and its native Goal. When the process
+has exited, one Supervisor `steer` decision resumes that exact session and
+carries current evidence with it. Transport is not a model decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
@@ -932,13 +935,19 @@ stores or displays copied live status as goal truth.
 - **Implemented:** a neutral, file-safe first turn initializes Codex's native
   session before the goal is bound and delivered. If identity capture fails,
   retrying the same goal reuses the pending pane instead of creating another.
+- **Implemented:** after binding, the executor sets one native Codex `/goal`
+  whose objective points to the canonical `goal.json`. Native Goals remain
+  enabled on new and restored sessions. Contract refinements update the same
+  file and notify the same worker instead of creating or synchronizing a second
+  durable goal record.
 - **Implemented:** the restart-stable worker name is derived from the goal UUID
   but shortened to Herdr's 32-character agent-name limit. The retained 108-bit
   UUID prefix keeps names practical to correlate without using an invalid full
   UUID.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
-  Codex worker, persists one goal contract and checkpoint, sends both the goal
-  and acceptance criteria, and keeps human focus on the supervisor pane.
+  Codex worker with native Goals enabled, persists one goal contract and
+  checkpoint, sends `/goal` only after the binding exists, and keeps human
+  focus on the supervisor pane.
 - **Verified:** an isolated refinement test adds exact-commit ADO and focused-PR
   requirements to one running goal, preserves its worker identity and active
   goal count, updates `goal.json`, appends `goal_refined` audit history, and
@@ -1027,7 +1036,7 @@ The PoC is successful when all of these are demonstrated:
   `state_change_seq`. This confirms the observe path does not prompt the worker.
 - Requiring a worker to call `herdr-supervisor update` would leak infrastructure
   into goal execution. Stage 2 instead introduces a supervisor-side observation
-  adapter; Codex workers remain unchanged and unaware of supervision.
+  adapter. Codex reads its canonical goal file but never calls Supervisor APIs.
 - A controlled Stage 2a run exposed an important boundary failure: a normal Pi
   session could inspect the worker's repository with built-in coding tools.
   The dedicated supervisor now activates only its identity-fenced supervisor

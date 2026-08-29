@@ -158,16 +158,14 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(startRequest.args, [
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
-    "--disable",
-    "goals",
   ]);
   assert.match(deliveredPrompts[0].prompt, /Initialize this worker session only/);
   assert.equal(deliveredPrompts[0].bindingExists, false);
   assert.doesNotMatch(deliveredPrompts[0].prompt, /Fix the focused regression/);
-  assert.match(deliveredPrompts[1].prompt, /Fix the focused regression/);
-  assert.match(deliveredPrompts[1].prompt, /Another worker is validating the same repository/);
-  assert.match(deliveredPrompts[1].prompt, /The focused test passes/);
-  assert.match(deliveredPrompts[1].prompt, /Make changes only in an isolated worktree/);
+  assert.match(deliveredPrompts[1].prompt, /^\/goal /);
+  assert.ok(deliveredPrompts[1].prompt.length <= 4006);
+  assert.match(deliveredPrompts[1].prompt, /goal\.json/);
+  assert.match(deliveredPrompts[1].prompt, /single canonical objective/);
   assert.match(deliveredPrompts[1].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[1].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[1].prompt, /distinguish missing convenience tooling/);
@@ -269,7 +267,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
     focus: false,
   });
   assert.equal(startRequest.paneId, started.pane_id);
-  assert.deepEqual(startRequest.args, ["--disable", "goals"]);
+  assert.deepEqual(startRequest.args, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -309,13 +307,11 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.deepEqual(contract.constraints, ["Use an isolated worktree and a focused PR."]);
   assert.equal(prompts.length, 1);
   assert.equal(prompts[0].paneId, worker.paneId);
-  assert.match(prompts[0].prompt, /complete durable contract/);
-  assert.match(prompts[0].prompt, /exact commit passes the ADO pipeline/);
-  assert.match(prompts[0].prompt, /every other worker's worktree as read-only/);
-  assert.match(prompts[0].prompt, /genuinely missing capability, authority, or information/);
-  assert.match(prompts[0].prompt, /operation that failed, where it ran, the effective identity or authority/);
-  assert.match(prompts[0].prompt, /authentication in one host, container, identity, or service changes another/);
-  assert.match(prompts[0].prompt, /Write progress and final results in plain language/);
+  assert.match(prompts[0].prompt, /refined the canonical contract/);
+  assert.match(prompts[0].prompt, /goal\.json/);
+  assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /Keep the native Goal active/);
+  assert.match(prompts[0].prompt, /plain language/);
   assert.equal((await readAudit("g_test", root)).at(-1).type, "goal_refined");
   pi.events.get("session_shutdown")();
 });
@@ -617,7 +613,8 @@ test("retry reuses a pending initialized pane instead of creating another worker
   assert.equal(starts, 1);
   assert.equal(prompts.length, 2);
   assert.match(prompts[0], /Initialize this worker session only/);
-  assert.match(prompts[1], /Complete one bounded diagnostic/);
+  assert.match(prompts[1], /^\/goal /);
+  assert.match(prompts[1], /goal\.json/);
   assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   pi.events.get("session_shutdown")();
 });
@@ -1466,8 +1463,6 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   assert.equal(resumes, 1);
   assert.equal(prompts, 0);
   assert.deepEqual(resumeRequest.args, [
-    "--disable",
-    "goals",
     "resume",
     worker.agentSession.value,
     "Continue from current goal evidence.",

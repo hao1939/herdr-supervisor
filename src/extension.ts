@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
+import { goalPaths } from "./goal-store.ts";
 import {
   loadSupervisorGoals,
   installSupervisorGoal,
@@ -77,7 +78,7 @@ function text(value: string, isError = false) {
 }
 
 function codexLaunchArgs() {
-  const args = ["--disable", "goals"];
+  const args: string[] = [];
   if (process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS === "1") {
     args.unshift(
       "--dangerously-bypass-approvals-and-sandbox",
@@ -88,6 +89,28 @@ function codexLaunchArgs() {
 }
 
 const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap. Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information. Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it. Do not assume that authentication in one host, container, identity, or service changes another.";
+
+function nativeGoalPrompt(goalId: string) {
+  const contract = resolve(goalPaths(goalId).contract);
+  const objective = [
+    `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
+    "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
+    workerExecutionBoundary,
+    "Work proactively from current evidence. Keep independent useful paths moving when one path waits. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
+    "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
+  ].join(" ");
+  if (objective.length > 4000) throw new Error("the native Codex Goal objective exceeds 4,000 characters");
+  return `/goal ${objective}`;
+}
+
+function refinedGoalPrompt(goalId: string) {
+  return [
+    `The human refined the canonical contract for your active Codex Goal at ${JSON.stringify(resolve(goalPaths(goalId).contract))}.`,
+    "Re-read the complete goal.json now and continue under its latest objective, context, completion criteria, and constraints.",
+    "Keep the native Goal active until the revised contract is fully proved. If you had already completed it, start the same native Goal again from this canonical contract.",
+    "Write progress and final results in plain language.",
+  ].join(" ");
+}
 
 function workerNameForGoal(goalId: string) {
   const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
@@ -611,6 +634,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     } catch (error) {
       warning = ` Monitoring setup failed: ${error.message}`;
     }
+    if (mode() === "live") {
+      try {
+        await client.promptAgent(paneId, nativeGoalPrompt(binding.goalId));
+      } catch (error) {
+        warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
+      }
+    }
     if (wake && shouldWake(binding, agent, findPane(snapshot, paneId)).wake) void handleSignal(binding.paneId);
     return { binding, warning };
   }
@@ -647,7 +677,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       goalCache?.unstarted.push(installed);
     }
     const goalId = installed.goalId;
-    const contract = installed.contract;
     const workerName = workerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
     if (!paneId) {
@@ -713,31 +742,20 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       throw new Error(`Started identified Codex worker ${paneId}, but could not record its goal: ${error.message}. The goal was not delivered; do not create another worker.`);
     }
 
-    const prompt = [
-      "Pursue this goal until it is fully achieved:",
-      contract.objective,
-      "",
-      ...(contract.context.length ? ["Relevant context:", ...contract.context.map((item) => `- ${item}`), ""] : []),
-      "Completion criteria:",
-      ...contract.acceptance.map((item) => `- ${item}`),
-      "",
-      ...(contract.constraints.length ? ["Constraints:", ...contract.constraints.map((item) => `- ${item}`), ""] : []),
-      workerExecutionBoundary,
-      "",
-      "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
-      "",
-      "Work proactively from current repository evidence. Do not stop after a plan or one attempt. If blocked, report the exact blocker and what would unblock it.",
-    ].join("\n");
+    const prompt = nativeGoalPrompt(goalId);
     let promptWarning = "";
     try {
       await client.promptAgent(paneId, prompt);
     } catch (error) {
-      promptWarning = ` Initial delivery could not be confirmed: ${error.message}.`;
+      promptWarning = ` Initial native Goal delivery could not be confirmed: ${error.message}.`;
     }
     return { ...result, existing: false, warning: `${result.warning}${promptWarning}` };
   }
 
-  async function startInstalled(paneId: string, goalId: string, { wake = true } = {}) {
+  async function startInstalled(paneId: string, goalId: string, {
+    wake = true,
+    activateNativeGoal = false,
+  } = {}) {
     const snapshot = await client.snapshot();
     const agent = findAgent(snapshot, paneId);
     if (!agent) throw new Error(`no observable agent in ${paneId}`);
@@ -751,6 +769,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       await armReviewTimer();
     } catch (error) {
       warning = ` Monitoring setup failed: ${error.message}`;
+    }
+    if (activateNativeGoal && mode() === "live") {
+      try {
+        await client.promptAgent(paneId, nativeGoalPrompt(goalId));
+      } catch (error) {
+        warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
+      }
     }
     if (wake && shouldWake(binding, agent, findPane(snapshot, paneId)).wake) void handleSignal(binding.paneId);
     return { binding, warning };
@@ -843,20 +868,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         scheduleReview(result.binding);
         let deliveryWarning = "";
         if (mode() === "live") {
-          const prompt = [
-            "The human refined this existing goal. Continue the same goal under this complete durable contract:",
-            result.contract.objective,
-            "",
-            ...(result.contract.context.length ? ["Relevant context:", ...result.contract.context.map((item) => `- ${item}`), ""] : []),
-            "Completion criteria:",
-            ...result.contract.acceptance.map((item) => `- ${item}`),
-            "",
-            ...(result.contract.constraints.length ? ["Constraints:", ...result.contract.constraints.map((item) => `- ${item}`)] : []),
-            "",
-            workerExecutionBoundary,
-            "",
-            "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
-          ].join("\n");
+          const prompt = refinedGoalPrompt(binding.goalId);
           try {
             const snapshot = await client.snapshot();
             const mismatch = identityMismatch(
@@ -1356,7 +1368,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       try {
         const result = goalParts[0] === "--goal-id"
-          ? await startInstalled(paneId, goalParts[1])
+          ? await startInstalled(paneId, goalParts[1], { activateNativeGoal: true })
           : await register(paneId, goal, []);
         let warning = result.warning;
         try { await refreshStatus(ctx); }
