@@ -150,11 +150,27 @@ test("stopped process is shown as recoverable supervision work, not changed iden
   assert.equal(
     formatWorker(liveWorker(current, snapshot(null))),
     [
-      "codex w1:p2 · process stopped",
-      "  Goal: finish the goal",
+      "Goal · needs attention",
+      "  Objective: finish the goal",
+      "  Worker: codex w1:p2 · process stopped",
       "  Next: supervisor should review whether the exact session can resume",
     ].join("\n"),
   );
+});
+
+test("a finished worker turn is not presented as a finished goal", () => {
+  const current = binding({
+    goalId: "g_open",
+    progress: "Repository work is complete, but required external proof is still pending.",
+    wait: {
+      condition: "the external evaluation to publish its result",
+      reviewAt: "2026-08-29T09:53:30.000Z",
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "done" }))));
+  assert.match(output, /^Goal g_open · waiting$/m);
+  assert.match(output, /Worker: codex w1:p2 · turn finished/);
+  assert.doesNotMatch(output, /^Goal g_open · (done|completed)$/m);
 });
 
 test("a persisted human question is the next action shown after restart", () => {

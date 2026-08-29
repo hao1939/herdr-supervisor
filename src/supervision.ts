@@ -106,12 +106,31 @@ function compact(value, limit) {
 
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
-  const state = processStopped ? "process stopped" : mismatch ? "identity changed" : agent.agent_status;
-  const name = `${binding.agentSession.agent} ${binding.paneId}`;
-  const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
   const awaitingHuman = binding.awaitingHuman || binding.lastDecision?.decision === "ask_human";
+  const goalState = mismatch
+    ? "needs attention"
+    : awaitingHuman
+      ? "waiting for you"
+      : binding.wait
+        ? "waiting"
+        : agent.agent_status === "working"
+          ? "working"
+          : "needs review";
+  const workerState = processStopped
+    ? "process stopped"
+    : mismatch
+      ? "identity changed"
+      : agent.agent_status === "done"
+        ? "turn finished"
+        : agent.agent_status;
+  const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
+  const worker = `${binding.agentSession.agent} ${binding.paneId}`;
   const goal = detailed ? binding.goal : compact(binding.goal, 240);
-  const lines = [`${name} · ${state}`, `  ${goalLabel}: ${goal}`];
+  const lines = [
+    `${goalLabel} · ${goalState}`,
+    `  Objective: ${goal}`,
+    `  Worker: ${worker} · ${workerState}`,
+  ];
   if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
