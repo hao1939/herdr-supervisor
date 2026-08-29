@@ -311,8 +311,117 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /exact commit passes the ADO pipeline/);
   assert.match(prompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(prompts[0].prompt, /genuinely missing capability, authority, or information/);
+  assert.match(prompts[0].prompt, /operation that failed, where it ran, the effective identity or authority/);
+  assert.match(prompts[0].prompt, /authentication in one host, container, identity, or service changes another/);
   assert.match(prompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal((await readAudit("g_test", root)).at(-1).type, "goal_refined");
+  pi.events.get("session_shutdown")();
+});
+
+test("one transient human fact queues separate focused reviews without rewriting goals", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reconsider-"));
+  const secondWorker = {
+    paneId: "w1:p7",
+    terminalId: "term_second",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_second" },
+  };
+  await registerSupervisedGoal(worker, {
+    objective: "Finish the first exact goal.",
+    context: ["Keep the durable first context."],
+    acceptance: ["The first proof passes."],
+  }, root, { goalId: "g_first" });
+  await registerSupervisedGoal(secondWorker, {
+    objective: "Finish the second exact goal.",
+    context: ["Keep the durable second context."],
+    acceptance: ["The second proof passes."],
+  }, root, { goalId: "g_second" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const agents = [
+    snapshot({ agent_status: "working", state_change_seq: 4 }).agents[0],
+    {
+      pane_id: secondWorker.paneId,
+      terminal_id: secondWorker.terminalId,
+      agent_status: "working",
+      state_change_seq: 5,
+      agent_session: secondWorker.agentSession,
+      interactive_ready: true,
+    },
+  ];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents,
+    panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async (paneId) => ({
+    read: { text: `${paneId} is still pursuing its goal.`, truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const before = await Promise.all([
+    loadGoalContract("g_first", root),
+    loadGoalContract("g_second", root),
+  ]);
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const queued = await pi.tools.get("supervisor_reconsider").execute("reconsider", {
+    pane_ids: [worker.paneId, secondWorker.paneId],
+    reason: "the authenticated service path now succeeds",
+  });
+
+  assert.equal(queued.isError, false);
+  assert.match(queued.content[0].text, /after this turn/);
+  assert.equal(pi.messages.length, 0, "focused reviews must not interrupt the human turn");
+  assert.deepEqual(await Promise.all([
+    loadGoalContract("g_first", root),
+    loadGoalContract("g_second", root),
+  ]), before, "transient evidence must not rewrite portable goal contracts");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /w1:p2/);
+  assert.match(pi.messages[0].content, /authenticated service path now succeeds/);
+  const fanout = await pi.tools.get("supervisor_reconsider").execute("nested-reconsider", {
+    pane_ids: [secondWorker.paneId],
+    reason: "do both in one review",
+  });
+  assert.equal(fanout.isError, true);
+  assert.match(fanout.content[0].text, /event reviews cannot fan out/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-first", { pane_id: worker.paneId });
+  const firstDecision = await pi.tools.get("supervisor_leave").execute("leave-first", {
+    pane_id: worker.paneId,
+    progress: "The first worker is actively pursuing the newly usable path.",
+  });
+  assert.equal(firstDecision.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /w1:p7/);
+  assert.match(pi.messages[1].content, /authenticated service path now succeeds/);
+  pi.events.get("session_shutdown")();
+});
+
+test("reconsideration rejects an unknown worker without scheduling work", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_reconsider").execute("unknown", {
+    pane_ids: ["w1:p999"],
+    reason: "new execution evidence",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /unsupervised worker/);
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.messages.length, 0);
   pi.events.get("session_shutdown")();
 });
 

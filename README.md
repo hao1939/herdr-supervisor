@@ -157,7 +157,10 @@ tests or generators rather than risking writes in somebody else's worktree.
 Likewise, a missing command or default credential helper is not automatically a
 human blocker. The worker first exhausts safe environment capabilities and
 separates missing convenience tooling from genuinely missing authority or
-information.
+information. A reported access blocker names the exact failed operation, where
+it ran, the effective identity or authority, the target service, and the
+observed error. A login or permission in another host, container, identity, or
+service is not treated as evidence that the blocked boundary is authorized.
 
 The human may refine an active goal in ordinary conversation. The supervisor
 replaces that same goal's complete portable contract, records the change in its
@@ -166,6 +169,19 @@ on temporary steering. Project-specific requirements remain explicit contract
 content. For example, a code-changing AKS goal can require an isolated branch
 and worktree, one focused clean PR with overlaps reconciled, and an appropriate
 ADO pipeline pass tied to the exact proposed commit before acceptance.
+
+A new execution fact is different from a goal refinement. A login, throttle,
+peer update, resolved wait, or request to recheck current work does not rewrite
+portable goal files. The supervisor selects the affected existing goals once;
+the runtime queues one ordinary focused review for each after the human turn.
+Each review still observes one worker and makes one decision, so several goals
+can react without one oversized cross-worker turn or accidental contract churn.
+
+Independent workers and pipeline runs proceed concurrently by default. The
+supervisor does not invent a shared-capacity reservation or make one worker a
+gatekeeper for another. It coordinates or serializes work only when current
+evidence shows an actual throttle, quota, service limit, resource collision, or
+exact conflicting operation.
 
 For exact operator control, `/supervise <pane> <goal>` still attaches an
 existing worker, and `/supervise <pane> --goal-id <id>` starts a copied portable
