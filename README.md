@@ -134,7 +134,7 @@ worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 ```sh
 npm install
 npm run check    # tsc --noEmit + shell syntax
-npm test         # 95 tests
+npm test         # node:test suite
 ```
 
 ## Documents

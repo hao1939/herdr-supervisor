@@ -934,7 +934,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_global_result",
     label: "Finish global supervision review",
-    description: "Finish the current compact all-goal review. Report relationships or system problems and select existing goals for later focused review. This tool never prompts or changes workers directly.",
+    description: "Finish the current compact all-goal review. Findings report relationships or system problems and name the goals they concern; they do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
     parameters: Type.Object({
       summary: Type.String({ minLength: 1, maxLength: 4000 }),
       findings: Type.Array(Type.Object({
@@ -990,13 +990,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       globalState = nextState;
       const reasons = new Map<string, string[]>();
-      for (const finding of findings) {
-        for (const goalId of finding.affectedGoalIds) {
-          const items = reasons.get(goalId) || [];
-          items.push(`${finding.problem}: ${finding.evidence.join("; ")}`);
-          reasons.set(goalId, items);
-        }
-      }
       for (const item of params.reconsider) {
         const items = reasons.get(item.goal_id) || [];
         items.push(item.reason.trim());
@@ -1017,7 +1010,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (isNewFinding) {
         pi.sendMessage({
           customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Rechecking: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
+          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Affects: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
           display: true,
         }, { triggerTurn: false, deliverAs: "followUp" });
       }
