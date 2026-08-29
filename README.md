@@ -51,7 +51,7 @@ Start Pi in a Herdr pane from a stable supervisor directory, separate from any
 worker project:
 
 ```sh
-supervisor_extension=/path/to/herdr-supervisor/extension.ts
+supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi --no-builtin-tools -e "$supervisor_extension" --supervisor-mode live
 ```

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { isAbsolute } from "node:path";
-import { HerdrClient } from "./src/herdr-client.ts";
+import { HerdrClient } from "./herdr-client.ts";
 import {
   loadSupervisorGoals,
   installSupervisorGoal,
@@ -10,9 +10,9 @@ import {
   refreshWorkerLocation,
   registerSupervisedGoal,
   startInstalledGoal,
-} from "./src/goal-registry.ts";
-import { formatObservation, observeWorker } from "./src/observation.ts";
-import { ReviewTurnFence } from "./src/review-turn.ts";
+} from "./goal-registry.ts";
+import { formatObservation, observeWorker } from "./observation.ts";
+import { ReviewTurnFence } from "./review-turn.ts";
 import {
   buildGlobalSnapshot,
   DEFAULT_GLOBAL_REVIEW_INTERVAL_MS,
@@ -22,7 +22,7 @@ import {
   loadGlobalReviewState,
   saveGlobalReviewState,
   stableHash,
-} from "./src/global-review.ts";
+} from "./global-review.ts";
 import {
   captureIdentity,
   findAgent,
@@ -37,7 +37,7 @@ import {
   recoveryRequest,
   reviewMessage,
   shouldWake,
-} from "./src/supervision.ts";
+} from "./supervision.ts";
 
 const Pane = Type.String({ description: "Exact Herdr pane ID, for example w1:p2" });
 const EvidenceItems = Type.Array(

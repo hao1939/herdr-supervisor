@@ -1,1 +1,1 @@
-export { default } from "/opt/herdr-supervisor/extension.ts";
+export { default } from "/opt/herdr-supervisor/src/extension.ts";

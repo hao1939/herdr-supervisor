@@ -26,7 +26,7 @@ RUN apt-get update \
 RUN mkdir -p /app /opt/herdr-supervisor \
     && chown node:node /app
 
-COPY --chown=node:node extension.ts package.json /opt/herdr-supervisor/
+COPY --chown=node:node package.json /opt/herdr-supervisor/
 COPY --chown=node:node bin /opt/herdr-supervisor/bin
 COPY --chown=node:node container /opt/herdr-supervisor/container
 COPY --chown=node:node src /opt/herdr-supervisor/src
