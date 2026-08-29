@@ -25,7 +25,7 @@
     "check": "tsc --noEmit && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
   },
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=26"
   },
   "dependencies": {
     "typebox": "^1.1.38"

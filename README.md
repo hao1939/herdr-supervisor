@@ -78,7 +78,7 @@ after an unexpected failure; an explicit operator stop remains stopped.
 
 If you have Herdr and Pi installed locally, you can load the extension directly.
 
-**Prerequisites:** Node.js >= 22.6, Herdr running, Pi installed.
+**Prerequisites:** Node.js >= 26, Herdr running, Pi installed.
 
 ```sh
 git clone https://github.com/hao1939/herdr-supervisor.git
