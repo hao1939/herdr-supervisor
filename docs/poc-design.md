@@ -253,9 +253,11 @@ approval, or preferred route. Its acceptance criteria say what must ultimately
 be true without unnecessarily making one implementation path the whole goal.
 The objective and criteria cover the same scope and time horizon. A finite
 review cycle may be a goal when that is what the human requested; it must not be
-used as a quiet substitute for an ongoing or broader improvement outcome. If
-the intended outcome is ongoing, the supervisor asks for or proposes an honest
-convergence boundary instead of making the first report, run, or PR terminal.
+used as a quiet substitute for an ongoing or broader improvement outcome. An
+ongoing outcome is recorded as a standing learn-and-improve loop: each review,
+fixed backlog, PR, merge, or raised threshold is a checkpoint that feeds the
+next cycle. The supervisor does not invent a finite convergence boundary to
+make it finishable; only an explicit human instruction stops or replaces it.
 When progress becomes stale, the LLM reassesses both the execution and the
 contract: whether the outcome is still coherent, useful, current, and
 achievable, and whether the observed blocker stops the outcome or only one

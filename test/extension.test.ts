@@ -443,6 +443,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
+  assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
+  assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
   pi.events.get("session_shutdown")();
 });
 

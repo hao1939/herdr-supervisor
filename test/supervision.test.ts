@@ -272,6 +272,8 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /final worker message, PR, run, report, or completed review cycle as evidence/);
   assert.match(message, /whole objective and every acceptance criterion at the same declared scope and time horizon/);
   assert.match(message, /criteria quietly narrow a broader or ongoing objective to one milestone/);
+  assert.match(message, /standing improvement loop/);
+  assert.match(message, /Do not invent a finite convergence boundary for standing work/);
   assert.match(message, /Compare all timestamps with the UTC review time above/);
 });
 
