@@ -452,6 +452,10 @@ scarce capacity, one active worker may use or probe it. That responsibility ends
 when the worker becomes
 idle or externally blocked: linked peers wake and the LLM decides which useful
 work can proceed. This avoids both a resource scheduler and an idle convoy.
+The peer identity is only an early-wake hint: an invalid or self-referential
+hint is dropped while the concrete condition and bounded deadline remain
+authoritative. Events improve latency; they are never required for eventual
+reconsideration.
 
 `leave` must be explicit. Ordinary model prose is not a completed decision,
 because the runtime must distinguish a deliberate choice from a malformed,

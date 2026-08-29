@@ -1027,6 +1027,40 @@ test("a settled worker wait receives a bounded review timestamp by default", asy
   pi.events.get("session_shutdown")();
 });
 
+test("an invalid optional peer hint cannot discard a valid bounded external wait", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The exact build is still active and has a retry boundary.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The exact external build remains active.",
+    waiting_for: "build 123 to finish",
+    waiting_on_pane: ":",
+    review_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+
+  assert.equal(leave.isError, false);
+  assert.match(leave.content[0].text, /ignored unknown worker/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.wait.condition, "build 123 to finish");
+  assert.equal(stored.wait.paneId, undefined);
+  assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
+  pi.events.get("session_shutdown")();
+});
+
 test("settlement preserves the deadline chosen by a completed decision", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

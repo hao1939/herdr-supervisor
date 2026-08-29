@@ -1060,22 +1060,28 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
       const waitingFor = params.waiting_for?.trim();
       const waitingOnPane = params.waiting_on_pane?.trim();
+      let effectiveWaitingOnPane = waitingOnPane;
+      let warning = "";
       if (waitingOnPane && !waitingFor) {
         return text("waiting_on_pane requires a concrete waiting_for condition.", true);
       }
       if (waitingOnPane === params.pane_id) {
-        return text("A worker cannot wait on itself.", true);
+        effectiveWaitingOnPane = undefined;
+        warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
       }
-      if (waitingOnPane) {
-        const peer = await bindingForPane(waitingOnPane);
+      if (effectiveWaitingOnPane) {
+        const peerPane = effectiveWaitingOnPane;
+        const peer = await bindingForPane(peerPane);
         if (!peer) {
-          return text(`Cannot wait on ${waitingOnPane} because it is not an active supervised worker. Reconsider the goal from current facts.`, true);
-        }
-        const peerAgent = findAgent(snapshot, waitingOnPane);
-        const peerProblem = identityMismatch(peer, peerAgent, findPane(snapshot, waitingOnPane));
-        if (peerProblem || peerAgent?.agent_status !== "working") {
-          const peerState = peerProblem || `worker is ${peerAgent?.agent_status || "not running"}`;
-          return text(`Cannot leave ${params.pane_id} waiting on ${waitingOnPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
+          warning = `\nPeer wake warning: ignored unknown worker ${peerPane}; the bounded review deadline remains active.`;
+          effectiveWaitingOnPane = undefined;
+        } else {
+          const peerAgent = findAgent(snapshot, peerPane);
+          const peerProblem = identityMismatch(peer, peerAgent, findPane(snapshot, peerPane));
+          if (peerProblem || peerAgent?.agent_status !== "working") {
+            const peerState = peerProblem || `worker is ${peerAgent?.agent_status || "not running"}`;
+            return text(`Cannot leave ${params.pane_id} waiting on ${peerPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
+          }
         }
       }
       if (agent.agent_status !== "working" && !waitingFor) {
@@ -1090,7 +1096,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`
         : params.progress.trim();
-      let warning = "";
       if (mode() === "live") {
         const result = await recordDecision(binding, "leave", {
           progress,
@@ -1100,14 +1105,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           wait: waitingFor ? {
             condition: waitingFor,
             reviewAt,
-            ...(waitingOnPane ? { paneId: waitingOnPane } : {}),
+            ...(effectiveWaitingOnPane ? { paneId: effectiveWaitingOnPane } : {}),
           } : undefined,
           evidence: params.evidence || binding.evidence,
           observationCursor: runtimeFor(binding).pendingCursor,
         });
         cacheCheckpoint(binding, result.state);
         runtimeFor(binding).pendingCursor = undefined;
-        if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
+        if (result.auditError) warning += `\nAudit warning: ${result.auditError.message}`;
       }
       scheduleReview(binding, reviewAt ? reviewDeadline - Date.now() : reviewIntervalMs());
       reviewTurn.close(params.pane_id);
