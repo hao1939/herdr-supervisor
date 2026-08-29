@@ -159,7 +159,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
     "-c",
-    'projects."/app/projects/sample-project".trust_level="trusted"',
+    'projects={"/app/projects/sample-project"={trust_level="trusted"}}',
     "Initialize this worker session only. Do not inspect or change files. Wait for the goal.",
   ]);
   assert.match(deliveredPrompts[0].prompt, /^\/goal /);

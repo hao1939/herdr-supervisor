@@ -85,7 +85,7 @@ function codexLaunchArgs(cwd?: string) {
       "--dangerously-bypass-hook-trust",
     );
     if (cwd) {
-      args.push("-c", `projects.${JSON.stringify(resolve(cwd))}.trust_level="trusted"`);
+      args.push("-c", `projects={${JSON.stringify(resolve(cwd))}={trust_level="trusted"}}`);
     }
   }
   return args;
