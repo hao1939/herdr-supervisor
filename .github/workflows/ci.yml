@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm run check
       - run: npm test
 
@@ -44,3 +45,26 @@ jobs:
         with:
           context: .
           push: false
+          load: true
+          tags: herdr-supervisor:ci
+      - name: Smoke test container
+        run: |
+          # Verify the entrypoint installs the extension symlink
+          docker run --rm herdr-supervisor:ci \
+            test -L /home/node/.pi/agent/extensions/herdr-supervisor.ts
+
+          # Verify the symlink target exists and re-exports the extension
+          docker run --rm herdr-supervisor:ci \
+            grep -q 'extension.ts' /home/node/.pi/agent/extensions/herdr-supervisor.ts
+
+          # Verify all source modules were copied
+          docker run --rm herdr-supervisor:ci \
+            sh -c 'for f in extension goal-store goal-registry herdr-client observation review-turn supervision global-review; do test -f /opt/herdr-supervisor/src/$f.ts || exit 1; done'
+
+          # Verify the Pi and Codex shims are executable
+          docker run --rm herdr-supervisor:ci \
+            sh -c 'test -x /usr/local/bin/pi && test -x /usr/local/bin/codex'
+
+          # Verify Herdr binary is present and executable
+          docker run --rm herdr-supervisor:ci \
+            herdr --version
