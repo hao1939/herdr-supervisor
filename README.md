@@ -151,3 +151,4 @@ npm test         # node:test suite
 Herdr owns runtime truth. The supervisor owns judgment about whether a
 registered worker is still moving toward its stated goal. It must not copy
 Herdr's lifecycle into a parallel queue, task graph, or status database.
+test
