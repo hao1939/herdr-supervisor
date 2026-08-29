@@ -337,14 +337,15 @@ register worker
   -> review immediately when the worker is already settled or blocked
   -> return immediately
 
-For a worker created by the supervisor, one neutral first turn initializes the
-native Codex session without inspecting or changing files. Identity capture and
-the durable goal binding then happen before the goal prompt is delivered. If
-the native session hook does not report an identity, the new worker remains
-unassigned and the goal is not sent. Retrying the same goal reuses that pane
-instead of creating another. This makes integration failure visible without
-creating orphan work. The dedicated image includes the runtime required by
-Herdr's managed Codex hook.
+For a worker created by the supervisor, its launch includes one neutral first
+turn that initializes the native Codex session without inspecting or changing
+files. Supplying that turn as a launch argument avoids racing terminal input
+against Codex startup. Identity capture and the durable goal binding then happen
+before the goal prompt is delivered. If the native session hook does not report
+an identity, the new worker remains unassigned and the goal is not sent.
+Retrying the same goal reuses that pane instead of creating another. This makes
+integration failure visible without creating orphan work. The dedicated image
+includes the runtime required by Herdr's managed Codex hook.
 
 Herdr event or stale deadline
   -> coalesce latest signal for that worker
@@ -932,9 +933,11 @@ stores or displays copied live status as goal truth.
 - **Implemented:** uncertain initial prompt delivery leaves one visible,
   supervised worker for later reconciliation and explicitly forbids creating a
   replacement merely because transport confirmation failed.
-- **Implemented:** a neutral, file-safe first turn initializes Codex's native
-  session before the goal is bound and delivered. If identity capture fails,
-  retrying the same goal reuses the pending pane instead of creating another.
+- **Implemented:** Codex launches with a neutral, file-safe first turn so native
+  session creation does not race a separate terminal injection. The goal is
+  bound and delivered only after that identity exists. If identity capture
+  fails, retrying the same goal reuses the pending pane instead of creating
+  another.
 - **Implemented:** after binding, the executor sets one native Codex `/goal`
   whose objective points to the canonical `goal.json`. Native Goals remain
   enabled on new and restored sessions. Contract refinements update the same

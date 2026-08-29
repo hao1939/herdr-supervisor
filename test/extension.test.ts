@@ -158,19 +158,18 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(startRequest.args, [
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
+    "Initialize this worker session only. Do not inspect or change files. Wait for the goal.",
   ]);
-  assert.match(deliveredPrompts[0].prompt, /Initialize this worker session only/);
-  assert.equal(deliveredPrompts[0].bindingExists, false);
-  assert.doesNotMatch(deliveredPrompts[0].prompt, /Fix the focused regression/);
-  assert.match(deliveredPrompts[1].prompt, /^\/goal /);
-  assert.ok(deliveredPrompts[1].prompt.length <= 4006);
-  assert.match(deliveredPrompts[1].prompt, /goal\.json/);
-  assert.match(deliveredPrompts[1].prompt, /single canonical objective/);
-  assert.match(deliveredPrompts[1].prompt, /every other worker's worktree as read-only/);
-  assert.match(deliveredPrompts[1].prompt, /Create another goal-owned worktree/);
-  assert.match(deliveredPrompts[1].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[1].prompt, /Write progress and final results in plain language/);
-  assert.equal(deliveredPrompts[1].bindingExists, true);
+  assert.match(deliveredPrompts[0].prompt, /^\/goal /);
+  assert.equal(deliveredPrompts[0].bindingExists, true);
+  assert.ok(deliveredPrompts[0].prompt.length <= 4006);
+  assert.match(deliveredPrompts[0].prompt, /goal\.json/);
+  assert.match(deliveredPrompts[0].prompt, /single canonical objective/);
+  assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
+  assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
+  assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
+  assert.equal(deliveredPrompts[0].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
@@ -267,7 +266,9 @@ test("the supervisor can place related workers in the same tab", async (t) => {
     focus: false,
   });
   assert.equal(startRequest.paneId, started.pane_id);
-  assert.deepEqual(startRequest.args, []);
+  assert.deepEqual(startRequest.args, [
+    "Initialize this worker session only. Do not inspect or change files. Wait for the goal.",
+  ]);
   pi.events.get("session_shutdown")();
 });
 
@@ -534,9 +535,7 @@ test("a missing native session cannot leave assigned work running unsupervised",
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /goal was not delivered or bound/);
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /Initialize this worker session only/);
-  assert.doesNotMatch(prompts[0], /Complete one full validation/);
+  assert.equal(prompts.length, 0);
   assert.equal((await loadSupervisorGoals(root)).active.length, 0);
   assert.equal((await loadSupervisorGoals(root)).unstarted.length, 1);
   pi.events.get("session_shutdown")();

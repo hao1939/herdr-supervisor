@@ -89,6 +89,7 @@ function codexLaunchArgs() {
 }
 
 const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap. Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information. Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it. Do not assume that authentication in one host, container, identity, or service changes another.";
+const workerInitializationPrompt = "Initialize this worker session only. Do not inspect or change files. Wait for the goal.";
 
 function nativeGoalPrompt(goalId: string) {
   const contract = resolve(goalPaths(goalId).contract);
@@ -679,6 +680,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
+    const retryingPendingStart = Boolean(paneId);
     if (!paneId) {
       const supervisorPane = process.env.HERDR_PANE_ID;
       if (!supervisorPane) throw new Error("Start the supervisor inside a Herdr pane before creating a worker.");
@@ -718,14 +720,22 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
       if (!pendingAgent) {
         try {
-          await client.startAndWaitAgent({ name: workerName, kind: "codex", paneId, args: codexLaunchArgs() });
-          await client.promptAgent(paneId, "Initialize this worker session only. Do not inspect or change files. Wait for the goal.");
+          await client.startAndWaitAgent({
+            name: workerName,
+            kind: "codex",
+            paneId,
+            args: [...codexLaunchArgs(), workerInitializationPrompt],
+          });
         } catch (error) {
           throw new Error(`Created worker pane ${paneId}, but Codex did not initialize: ${error.message}. Retry this same goal; do not create another worker.`);
         }
       } else if (!pendingAgent.agent_session) {
-        await client.promptAgent(paneId, "Initialize this worker session only. Do not inspect or change files. Wait for the goal.");
+        await client.promptAgent(paneId, workerInitializationPrompt);
       }
+    }
+
+    if (retryingPendingStart) {
+      await client.promptAgent(paneId, workerInitializationPrompt);
     }
 
     try {
