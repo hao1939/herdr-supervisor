@@ -69,6 +69,7 @@ type RuntimeGoal = {
   awaitingHuman: boolean;
   missingDecisionRetries: number;
   pendingCursor?: object;
+  pendingObservationHasMessages?: boolean;
 };
 
 function text(value: string, isError = false) {
@@ -491,6 +492,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (!decision.wake || runtime.lastNoticeKey === decision.key) return;
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
+    runtime.pendingObservationHasMessages = undefined;
     const currentMode = mode();
     if (currentMode !== "observe") {
       activeReviewPane = paneId;
@@ -1026,6 +1028,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         });
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = observation.cursor;
+        runtime.pendingObservationHasMessages = observation.messages.length > 0;
         runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
         scheduleReview(binding);
         await armReviewTimer();
@@ -1064,6 +1067,17 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       let warning = "";
       if (waitingOnPane && !waitingFor) {
         return text("waiting_on_pane requires a concrete waiting_for condition.", true);
+      }
+      const previousReviewAt = Date.parse(binding.wait?.reviewAt || "");
+      if (
+        waitingFor
+        && !binding.wait?.paneId
+        && agent.agent_status !== "working"
+        && Number.isFinite(previousReviewAt)
+        && previousReviewAt <= Date.now()
+        && runtimeFor(binding).pendingObservationHasMessages === false
+      ) {
+        return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
       }
       if (waitingOnPane === params.pane_id) {
         effectiveWaitingOnPane = undefined;

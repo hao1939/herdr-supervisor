@@ -1149,6 +1149,18 @@ test("restart restores a settled wait without a no-change review before its dead
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /review deadline elapsed/);
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-due", {
+    pane_id: worker.paneId,
+  });
+  assert.match(observation.content[0].text, /No new assistant messages/);
+  const staleLeave = await pi.tools.get("supervisor_leave").execute("leave-stale", {
+    pane_id: worker.paneId,
+    progress: "The external condition may still be active.",
+    waiting_for: "the service retry boundary",
+    review_at: new Date(Date.now() + 60_000).toISOString(),
+  });
+  assert.equal(staleLeave.isError, true);
+  assert.match(staleLeave.content[0].text, /Cannot extend this expired external wait without fresh worker evidence/);
   pi.events.get("session_shutdown")();
 });
 

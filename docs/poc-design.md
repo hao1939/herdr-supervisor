@@ -816,6 +816,9 @@ stores or displays copied live status as goal truth.
   and explicit stops in the audit journal without making it runtime authority.
 - **Implemented:** explicit `leave` uses bounded `reviewAt`; a turn that only narrates
   an intention is not complete.
+- **Implemented:** an expired external wait cannot be extended from an unchanged
+  settled-worker observation; the same worker must check the condition or take
+  another concrete action.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads
   bounded evidence; the audit never advances the cursor.
