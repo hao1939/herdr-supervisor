@@ -1,7 +1,6 @@
 # Herdr Supervisor design
 
 **Status:** Current design
-**Updated:** 2026-08-30
 
 ## Purpose
 
