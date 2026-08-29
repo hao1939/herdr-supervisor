@@ -934,7 +934,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_global_result",
     label: "Finish global supervision review",
-    description: "Finish the current compact all-goal review. Report relationships or system problems and select existing goals for later focused review. This tool never prompts or changes workers directly.",
+    description: "Finish the current compact all-goal review. Findings report relationships or system problems and name the goals they concern; they do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
     parameters: Type.Object({
       summary: Type.String({ minLength: 1, maxLength: 4000 }),
       findings: Type.Array(Type.Object({
@@ -990,13 +990,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       globalState = nextState;
       const reasons = new Map<string, string[]>();
-      for (const finding of findings) {
-        for (const goalId of finding.affectedGoalIds) {
-          const items = reasons.get(goalId) || [];
-          items.push(`${finding.problem}: ${finding.evidence.join("; ")}`);
-          reasons.set(goalId, items);
-        }
-      }
       for (const item of params.reconsider) {
         const items = reasons.get(item.goal_id) || [];
         items.push(item.reason.trim());
@@ -1017,7 +1010,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (isNewFinding) {
         pi.sendMessage({
           customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Rechecking: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
+          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Affects: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
           display: true,
         }, { triggerTurn: false, deliverAs: "followUp" });
       }
@@ -1069,7 +1062,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and omit waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
@@ -1093,6 +1086,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       let warning = "";
       if (waitingOnPane && !waitingFor) {
         return text("waiting_on_pane requires a concrete waiting_for condition.", true);
+      }
+      if (agent.agent_status === "working" && waitingFor) {
+        return text("A working worker is active, not waiting. Omit waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
       }
       const previousReviewAt = Date.parse(binding.wait?.reviewAt || "");
       if (

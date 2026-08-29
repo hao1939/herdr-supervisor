@@ -586,6 +586,12 @@ The stale-progress deadline means a registered goal has gone too long without
 a supervisor review. It is a recovery safety net, not a claim that the worker
 made no progress and not merely an idle terminal.
 
+A live worker that is still working remains working. Its next useful checkpoint
+belongs in progress, not in a wait condition. A wait is recorded only after the
+worker settles on a concrete external or peer condition that can resume it.
+This keeps the human view truthful and lets quiet-working review suppression
+apply normally.
+
 Use one nearest-deadline timer for all registered workers. Deadlines are
 temporary scheduling hints, not durable goal truth:
 
@@ -600,10 +606,12 @@ reviews still read current Herdr state and bounded native messages because an
 event may have been missed or delayed. In addition, one deliberately
 low-frequency global review receives only the compact current projection across
 goals. It catches circular waits, several goals affected by one runtime fault,
-and a stuck supervision path that no single goal can explain. It only names
-affected goals; code queues their normal focused reviews. The next focused
-deadline starts after its review turn settles, so a slow model turn cannot
-enqueue another review behind itself.
+and a stuck supervision path that no single goal can explain. A finding names
+the goals it concerns for a human-readable report. Only the separate
+`reconsider` decision queues an ordinary focused review, so reporting a shared
+condition does not itself spend one model turn per affected goal. The next
+focused deadline starts after its review turn settles, so a slow model turn
+cannot enqueue another review behind itself.
 
 The global signal coalesces to one pending review and runs after human and
 focused work. It uses the same Pi session and must end with one structured
@@ -757,9 +765,10 @@ stores or displays copied live status as goal truth.
 - **Implemented:** one low-frequency timer coalesces a compact review across
   current goal checkpoints, Herdr worker states, waits, and supervisor health.
   Human turns and focused reviews always drain first.
-- **Implemented:** one structured global result validates every affected goal
-  before any routing, then queues the existing focused review path for each
-  valid goal. It never reads worker logs or acts on several workers itself.
+- **Implemented:** one structured global result validates every referenced goal
+  before recording findings, and queues the existing focused review path only
+  for explicit `reconsider` decisions. It never reads worker logs or acts on
+  several workers itself.
 - **Implemented:** a small atomic checkpoint restores the next deadline after
   restart, retries one missing decision, and suppresses unchanged findings.
 - **Verified:** focused tests cover compact context, priority, atomic reference
@@ -956,8 +965,9 @@ The PoC is successful when all of these are demonstrated:
 8. Replacing a pane occupant fails closed instead of steering the wrong agent.
 9. Herdr remains the sole source of live worker state.
 10. Idle operation performs no continuous scan or terminal-log read. The only
-    cross-goal LLM call is a low-frequency compact health review, which routes
-    any finding through ordinary focused reviews.
+    cross-goal LLM call is a low-frequency compact health review. It reports
+    cross-goal findings once and routes only explicit reconsideration through
+    ordinary focused reviews.
 11. Sequential reviews of two different workers remain correctly scoped while
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn
