@@ -61,7 +61,7 @@ const supervisorTools = [
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 type SupervisorMode = "observe" | "dry-run" | "live";
-type ReviewSignal = { force: boolean; reason: string; key: string };
+type ReviewSignal = { force: boolean; reason: string; key: string; deadline?: boolean };
 type RuntimeGoal = {
   nextReviewAt?: string;
   lastNoticeKey?: string;
@@ -316,6 +316,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           force: true,
           reason: "review deadline elapsed",
           key: `deadline:${binding.nextReviewAt || "recovery"}`,
+          deadline: true,
         });
       }
     } finally {
@@ -468,6 +469,28 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }
       : currentDecision;
     const runtime = runtimeFor(binding);
+    if (
+      signal?.deadline
+      && !binding.wait
+      && agent?.agent_status === "working"
+      && !identityMismatch(binding, agent, pane)
+    ) {
+      try {
+        const observation = await observeWorker(binding, client);
+        if (!observation.messages.length) {
+          // A routine focused review has no new evidence to judge. Keep the
+          // worker moving and let the low-frequency global review catch a
+          // process that remains "working" for an implausibly long time.
+          runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
+          runtime.lastNoticeKey = decision.key;
+          scheduleReview(binding);
+          return;
+        }
+      } catch {
+        // If the cheap evidence check fails, review rather than hide a
+        // potentially stalled worker.
+      }
+    }
     const waitingUntil = Date.parse(binding.wait?.reviewAt || "");
     if (
       !signal?.force

@@ -1101,6 +1101,54 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   pi.events.get("session_shutdown")();
 });
 
+test("a routine deadline stays quiet when a working worker has no new evidence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-working-quiet-"));
+  const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
+  const sessionFile = join(sessions, "worker.jsonl");
+  const line = `${JSON.stringify({
+    timestamp: "2026-08-28T20:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Work continues." }] },
+  })}\n`;
+  await writeFile(sessionFile, line);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Finish a long-running validation.",
+    acceptance: ["The complete validation is proved."],
+  }, root, { goalId: "g_working_quiet" });
+  await recordDecision(binding, "steer", {
+    progress: "The long-running validation is active.",
+    action: "Continue the validation.",
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
+    evidence: ["The validation started successfully."],
+  }, root);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "working",
+    state_change_seq: 3,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 1150));
+  assert.equal(pi.messages.length, 0, "a routine deadline without new evidence must not spend a model review");
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.progress, "The long-running validation is active.");
+  pi.events.get("session_shutdown")();
+});
+
 test("restart restores a settled wait without a no-change review before its deadline", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-wait-restart-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
