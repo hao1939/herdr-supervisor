@@ -10,9 +10,17 @@ import {
   liveWorker,
   nextReviewDelay,
   recoveryRequest,
-  reviewMessage,
+  reviewDeadline,
   shouldWake,
 } from "../src/supervision.ts";
+import { reviewMessage } from "../src/prompts.ts";
+
+test("review deadlines share one bounded validation rule", () => {
+  const now = Date.parse("2026-08-28T00:00:00.000Z");
+  assert.equal(reviewDeadline("2026-08-28T00:01:00.000Z", now), now + 60_000);
+  assert.throws(() => reviewDeadline("later", now), /between one second and 24 hours/);
+  assert.throws(() => reviewDeadline("2026-08-30T00:00:00.000Z", now), /between one second and 24 hours/);
+});
 
 function agent(overrides = {}) {
   return {

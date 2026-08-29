@@ -1,4 +1,13 @@
 export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
+export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
+
+export function reviewDeadline(reviewAt, now = Date.now()) {
+  const deadline = Date.parse(reviewAt);
+  if (!Number.isFinite(deadline) || deadline < now + 1000 || deadline > now + MAX_REVIEW_DELAY_MS) {
+    throw new Error("review time must be between one second and 24 hours from now");
+  }
+  return deadline;
+}
 
 export function findAgent(snapshot, paneId) {
   return snapshot?.agents?.find((agent) => agent.pane_id === paneId);
@@ -106,7 +115,7 @@ function compact(value, limit) {
 
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
-  const awaitingHuman = binding.awaitingHuman || binding.lastDecision?.decision === "ask_human";
+  const awaitingHuman = binding.lastDecision?.decision === "ask_human";
   const goalState = mismatch
     ? "needs attention"
     : awaitingHuman
@@ -151,20 +160,4 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   }
   else lines.push(`  Next: supervisor should review current evidence`);
   return lines.join("\n");
-}
-
-export function reviewMessage(binding, agent, reason, now = new Date()) {
-  const criteria = binding.acceptance.length
-    ? binding.acceptance.map((item) => `- ${item}`).join("\n")
-    : "- The stated goal is fully achieved with convincing evidence.";
-  const context = binding.context?.length ? binding.context.map((item) => `- ${item}`).join("\n") : "- No additional context.";
-  const constraints = binding.constraints?.length ? binding.constraints.map((item) => `- ${item}`).join("\n") : "- No additional constraints.";
-  const progress = binding.progress || "No completed review has recorded progress yet.";
-  const evidence = binding.evidence?.length
-    ? binding.evidence.slice(-8).map((item) => `- ${item.length > 1000 ? `${item.slice(0, 985)}…[truncated]` : item}`).join("\n")
-    : "- No evidence has been preserved yet.";
-  const wait = binding.wait
-    ? `\n\nCurrent wait\n  ${binding.wait.condition}\n  Review at: ${binding.wait.reviewAt}`
-    : "";
-  return `Worker review · ${binding.agentSession.agent} ${binding.paneId}\nReview time: ${now.toISOString()} (UTC)\n\nThis turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.\n\nGoal\n  ${binding.goal}\n\nRequired context\n${context}\n\nConstraints\n${constraints}\n\nCurrent progress\n  ${progress}${wait}\n\nCurrent evidence\n${evidence}\n\nWhy review now\n  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.\n\nWorker acceptance criteria\n${criteria}\n\nReview\n  Observe this exact worker once. Compare all timestamps with the UTC review time above. Reassess whether the durable goal is still coherent, useful, and achievable, and whether the current blocker stops the whole outcome or only one path. Treat a final worker message, PR, run, report, or completed review cycle as evidence, never as completion by itself. Finish only when current evidence covers the whole objective and every acceptance criterion at the same declared scope and time horizon. If the criteria quietly narrow a broader or ongoing objective to one milestone, continue the remaining outcome or ask the human one concrete correction; do not accept it. When the human's outcome is a standing improvement loop, each inventory pass, fixed backlog, PR, merge, or raised threshold is only a checkpoint: learn from it, raise the rubric, and continue until the human explicitly stops or replaces the goal. Do not invent a finite convergence boundary for standing work. If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there. If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work, alternative proof, or preparation. Leave it waiting again only when fresh evidence shows nothing useful can move and supplies the next exact boundary. If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling. Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.`;
 }

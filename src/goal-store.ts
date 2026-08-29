@@ -32,7 +32,7 @@ const waitFields = new Set(["condition", "reviewAt", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
-const decisions = new Set(["leave", "steer", "ask_human", "recover", "accept", "stop"]);
+const decisions = new Set(["leave", "steer", "ask_human", "accept", "stop"]);
 const writes = new Map();
 
 function serializeWrite(key, operation) {

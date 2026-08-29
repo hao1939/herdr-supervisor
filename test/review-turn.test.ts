@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ReviewTurnFence } from "../src/review-turn.ts";
 
+test("one fence owns both review preparation and the active turn", () => {
+  const turn = new ReviewTurnFence();
+  turn.prepare("w1:p2");
+  assert.equal(turn.isPreparing("w1:p2"), true);
+  assert.equal(turn.isBusy("w1:p2"), true);
+
+  turn.begin("w1:p2");
+  assert.equal(turn.isPreparing(), false);
+  assert.equal(turn.isActive("w1:p2"), true);
+  turn.finishPreparing();
+  assert.equal(turn.isActive("w1:p2"), true);
+
+  turn.end();
+  assert.equal(turn.isBusy(), false);
+});
+
 test("an automated review can observe only its exact worker once", () => {
   const turn = new ReviewTurnFence();
   turn.begin("w1:p2");

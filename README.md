@@ -111,10 +111,12 @@ exactly one decision:
 - **steer** — send one goal-aware instruction to the same worker, optionally
   preserving an exact time when that instruction must be checked again
 - **ask_human** — a concrete question when your authority or information is needed
-- **recover** — resume the exact Codex session and paused native Goal when the
-  process has exited, without waiting at an interactive confirmation
 - **accept** — goal met with convincing evidence
 - **stop** — end supervision without stopping the worker
+
+Exact-session resume is not another model decision. When the model chooses
+**steer** for a stopped Codex process, the executor resumes that same session
+and paused native Goal before delivering the instruction.
 
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
 (execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is
@@ -152,8 +154,9 @@ npm test         # node:test suite
 ## Documents
 
 - [Changelog](CHANGELOG.md)
+- [Current design](docs/design.md)
 - [Research landscape](docs/research.md)
-- [Proof-of-concept design](docs/poc-design.md)
+- [Proof-of-concept validation record](docs/poc-design.md)
 
 ## Design rule
 
