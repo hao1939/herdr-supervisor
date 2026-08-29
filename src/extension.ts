@@ -188,6 +188,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     cacheBinding({
       ...binding,
+      updatedAt: state.updatedAt,
       evidence: [...state.evidence],
       progress: state.progress,
       lastDecision: state.lastDecision,
