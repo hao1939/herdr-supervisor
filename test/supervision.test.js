@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   captureIdentity,
+  dependentBindings,
   dueBindings,
   findPane,
   formatWorker,
@@ -73,6 +74,19 @@ test("bindings without a deadline receive one recovery review", () => {
   const workers = [{ paneId: "w1:p1" }];
   assert.equal(nextReviewDelay(workers), 0);
   assert.deepEqual(dueBindings(workers).map((worker) => worker.paneId), ["w1:p1"]);
+});
+
+test("a worker change selects only waits linked to that exact worker", () => {
+  const workers = [
+    { paneId: "w1:p2", wait: { paneId: "w1:p7" } },
+    { paneId: "w1:p3", wait: { paneId: "w1:p8" } },
+    { paneId: "w1:p4", wait: { condition: "an external approval" } },
+    { paneId: "w1:p7" },
+  ];
+  assert.deepEqual(
+    dependentBindings(workers, "w1:p7").map((worker) => worker.paneId),
+    ["w1:p2"],
+  );
 });
 
 test("working is quiet while settled and blocked states wake review", () => {
@@ -232,7 +246,8 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /supervisor_status to read current recorded peer progress/);
   assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
-  assert.match(message, /If a wait deadline elapsed, continue the due work/);
+  assert.match(message, /confirm that the condition still exists/);
+  assert.match(message, /continue any independent useful work/);
   assert.match(message, /Compare all timestamps with the UTC review time above/);
 });
 

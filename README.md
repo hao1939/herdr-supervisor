@@ -74,13 +74,17 @@ can read the existing all-worker status and relay known progress instead of
 asking the human to coordinate panes. This adds no relay service or new state.
 If that worker is already settled, the same leave action can record one
 concrete peer or external wait and schedule a bounded recheck without prompting
-the worker merely to wait. Shared scarce resources retain one active owner, so
-peer workers do not all repeat the same capacity probe.
+the worker merely to wait. A direct peer wait records that exact worker, so its
+next change immediately wakes the dependent goal. Shared capacity may have one
+active user or probe, but an idle or externally blocked worker does not reserve
+unused capacity while other goals could move.
 
 The same session also supports a genuine human decision without another task or
 queue: one review can observe and ask a concrete question while leaving the
 worker untouched; the human's reply steers that worker once, and its next Herdr
-event resumes normal review.
+event resumes normal review. The question retains a bounded review time, so the
+supervisor later checks whether the answer is still necessary or useful work
+can proceed without it.
 
 Restart and failure-edge trials are also passing. If Pi stops while a steered
 worker runs, resuming the same Pi session reloads the binding checkpoint,
@@ -92,9 +96,11 @@ enforces one action per review; it does not add a semantic retry counter.
 Restart does not force a model turn for every healthy worker. Concrete wait
 conditions and their exact review deadlines live in `current.json`; restart
 restores those deadlines and checks bounded native worker evidence before
-reviewing a settled wait early. Expired waits, new evidence, and real failures
-still wake immediately. This keeps human input responsive as the number of
-concurrent goals grows.
+reviewing a settled wait early. Expired waits, linked-worker changes, new
+evidence, and real failures wake immediately. Each due review reconfirms the
+blocker, seeks a safe mitigation, and continues independent useful work before
+waiting again. This keeps human input responsive as the number of concurrent
+goals grows.
 
 The recovery path has also been verified end to end. The model chooses only to
 continue the goal. When an exact Codex process stopped but its original Herdr

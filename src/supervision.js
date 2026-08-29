@@ -48,6 +48,10 @@ export function nextReviewDelay(workers, now = new Date()) {
   return Math.max(0, Math.min(...deadlines) - timestamp);
 }
 
+export function dependentBindings(workers, paneId) {
+  return workers.filter((worker) => worker.paneId !== paneId && worker.wait?.paneId === paneId);
+}
+
 export function liveWorker(binding, snapshot) {
   const agent = findAgent(snapshot, binding.paneId);
   const pane = findPane(snapshot, binding.paneId);
@@ -111,7 +115,11 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
-  else if (awaitingHuman) lines.push("  Next: answer the supervisor's question above");
+  else if (awaitingHuman) {
+    lines.push("  Next: answer the supervisor's question above");
+    const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
+    if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
+  }
   else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
   else if (agent.agent_status === "working") lines.push("  Next: review when the worker settles or blocks");
   else if (binding.wait) {
@@ -136,5 +144,5 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
   const wait = binding.wait
     ? `\n\nCurrent wait\n  ${binding.wait.condition}\n  Review at: ${binding.wait.reviewAt}`
     : "";
-  return `Worker review · ${binding.agentSession.agent} ${binding.paneId}\nReview time: ${now.toISOString()} (UTC)\n\nThis turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.\n\nGoal\n  ${binding.goal}\n\nRequired context\n${context}\n\nConstraints\n${constraints}\n\nCurrent progress\n  ${progress}${wait}\n\nCurrent evidence\n${evidence}\n\nWhy review now\n  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.\n\nWorker acceptance criteria\n${criteria}\n\nReview\n  Observe this exact worker once. Compare all timestamps with the UTC review time above. If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there. If a wait deadline elapsed, continue the due work; leave it waiting again only when fresh current evidence establishes why and supplies the next exact boundary. Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.`;
+  return `Worker review · ${binding.agentSession.agent} ${binding.paneId}\nReview time: ${now.toISOString()} (UTC)\n\nThis turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.\n\nGoal\n  ${binding.goal}\n\nRequired context\n${context}\n\nConstraints\n${constraints}\n\nCurrent progress\n  ${progress}${wait}\n\nCurrent evidence\n${evidence}\n\nWhy review now\n  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.\n\nWorker acceptance criteria\n${criteria}\n\nReview\n  Observe this exact worker once. Compare all timestamps with the UTC review time above. If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there. If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work. Leave it waiting again only when fresh evidence shows nothing useful can move and supplies the next exact boundary. Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.`;
 }

@@ -586,7 +586,7 @@ test("restart adopts a new terminal without forcing a healthy worker review", as
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
 
-  const [stored] = (await loadSupervisorGoals(root)).active;
+  const stored = (await loadSupervisorGoals(root)).active.find((binding) => binding.paneId === worker.paneId);
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
   assert.equal(pi.messages.length, 0);
@@ -623,6 +623,8 @@ test("restart preserves a pending human decision without asking again", async (t
   assert.deepEqual(waiting.evidence, [
     "The worker exhausted local alternatives and needs the capacity owner's approval.",
   ]);
+  assert.match(waiting.wait.condition, /human's answer/);
+  assert.ok(Date.parse(waiting.wait.reviewAt) > Date.now());
   const waitingAudit = await readAudit("g_test", root);
   assert.deepEqual(waitingAudit.at(-1).evidence, waiting.evidence);
   firstPi.events.get("session_shutdown")();
@@ -637,6 +639,36 @@ test("restart preserves a pending human decision without asking again", async (t
   const status = await secondPi.tools.get("supervisor_status").execute("status", {});
   assert.match(status.content[0].text, /Next: answer the supervisor's question above/);
   secondPi.events.get("session_shutdown")();
+});
+
+test("a human wait is reconsidered instead of being forgotten", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker still needs a real human decision.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const asked = await pi.tools.get("supervisor_ask_human").execute("ask", {
+    pane_id: worker.paneId,
+    question: "Which release boundary should this validation use?",
+  });
+  assert.equal(asked.isError, false);
+  await pi.events.get("agent_settled")();
+
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /review deadline elapsed/);
+  pi.events.get("session_shutdown")();
 });
 
 test("an idle worker cannot be left working and may be steered in the same review", async (t) => {
@@ -693,6 +725,15 @@ test("an idle worker cannot be left working and may be steered in the same revie
 
 test("a settled worker may wait on one explicit peer condition", async (t) => {
   const root = await fixture();
+  const peerWorker = {
+    paneId: "w1:p7",
+    terminalId: "term_peer",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_peer" },
+  };
+  await registerSupervisedGoal(peerWorker, {
+    objective: "Check shared ADO capacity.",
+    acceptance: ["Capacity is classified."],
+  }, root, { goalId: "g_peer" });
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
   t.after(() => {
@@ -700,7 +741,23 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "done", state_change_seq: 3 }));
+  let peerStatus = "working";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [
+      snapshot({ agent_status: "done", state_change_seq: 3 }).agents[0],
+      {
+        pane_id: peerWorker.paneId,
+        terminal_id: peerWorker.terminalId,
+        agent_status: peerStatus,
+        state_change_seq: 4,
+        agent_session: peerWorker.agentSession,
+      },
+    ],
+    panes: [
+      ...snapshot().panes,
+      { pane_id: peerWorker.paneId, terminal_id: peerWorker.terminalId },
+    ],
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Local work is complete; a peer owns the shared capacity check.", truncated: false } }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
@@ -710,25 +767,114 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  peerStatus = "idle";
+  const convoy = await pi.tools.get("supervisor_leave").execute("leave-convoy", {
+    pane_id: worker.paneId,
+    progress: "Local proof is preserved.",
+    waiting_for: "w1:p7 to release shared capacity",
+    waiting_on_pane: "w1:p7",
+  });
+  assert.equal(convoy.isError, true);
+  assert.match(convoy.content[0].text, /capacity is not reserved by an inactive worker/);
+  peerStatus = "working";
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
     waiting_for: "w1:p7 to report that shared ADO capacity is available",
+    waiting_on_pane: "w1:p7",
     review_at: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(leave.isError, false);
   assert.match(leave.content[0].text, /waiting for w1:p7 to report/);
   assert.equal(prompts, 0);
-  const [stored] = (await loadSupervisorGoals(root)).active;
+  const stored = (await loadSupervisorGoals(root)).active.find((binding) => binding.paneId === worker.paneId);
   assert.equal(stored.lastDecision.decision, "leave");
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
   assert.equal(stored.wait.condition, "w1:p7 to report that shared ADO capacity is available");
+  assert.equal(stored.wait.paneId, "w1:p7");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
 });
 
-test("a settled worker wait requires its bounded review timestamp", async (t) => {
+test("a peer event immediately reconsiders its exact waiting worker", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-peer-wait-"));
+  const sessionFile = join(root, "waiting-worker.jsonl");
+  await writeFile(sessionFile, "");
+  const waitingWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const peerWorker = {
+    paneId: "w1:p7",
+    terminalId: "term_peer",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_peer" },
+  };
+  const waiting = await registerSupervisedGoal(waitingWorker, {
+    objective: "Run the next useful validation when capacity is free.",
+    acceptance: ["The validation passes."],
+  }, root, { goalId: "g_waiting" });
+  await recordDecision(waiting, "leave", {
+    progress: "Local preparation is complete.",
+    action: "Wait for the peer's capacity decision.",
+    wait: {
+      condition: "w1:p7 to stop using shared capacity",
+      paneId: peerWorker.paneId,
+      reviewAt: new Date(Date.now() + 60_000).toISOString(),
+    },
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: 0 },
+  }, root);
+  await registerSupervisedGoal(peerWorker, {
+    objective: "Check shared validation capacity.",
+    acceptance: ["Capacity is classified."],
+  }, root, { goalId: "g_peer" });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const agents = [
+    {
+      pane_id: waitingWorker.paneId,
+      terminal_id: waitingWorker.terminalId,
+      agent_status: "idle",
+      state_change_seq: 2,
+      agent_session: waitingWorker.agentSession,
+    },
+    {
+      pane_id: peerWorker.paneId,
+      terminal_id: peerWorker.terminalId,
+      agent_status: "working",
+      state_change_seq: 3,
+      agent_session: peerWorker.agentSession,
+    },
+  ];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents,
+    panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
+  }));
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 0, "the unchanged future wait should remain quiet");
+
+  subscriptionEvent({ data: { pane_id: peerWorker.paneId } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /w1:p7 changed; reconsider whether useful work can proceed/);
+  assert.match(pi.messages[0].content, /w1:p2/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a settled worker wait receives a bounded review timestamp by default", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -751,10 +897,10 @@ test("a settled worker wait requires its bounded review timestamp", async (t) =>
     waiting_for: "the server-directed retry boundary",
   });
 
-  assert.equal(leave.isError, true);
-  assert.match(leave.content[0].text, /without a valid review_at timestamp/);
+  assert.equal(leave.isError, false);
   const [stored] = (await loadSupervisorGoals(root)).active;
-  assert.equal(stored.lastDecision, undefined);
+  assert.equal(stored.lastDecision.decision, "leave");
+  assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
 });
 

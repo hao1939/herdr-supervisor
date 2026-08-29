@@ -286,9 +286,10 @@ decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
-The last recorded `ask_human` decision restores the goal's human-wait state.
-Until the human answers, restart reconciliation and worker events remain quiet
-instead of asking the same question again.
+The last recorded `ask_human` decision restores the goal's human-wait state and
+its bounded reconsideration time.
+Until the human answers, ordinary restart noise and worker events remain quiet.
+The stored deadline still wakes a bounded reconsideration of alternatives.
 The native identity is immutable within that local execution. To run a goal
 elsewhere or again, copy its `goal.json` into a new goal directory and explicitly
 select a new worker. Old checkpoints and logs are neither required nor moved.
@@ -297,8 +298,9 @@ requires its original runtime and native session.
 
 Pending signals and the one armed timer stay in memory. A concrete wait's
 condition and absolute review deadline live in `current.json`, as does a human
-wait through its last decision, so restart does not lose either. None of these
-files contains raw events, terminal output, reconnects, or copied Herdr status.
+wait through its last decision and wait record, so restart does not lose either.
+None of these files contains raw events, terminal output, reconnects, or copied
+Herdr status.
 The PoC needs no task store, replay framework, export command, archive
 operation, or status database.
 
@@ -336,7 +338,8 @@ Supervisor restart or resumed session
   -> fetch one fresh Herdr snapshot
   -> restore exact wait deadlines
   -> reread bounded worker evidence before waking an unchanged settled wait
-  -> reconsider expired waits, new evidence, and failures from current facts
+  -> reconsider expired waits, linked-worker changes, new evidence,
+     and failures from current facts
   -> continue normal event-driven supervision
 ```
 
@@ -351,6 +354,7 @@ Supervisor restart or resumed session
 | Pane disappears or occupant changes      | Fail closed and ask the human only when a decision is needed             |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
+| Linked worker changes                    | Reconsider only goals explicitly waiting on that worker                 |
 
 The event means "reconsider this goal now." It never decides success by
 itself.
@@ -439,13 +443,15 @@ the outcome is known, and atomically updates the current goal context.
 
 `supervisor_leave` also covers a settled worker whose next step has one concrete
 peer or external condition. The model supplies that condition as structured
-input together with an explicit bounded review timestamp; the extension rejects a
-wait that could silently fall back to the generic review interval. A known
-retry boundary is reviewed on time, while an event-driven peer wait uses a
-low-frequency safety review. A settled worker without a concrete condition and
-delay is still rejected. When several goals share scarce capacity, the
-supervisor keeps one worker responsible for probing it and parks peers this way
-instead of adding a resource scheduler or letting every worker retry.
+input. A direct peer wait also supplies that worker's exact pane identity, so
+code can route its next event without interpreting prose. The runtime assigns
+the normal bounded review interval automatically. If current evidence supplies
+an exact retry time, the model may preserve it instead. A settled worker
+without a concrete condition is still rejected. When several goals share
+scarce capacity, one active worker may use or probe it. That responsibility ends
+when the worker becomes
+idle or externally blocked: linked peers wake and the LLM decides which useful
+work can proceed. This avoids both a resource scheduler and an idle convoy.
 
 `leave` must be explicit. Ordinary model prose is not a completed decision,
 because the runtime must distinguish a deliberate choice from a malformed,
@@ -455,20 +461,29 @@ is scheduled. If a decision was completed, settlement preserves the timer or
 human wait chosen by that decision instead of replacing it with the generic
 review interval.
 
-`reviewAt` is an absolute ISO timestamp bounded to the next 24 hours. It is
-required for an explicit wait, so the model can copy an exact retry boundary
-instead of doing delay arithmetic, and a quiet peer wait need not spend a model
-turn every ten minutes. The condition and deadline are checkpointed and
-restored after restart. A bounded native-evidence check suppresses restored
+`reviewAt` is an absolute ISO timestamp bounded to the next 24 hours. Execution
+code supplies the normal review interval when the model omits it; the model
+copies a later time only when current evidence provides a real exact retry
+boundary. A linked peer event may wake the goal earlier. The condition and
+deadline are checkpointed and restored after restart. A bounded native-evidence check suppresses restored
 no-change lifecycle noise; new evidence and real failures still wake promptly.
 Every review states its exact current UTC time so the model compares like-for-like
 timestamps rather than guessing from the conversation date.
 
+A wait is a promise to reconsider, not a terminal disposition. At the deadline
+the supervisor confirms the condition from fresh evidence, looks for safe
+mitigation, and continues independent useful work. It may wait again only when
+fresh evidence shows that nothing meaningful can move and supplies the next
+exact boundary. A linked worker's change triggers the same reconsideration
+immediately.
+
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
-the worker untouched. The last decision in the checkpoint restores that wait
-after restart. The human's answer may then steer that same worker once. No
-waiting task or durable message queue is created.
+the worker untouched. Its wait and bounded reconsideration time are stored in
+the checkpoint and restored after restart. The human's answer may then steer
+that same worker once. If no answer arrives, the later review checks for a
+mitigation or independent work instead of forgetting the goal. No waiting task
+or durable message queue is created.
 
 ## 10. Shared supervisor context
 
@@ -556,9 +571,10 @@ bounded native messages before deciding because an event may have been missed
 or delayed. The next deadline starts after the review turn settles, so a slow
 model turn cannot enqueue another review behind itself.
 
-A goal waiting for the human has no stale deadline while the current supervisor
-process remains alive. After restart all unfinished goals are reconsidered, so
-the question is regenerated when it is still necessary.
+A goal waiting for the human keeps a bounded deadline. When it expires, the
+supervisor checks whether the answer is still necessary, whether the blocker can
+be mitigated, and whether independent useful work can proceed. Ordinary worker
+events do not repeat the question before that review.
 
 ## 13. Failure handling
 
