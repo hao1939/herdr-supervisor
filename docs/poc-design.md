@@ -248,6 +248,19 @@ is deliberately written to `goal.json`; ordinary progress remains local in
 Independent size bounds reject unbounded context instead of silently growing
 every review prompt.
 
+A goal describes a durable outcome, not one attempt, command, pipeline run,
+approval, or preferred route. Its acceptance criteria say what must ultimately
+be true without unnecessarily making one implementation path the whole goal.
+When progress becomes stale, the LLM reassesses both the execution and the
+contract: whether the outcome is still coherent, useful, current, and
+achievable, and whether the observed blocker stops the outcome or only one
+path. It continues independent work, alternative proof, mitigation, or useful
+preparation when those remain in scope. If the contract itself has become
+obsolete, contradictory, or impractical, the supervisor asks the human one
+concrete question; it does not silently rewrite the goal or repeatedly preserve
+an impossible wait. Code supplies the compact current facts and executes the
+decision. It does not infer goal quality or alternatives from keywords.
+
 Execution ownership follows the goal, not the repository. A worker may create
 and use one or more worktrees for its goal, but the starting checkout and every
 other goal's worktree are read-only discovery sources. This includes commands
@@ -475,10 +488,12 @@ Every review states its exact current UTC time so the model compares like-for-li
 timestamps rather than guessing from the conversation date.
 
 A wait is a promise to reconsider, not a terminal disposition. At the deadline
-the supervisor confirms the condition from fresh evidence, looks for safe
-mitigation, and continues independent useful work. It may wait again only when
-fresh evidence shows that nothing meaningful can move and supplies the next
-exact boundary. A linked worker's change triggers the same reconsideration
+the supervisor confirms the condition from fresh evidence, reassesses whether
+the goal is practical and whether the condition blocks the whole outcome or
+only one route, looks for safe mitigation or alternative proof, and continues
+independent useful work or preparation. It may wait again only when fresh
+evidence shows that nothing meaningful can move and supplies the next exact
+boundary. A linked worker's change triggers the same reconsideration
 immediately.
 
 `ask_human` is an explicit supervisor operation because it has different

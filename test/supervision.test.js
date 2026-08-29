@@ -248,6 +248,11 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Your own response is not worker evidence/);
   assert.match(message, /confirm that the condition still exists/);
   assert.match(message, /continue any independent useful work/);
+  assert.match(message, /durable goal is still coherent, useful, and achievable/);
+  assert.match(message, /current blocker stops the whole outcome or only one path/);
+  assert.match(message, /alternative proof, or preparation/);
+  assert.match(message, /goal contract itself is obsolete, contradictory, or impractical/);
+  assert.match(message, /ask the human one concrete question/);
   assert.match(message, /Compare all timestamps with the UTC review time above/);
 });
 

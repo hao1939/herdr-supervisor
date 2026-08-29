@@ -436,6 +436,10 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /do not ask permission again merely to perform a step needed by its acceptance criteria/);
   assert.match(result.systemPrompt, /human input arrives during a focused worker review/);
   assert.match(result.systemPrompt, /retain any other affected workers for later/);
+  assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
+  assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
+  assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
+  assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   pi.events.get("session_shutdown")();
 });
 
