@@ -251,6 +251,11 @@ every review prompt.
 A goal describes a durable outcome, not one attempt, command, pipeline run,
 approval, or preferred route. Its acceptance criteria say what must ultimately
 be true without unnecessarily making one implementation path the whole goal.
+The objective and criteria cover the same scope and time horizon. A finite
+review cycle may be a goal when that is what the human requested; it must not be
+used as a quiet substitute for an ongoing or broader improvement outcome. If
+the intended outcome is ongoing, the supervisor asks for or proposes an honest
+convergence boundary instead of making the first report, run, or PR terminal.
 When progress becomes stale, the LLM reassesses both the execution and the
 contract: whether the outcome is still coherent, useful, current, and
 achievable, and whether the observed blocker stops the outcome or only one
@@ -445,7 +450,10 @@ Meaning:
 - `steer`: continue the same worker with one useful instruction; code resumes
   its exact session automatically when the process has exited.
 - `ask_human`: a real decision or missing fact requires the human.
-- `accept`: acceptance criteria are supported by current evidence.
+- `accept`: current evidence covers the whole objective and every acceptance
+  criterion at their declared horizon. A final worker message, one PR or run,
+  or completion of one review cycle is only evidence unless it proves that
+  entire outcome.
 
 The corresponding tools are `supervisor_leave`, `supervisor_steer`,
 `supervisor_ask_human`, and `supervisor_finish`. The
