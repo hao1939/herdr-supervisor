@@ -127,9 +127,10 @@ worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 
 When a worker creates or updates a pull request, its native Goal asks it to add
 a small `Supervision` block to the description containing the readable goal,
-exact goal ID, Herdr worker name, native Codex session ID, and Herdr pane ID.
-The PR title and main summary stay about the change; the metadata only makes the
-originating supervised work easy to trace.
+exact goal ID, Herdr worker name, and Herdr pane ID. A public native Codex
+session ID is included when the binding has one. Path-backed bindings never
+publish their local session path. The PR title and main summary stay about the
+change; the metadata only makes the originating supervised work easy to trace.
 
 ### Current limitations
 

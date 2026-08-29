@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import herdrSupervisor from "../src/extension.ts";
-import { loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
+import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
+import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
@@ -71,6 +71,27 @@ async function fixture() {
   }, root, { goalId: "g_test" });
   return root;
 }
+
+test("pull request traceability never publishes a path-backed session locator", () => {
+  const trace = pullRequestTraceability({
+    goalId: "g_path",
+    goal: "Review the exact change.",
+    paneId: "w1:p9",
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/private/home/user/.codex/sessions/session.jsonl",
+    },
+  });
+
+  assert.match(trace, /## Supervision/);
+  assert.match(trace, /- Goal: "Review the exact change\." \("g_path"\)/);
+  assert.match(trace, /- Worker: "goal-path"/);
+  assert.match(trace, /- Pane: "w1:p9"/);
+  assert.doesNotMatch(trace, /Codex session:/);
+  assert.doesNotMatch(trace, /\/private\/home/);
+});
 
 test("a human goal creates, prompts, and supervises one Codex worker", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-"));
@@ -170,19 +191,126 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[0].prompt, /Supervision section/);
-  assert.match(deliveredPrompts[0].prompt, /Goal \"Fix the focused regression\.\" \(\"g_[a-zA-Z0-9_-]+\"\)/);
-  assert.match(deliveredPrompts[0].prompt, /Worker \"goal-[a-z0-9_-]+\"/);
-  assert.match(deliveredPrompts[0].prompt, new RegExp(`Codex session ${JSON.stringify(managed.agent_session.value)}`));
-  assert.match(deliveredPrompts[0].prompt, new RegExp(`Pane ${JSON.stringify(managed.pane_id)}`));
+  assert.match(deliveredPrompts[0].prompt, /## Supervision/);
   assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[0].bindingExists, true);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
+  assert.ok(deliveredPrompts[0].prompt.includes(`- Goal: "Fix the focused regression." (${JSON.stringify(goals.active[0].goalId)})`));
+  assert.ok(deliveredPrompts[0].prompt.includes(`- Worker: ${JSON.stringify(`goal-${goals.active[0].goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`)}`));
+  assert.ok(deliveredPrompts[0].prompt.includes(`- Codex session: ${JSON.stringify(managed.agent_session.value)}`));
+  assert.ok(deliveredPrompts[0].prompt.includes(`- Pane: ${JSON.stringify(managed.pane_id)}`));
   assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
   assert.deepEqual(goals.active[0].constraints, ["Make changes only in an isolated worktree."]);
+  pi.events.get("session_shutdown")();
+});
+
+test("attaching an existing worker delivers its exact persisted supervision trace", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-attach-trace-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const notices = [];
+  await pi.commands.get("supervise").handler(`${worker.paneId} Trace the attached worker`, {
+    ui: {
+      notify(message, level) { notices.push({ message, level }); },
+      setStatus() {},
+    },
+  });
+
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  assert.equal(notices.at(-1).level, "info");
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].paneId, worker.paneId);
+  assert.ok(prompts[0].prompt.includes(`- Goal: ${JSON.stringify(binding.goal)} (${JSON.stringify(binding.goalId)})`));
+  assert.ok(prompts[0].prompt.includes(`- Codex session: ${JSON.stringify(worker.agentSession.value)}`));
+  assert.ok(prompts[0].prompt.includes(`- Pane: ${JSON.stringify(worker.paneId)}`));
+  pi.events.get("session_shutdown")();
+});
+
+test("a copied goal activated after restart keeps its exact goal and worker trace", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-copied-trace-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Trace the copied goal after restart.",
+    acceptance: ["The copied goal is bound to the exact worker."],
+  }, root, { goalId: "g_copied_trace" });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const firstPi = fakePi();
+  herdrSupervisor(firstPi);
+  await firstPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  firstPi.events.get("session_shutdown")();
+
+  const secondPi = fakePi();
+  herdrSupervisor(secondPi);
+  await secondPi.commands.get("supervise").handler(`${worker.paneId} --goal-id g_copied_trace`, {
+    ui: { notify() {}, setStatus() {} },
+  });
+
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].paneId, worker.paneId);
+  assert.ok(prompts[0].prompt.includes('- Goal: "Trace the copied goal after restart." ("g_copied_trace")'));
+  assert.ok(prompts[0].prompt.includes(`- Codex session: ${JSON.stringify(worker.agentSession.value)}`));
+  assert.ok(prompts[0].prompt.includes(`- Pane: ${JSON.stringify(worker.paneId)}`));
+  secondPi.events.get("session_shutdown")();
+});
+
+test("native Goal delivery refuses a replacement session after registration", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-stale-trace-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let snapshotCalls = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshotCalls += 1;
+    return snapshot(snapshotCalls === 1
+      ? { agent_status: "working" }
+      : {
+          agent_status: "working",
+          agent_session: { ...worker.agentSession, value: "replacement_session" },
+        });
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const notices = [];
+  await pi.commands.get("supervise").handler(`${worker.paneId} Refuse stale provenance`, {
+    ui: {
+      notify(message, level) { notices.push({ message, level }); },
+      setStatus() {},
+    },
+  });
+
+  assert.equal(prompts, 0);
+  assert.equal(notices.at(-1).level, "warning");
+  assert.match(notices.at(-1).message, /refusing stale native Goal delivery: worker value changed/);
   pi.events.get("session_shutdown")();
 });
 
