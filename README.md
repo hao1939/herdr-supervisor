@@ -125,6 +125,11 @@ durable contract and informs the same worker — no sibling goals or temporary
 steering. For operator control, `/supervise <pane> <goal>` attaches an existing
 worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 
+When a worker creates or updates a pull request, its native Goal asks it to add
+a small `Supervision` block to the description containing the exact goal ID,
+native worker-session ID, and Herdr pane ID. The PR title and summary stay about
+the change; the IDs only make the originating supervised work easy to trace.
+
 ### Current limitations
 
 - **Codex only.** Worker startup, message-level observation, and exact-session
