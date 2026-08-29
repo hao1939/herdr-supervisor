@@ -586,6 +586,12 @@ The stale-progress deadline means a registered goal has gone too long without
 a supervisor review. It is a recovery safety net, not a claim that the worker
 made no progress and not merely an idle terminal.
 
+A live worker that is still working remains working. Its next useful checkpoint
+belongs in progress, not in a wait condition. A wait is recorded only after the
+worker settles on a concrete external or peer condition that can resume it.
+This keeps the human view truthful and lets quiet-working review suppression
+apply normally.
+
 Use one nearest-deadline timer for all registered workers. Deadlines are
 temporary scheduling hints, not durable goal truth:
 

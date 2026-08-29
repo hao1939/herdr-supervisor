@@ -1069,7 +1069,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and omit waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
@@ -1093,6 +1093,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       let warning = "";
       if (waitingOnPane && !waitingFor) {
         return text("waiting_on_pane requires a concrete waiting_for condition.", true);
+      }
+      if (agent.agent_status === "working" && waitingFor) {
+        return text("A working worker is active, not waiting. Omit waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
       }
       const previousReviewAt = Date.parse(binding.wait?.reviewAt || "");
       if (

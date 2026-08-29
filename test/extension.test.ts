@@ -1036,6 +1036,43 @@ test("a settled worker wait receives a bounded review timestamp by default", asy
   pi.events.get("session_shutdown")();
 });
 
+test("a working worker cannot be mislabeled as waiting for its own next checkpoint", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let agentStatus = "blocked";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: agentStatus, state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is actively producing the next checkpoint.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  agentStatus = "working";
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const invalidWait = await pi.tools.get("supervisor_leave").execute("leave-waiting", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively producing the next checkpoint.",
+    waiting_for: "the worker's next checkpoint",
+  });
+  assert.equal(invalidWait.isError, true);
+  assert.match(invalidWait.content[0].text, /working worker is active, not waiting/);
+
+  const active = await pi.tools.get("supervisor_leave").execute("leave-working", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively producing the next checkpoint.",
+  });
+  assert.equal(active.isError, false);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.wait, undefined);
+  pi.events.get("session_shutdown")();
+});
+
 test("an invalid optional peer hint cannot discard a valid bounded external wait", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
