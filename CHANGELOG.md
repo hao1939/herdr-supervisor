@@ -3,6 +3,15 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.2.2](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.1...herdr-supervisor-v0.2.2) (2026-08-29)
+
+
+### Bug Fixes
+
+* keep active workers out of waiting state ([4567fac](https://github.com/hao1939/herdr-supervisor/commit/4567fac9a679f46d74b61f83779bfe09147622b7))
+* preserve standing improvement goals ([880e7f7](https://github.com/hao1939/herdr-supervisor/commit/880e7f7f86ec7162af54ca9a01ead19c29f5529f))
+* separate global findings from review routing ([7277f46](https://github.com/hao1939/herdr-supervisor/commit/7277f46a40498a8d9c3c599acd224182edc164b6))
+
 ## [0.2.1](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.0...herdr-supervisor-v0.2.1) (2026-08-29)
 
 
