@@ -1,10 +1,16 @@
 export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
 export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
+const ISO_8601_WITH_TIMEZONE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 export function reviewDeadline(reviewAt, now = Date.now()) {
   const deadline = Date.parse(reviewAt);
-  if (!Number.isFinite(deadline) || deadline < now + 1000 || deadline > now + MAX_REVIEW_DELAY_MS) {
-    throw new Error("review time must be between one second and 24 hours from now");
+  if (
+    !ISO_8601_WITH_TIMEZONE.test(reviewAt)
+    || !Number.isFinite(deadline)
+    || deadline < now + 1000
+    || deadline > now + MAX_REVIEW_DELAY_MS
+  ) {
+    throw new Error("review time must be a timezone-bearing ISO 8601 timestamp between one second and 24 hours from now");
   }
   return deadline;
 }

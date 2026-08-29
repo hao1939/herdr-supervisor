@@ -927,7 +927,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const missing = requested.filter((paneId) => !activePanes.has(paneId));
       if (missing.length) return text(`Cannot reconsider unsupervised worker(s): ${missing.join(", ")}.`, true);
       const sequence = ++workerEventSequence;
-      const queued = requested.filter((paneId) => paneId !== reviewTurn.paneId);
+      const activeReviewPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
+      const queued = requested.filter((paneId) => paneId !== activeReviewPane);
       for (const paneId of queued) {
         queueSignal(paneId, {
           force: true,

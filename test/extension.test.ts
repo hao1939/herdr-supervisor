@@ -587,6 +587,60 @@ test("reconsideration rejects an unknown worker without scheduling work", async 
   pi.events.get("session_shutdown")();
 });
 
+test("human reconsideration is retained while its focused review is preparing", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+
+  let releaseFirstSnapshot;
+  const firstSnapshot = new Promise((resolve) => { releaseFirstSnapshot = resolve; });
+  let snapshotCalls = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshotCalls += 1;
+    if (snapshotCalls === 1) await firstSnapshot;
+    return snapshot({ agent_status: "idle", state_change_seq: snapshotCalls + 2 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("first", {
+    pane_ids: [worker.paneId],
+    reason: "the first fact arrived",
+  });
+  const settling = pi.events.get("agent_settled")();
+  await waitFor(() => snapshotCalls === 1);
+
+  const retained = await pi.tools.get("supervisor_reconsider").execute("during-preparation", {
+    pane_ids: [worker.paneId],
+    reason: "a newer fact arrived during preparation",
+  });
+  assert.equal(retained.isError, false);
+  releaseFirstSnapshot();
+  await settling;
+  await waitFor(() => pi.messages.length === 1);
+
+  await pi.tools.get("supervisor_observe").execute("observe-first", { pane_id: worker.paneId });
+  const decision = await pi.tools.get("supervisor_steer").execute("steer-first", {
+    pane_id: worker.paneId,
+    message: "Continue the next useful step.",
+    evidence: ["The worker is ready to continue."],
+  });
+  assert.equal(decision.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /a newer fact arrived during preparation/);
+  pi.events.get("session_shutdown")();
+});
+
 test("an accepted goal delegates normal reversible execution authority", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
