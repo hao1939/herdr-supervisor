@@ -384,12 +384,13 @@ test("one transient human fact queues separate focused reviews without rewriting
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /w1:p2/);
   assert.match(pi.messages[0].content, /authenticated service path now succeeds/);
-  const fanout = await pi.tools.get("supervisor_reconsider").execute("nested-reconsider", {
+  const retained = await pi.tools.get("supervisor_reconsider").execute("nested-reconsider", {
     pane_ids: [secondWorker.paneId],
-    reason: "do both in one review",
+    reason: "new human input arrived during this review",
   });
-  assert.equal(fanout.isError, true);
-  assert.match(fanout.content[0].text, /event reviews cannot fan out/);
+  assert.equal(retained.isError, false);
+  assert.match(retained.content[0].text, /Retained focused reconsideration for w1:p7 after it/);
+  assert.equal(pi.messages.length, 1, "the retained review must not interrupt the current decision");
 
   await pi.tools.get("supervisor_observe").execute("observe-first", { pane_id: worker.paneId });
   const firstDecision = await pi.tools.get("supervisor_leave").execute("leave-first", {
@@ -400,7 +401,7 @@ test("one transient human fact queues separate focused reviews without rewriting
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 2);
   assert.match(pi.messages[1].content, /w1:p7/);
-  assert.match(pi.messages[1].content, /authenticated service path now succeeds/);
+  assert.match(pi.messages[1].content, /new human input arrived during this review/);
   pi.events.get("session_shutdown")();
 });
 
@@ -422,6 +423,17 @@ test("reconsideration rejects an unknown worker without scheduling work", async 
   assert.match(result.content[0].text, /unsupervised worker/);
   await pi.events.get("agent_settled")();
   assert.equal(pi.messages.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("an accepted goal delegates normal reversible execution authority", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
+  assert.match(result.systemPrompt, /accepted goal delegates authority for its normal reversible in-scope execution steps/);
+  assert.match(result.systemPrompt, /do not ask permission again merely to perform a step needed by its acceptance criteria/);
+  assert.match(result.systemPrompt, /human input arrives during a focused worker review/);
+  assert.match(result.systemPrompt, /retain any other affected workers for later/);
   pi.events.get("session_shutdown")();
 });
 

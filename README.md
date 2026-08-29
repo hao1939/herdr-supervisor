@@ -176,6 +176,14 @@ portable goal files. The supervisor selects the affected existing goals once;
 the runtime queues one ordinary focused review for each after the human turn.
 Each review still observes one worker and makes one decision, so several goals
 can react without one oversized cross-worker turn or accidental contract churn.
+Human input that arrives during a focused worker review is retained for the
+other affected goals and drained afterward; it is not rejected or reduced to a
+text-only acknowledgement.
+
+Accepting a goal delegates authority for its normal reversible in-scope steps.
+The supervisor does not ask again before a step required by the accepted
+outcome, unless the human explicitly reserved that decision, forbade the
+action, or the step materially expands the outcome or risk.
 
 Independent workers and pipeline runs proceed concurrently by default. The
 supervisor does not invent a shared-capacity reservation or make one worker a
