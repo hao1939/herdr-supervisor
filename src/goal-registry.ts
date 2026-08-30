@@ -15,6 +15,17 @@ import type { GoalBinding } from "./types.ts";
 
 export const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
 
+function assertWorkerAvailable(active, worker) {
+  const paneOwner = active.find((binding) => binding.paneId === worker.paneId);
+  if (paneOwner) {
+    throw new Error(`${worker.paneId} already pursues goal ${paneOwner.goalId}; stop it before assigning another goal`);
+  }
+  const sessionOwner = active.find((binding) => sameAgentSession(binding.agentSession, worker.agentSession));
+  if (sessionOwner) {
+    throw new Error(`the native agent session already pursues goal ${sessionOwner.goalId}; stop it before assigning another goal`);
+  }
+}
+
 export function bindingFromRecord(record): GoalBinding {
   if (!record?.contract || !record?.state) throw new Error("goal has no local execution");
   return {
@@ -76,10 +87,7 @@ export async function registerSupervisedGoal(worker, input, root?, options: any 
   if (goals.errors.length) {
     throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
   }
-  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
-  if (existing) {
-    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
-  }
+  assertWorkerAvailable(goals.active, worker);
   const { goalId, contract } = await installSupervisorGoal(input, root, options);
   const state = await startGoal(goalId, worker, root, { at: options.at });
   return bindingFromRecord({ goalId, contract, state });
@@ -90,10 +98,7 @@ export async function startInstalledGoal(goalId, worker, root?, options: any = {
   if (goals.errors.length) {
     throw new Error(`repair unreadable goals before starting another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
   }
-  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
-  if (existing) {
-    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
-  }
+  assertWorkerAvailable(goals.active, worker);
   const installed = goals.unstarted.find((record) => record.goalId === goalId);
   if (!installed) {
     await loadGoalContract(goalId, root);

@@ -38,6 +38,13 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
   await assert.rejects(registerSupervisedGoal(worker, {
     objective: "A different goal.",
   }, directory), /already pursues goal g_test/);
+  await assert.rejects(registerSupervisedGoal({
+    ...worker,
+    paneId: "w1:p9",
+    terminalId: "term_other",
+  }, {
+    objective: "Another goal with the same native session.",
+  }, directory), /native agent session already pursues goal g_test/);
 });
 
 test("refining a goal replaces its contract without replacing its worker", async () => {
@@ -149,6 +156,16 @@ test("the supervisor starts a copied contract through its single writer", async 
   assert.equal((binding as any).worker, undefined);
   assert.equal(binding.paneId, "w1:p2");
   await assert.rejects(startInstalledGoal("g_copied", worker, directory), /already pursues goal/);
+
+  await installGoal("g_other", createGoalContract({
+    objective: "Run another copied goal.",
+    acceptance: ["The other copied goal is verified."],
+  }), directory);
+  await assert.rejects(startInstalledGoal("g_other", {
+    ...worker,
+    paneId: "w1:p9",
+    terminalId: "term_other",
+  }, directory), /native agent session already pursues goal g_copied/);
 });
 
 test("restart reloads concurrent goals independently and reconsiders fresh Herdr state", async () => {

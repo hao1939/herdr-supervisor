@@ -27,6 +27,8 @@ There are three roles:
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal
 contract, its latest review checkpoint, and the judgment about what to do next.
+One native agent session can belong to only one unfinished goal, regardless of
+which pane currently routes to it.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
