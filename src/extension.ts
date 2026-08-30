@@ -140,8 +140,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return Boolean(
       binding.externalChange
       && Number.isInteger(binding.externalChange.workerSequence)
-      && binding.lastDecision?.decision === "steer"
-      && Date.parse(binding.lastDecision.at) >= Date.parse(binding.externalChange.observedAt),
+      && binding.lastDecision?.decision === "steer",
     );
   }
 

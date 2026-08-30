@@ -1878,7 +1878,7 @@ test("a working reread stays quiet until its worker settles", async (t) => {
     source: "github-pr",
     subject: "hao1939/herdr-supervisor#16",
     revision: "working-revision",
-    observedAt: new Date(Date.now() - 2000).toISOString(),
+    observedAt: new Date(Date.now() + 60_000).toISOString(),
   }, root);
   await recordDecision(binding, "steer", {
     progress: "The worker is rereading PR 16.",
