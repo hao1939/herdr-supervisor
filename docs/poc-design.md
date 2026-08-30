@@ -668,7 +668,7 @@ events do not repeat the question before that review.
 | ----------------------------- | -------------------------------------------------------------------------------------------------- |
 | Supervisor or Herdr reconnect | Resume the same Pi session when available, load unfinished goals directly, fetch one snapshot, and re-arm watches |
 | Worker occupant changed       | Stop and ask the human; never prompt the replacement automatically                                 |
-| Exact worker process stopped  | Resume only a supported native session in the same terminal, then send one continuation             |
+| Exact worker process stopped  | Refresh an empty restored pane's terminal when needed, resume only the exact native session, then continue |
 | Worker pane disappeared       | On `steer`, create a new routing pane and resume only the exact saved native session                  |
 | Malformed or missing decision | Apply no action or checkpoint, record a visible diagnostic, and schedule one bounded retry         |
 | Prompt/send failure           | Re-read current identity and state before one bounded retry                                        |
@@ -1022,10 +1022,10 @@ The PoC is successful when all of these are demonstrated:
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn
     triggered by fresh Herdr state.
-13. Continuing a stopped supported process resumes its exact native session and
-    paused Goal in the same terminal without an interactive prompt; a missing
-    pane may be relocated only for the exact saved session; changed
-    native identity fails closed.
+13. Continuing a stopped supported process refreshes an empty restored pane's
+    transient terminal when needed, then resumes its exact native session and
+    paused Goal without an interactive prompt; a missing pane may be relocated
+    only for the exact saved session; changed native identity fails closed.
 14. Every automatic review ends in one explicit decision; prose alone cannot
     advance a checkpoint or hide an incomplete review.
 15. Restart recovery loads every unfinished goal directly and reconsiders it from current

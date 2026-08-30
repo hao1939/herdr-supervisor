@@ -67,7 +67,8 @@ it is not a model review decision.
 Resuming a native Goal is also not a model decision. If `steer` is chosen for
 an exact settled Codex worker, code resumes its native Goal before sending the
 instruction into the active turn. If the process exited while its pane and
-native session remain recoverable, code resumes that same session first. A
+native session remain recoverable, code resumes that same session first. An
+empty pane restored with a new terminal refreshes that transient checkpoint. A
 missing pane may be replaced as a routing location only when code resumes and
 verifies the exact saved native session. A changed session fails closed.
 

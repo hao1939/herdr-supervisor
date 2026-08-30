@@ -474,7 +474,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return panes[0];
   }
 
-  async function relocateMissingWorker(binding, snapshot) {
+  async function recoverWorkerRouting(binding, snapshot) {
     const session = binding.agentSession;
     if (session.agent !== "codex" || session.kind !== "id") {
       throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
@@ -488,6 +488,17 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (existingAgent) {
       await assertRecoveryIdentityAvailable(binding, existingAgent.pane_id);
       return refreshObservedLocation(binding, existingAgent);
+    }
+    const currentPane = findPane(snapshot, binding.paneId);
+    if (currentPane) {
+      await assertRecoveryIdentityAvailable(binding, currentPane.pane_id);
+      const refreshed = await refreshWorkerLocation(binding, {
+        paneId: currentPane.pane_id,
+        terminalId: currentPane.terminal_id,
+        agentSession: session,
+      });
+      cacheBinding(refreshed);
+      return refreshed;
     }
     const supervisorPaneId = process.env.HERDR_PANE_ID;
     const supervisorPane = supervisorPaneId ? findPane(snapshot, supervisorPaneId) : undefined;
@@ -1718,17 +1729,15 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           agent,
           pane,
         );
-        const canResume = !agent && pane?.terminal_id === binding.terminalId;
-        const canRelocate = !agent
-          && !pane
+        const canRecover = !agent
           && binding.agentSession.agent === "codex"
           && binding.agentSession.kind === "id";
-        if (mismatch && !canResume && !canRelocate) return text(`Refusing to continue: ${mismatch}.`, true);
+        if (mismatch && !canRecover) return text(`Refusing to continue: ${mismatch}.`, true);
         if (mode() !== "live") {
           reviewTurn.close(params.pane_id);
-          const action = canRelocate
+          const action = canRecover && !pane
             ? `create a new routing pane and resume the exact ${binding.agentSession.agent} session for`
-            : canResume
+            : canRecover
               ? `resume the exact ${binding.agentSession.agent} session in`
               : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
@@ -1740,18 +1749,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         let liveAgent = findAgent(liveSnapshot, params.pane_id);
         let livePane = findPane(liveSnapshot, params.pane_id);
         let relocated = false;
-        if (!liveAgent && !livePane) {
-          binding = await relocateMissingWorker(binding, liveSnapshot);
-          reviewTurn.retarget(params.pane_id, binding.paneId);
-          try {
-            await connectObserver();
-          } catch (error) {
-            reportBackgroundFailure("Could not watch the relocated worker", error);
+        if (!liveAgent) {
+          const previousPaneId = binding.paneId;
+          binding = await recoverWorkerRouting(binding, liveSnapshot);
+          relocated = binding.paneId !== previousPaneId;
+          if (relocated) {
+            reviewTurn.retarget(params.pane_id, binding.paneId);
+            try {
+              await connectObserver();
+            } catch (error) {
+              reportBackgroundFailure("Could not watch the relocated worker", error);
+            }
           }
           liveSnapshot = await client.snapshot();
           liveAgent = findAgent(liveSnapshot, binding.paneId);
           livePane = findPane(liveSnapshot, binding.paneId);
-          relocated = true;
         }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;

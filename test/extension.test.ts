@@ -3352,7 +3352,7 @@ test("an uncertain steer keeps an already accepted external reread resolved", as
   pi.events.get("session_shutdown")();
 });
 
-test("continuing a stopped worker resumes the exact session atomically", async (t) => {
+test("continuing after restart refreshes an empty pane terminal and resumes the exact session", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3363,11 +3363,15 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   let resumes = 0;
   let prompts = 0;
   let resumeRequest;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
+  const restartedTerminal = "term_after_restart";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [],
+    panes: [{ pane_id: worker.paneId, terminal_id: restartedTerminal }],
+  }));
   t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
     resumes += 1;
     resumeRequest = request;
-    return snapshot().agents[0];
+    return snapshot({ terminal_id: restartedTerminal }).agents[0];
   });
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
     prompts += 1;
@@ -3393,6 +3397,8 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   ]);
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Resumed the exact codex session and native Goal/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.terminalId, restartedTerminal);
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
