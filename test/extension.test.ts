@@ -3259,7 +3259,7 @@ test("a global review reloads goal contracts copied in after session start", asy
     await new Promise((resolve) => setImmediate(resolve));
   }
   const review = pi.messages.find((message) => message.customType === "herdr-supervisor-global-review");
-  assert.ok(review);
+  assert.ok(review, "timed out waiting for global review message");
   assert.match(review.content, /"goalId": "g_copied"/);
   assert.match(review.content, /"workerState": "unstarted"/);
   const result = await pi.tools.get("supervisor_global_result").execute("copied-finding", {
