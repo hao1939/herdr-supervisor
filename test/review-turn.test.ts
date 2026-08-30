@@ -80,3 +80,9 @@ test("a review follows the same worker to a recovered routing pane", () => {
   assert.match(fence.guard("w1:p2"), /scoped to w1:p9/);
   assert.equal(fence.guard("w1:p9"), undefined);
 });
+
+test("a direct human turn needs no review fence relocation", () => {
+  const fence = new ReviewTurnFence();
+  fence.retarget("w1:p2", "w1:p9");
+  assert.equal(fence.paneId, undefined);
+});

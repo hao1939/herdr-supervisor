@@ -165,6 +165,25 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
     throw new Error("the native agent session changed");
   }
   if (worker.paneId === binding.paneId && worker.terminalId === binding.terminalId) return binding;
+  if (worker.paneId !== binding.paneId) {
+    const goals = await loadSupervisorGoals(root);
+    const legacyDependents = goals.active.filter((candidate) => (
+      candidate.goalId !== binding.goalId
+      && !candidate.wait?.goalId
+      && candidate.wait?.paneId === binding.paneId
+    ));
+    // Make the durable goal identity authoritative before changing its
+    // replaceable pane. If interrupted, the peer remains at the old pane and
+    // this idempotent upgrade is retried before relocation.
+    for (const dependent of legacyDependents) {
+      await updateGoalState(dependent.goalId, (current) => {
+        if (current.wait?.paneId === binding.paneId && !current.wait.goalId) {
+          current.wait.goalId = binding.goalId;
+        }
+        return current;
+      }, root, now);
+    }
+  }
   const state = await updateGoalState(binding.goalId, (current) => {
     current.worker.paneId = worker.paneId;
     current.worker.terminalId = worker.terminalId;

@@ -78,8 +78,14 @@ export function nextReviewDelay(workers, now = new Date()) {
   return Math.max(0, Math.min(...deadlines) - timestamp);
 }
 
-export function dependentBindings(workers, paneId) {
-  return workers.filter((worker) => worker.paneId !== paneId && worker.wait?.paneId === paneId);
+export function dependentBindings(workers, peer) {
+  return workers.filter((worker) => (
+    worker.goalId !== peer.goalId
+    && (
+      (peer.goalId && worker.wait?.goalId === peer.goalId)
+      || (!worker.wait?.goalId && worker.wait?.paneId === peer.paneId)
+    )
+  ));
 }
 
 export function liveWorker(binding, snapshot) {

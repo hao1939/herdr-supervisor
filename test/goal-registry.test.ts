@@ -269,6 +269,23 @@ test("the same native session may refresh its transient routing location", async
   const binding = await registerSupervisedGoal(worker, {
     objective: "Keep working after restart.",
   }, directory, { goalId: "g_restart", at: "2026-08-28T10:00:00.000Z" });
+  const dependentWorker = {
+    paneId: "w1:p3",
+    terminalId: "term_dependent",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_dependent" },
+  };
+  const dependent = await registerSupervisedGoal(dependentWorker, {
+    objective: "Continue when the peer changes.",
+  }, directory, { goalId: "g_dependent", at: "2026-08-28T10:00:10.000Z" });
+  await recordDecision(dependent, "leave", {
+    progress: "Waiting for the peer.",
+    action: "Wait for the peer.",
+    wait: {
+      condition: "the peer result",
+      paneId: worker.paneId,
+      reviewAt: "2026-08-28T11:00:00.000Z",
+    },
+  }, directory, () => "2026-08-28T10:00:20.000Z");
   const refreshed = await refreshWorkerLocation(binding, {
     ...worker,
     paneId: "w1:p9",
@@ -277,8 +294,12 @@ test("the same native session may refresh its transient routing location", async
 
   assert.equal(refreshed.paneId, "w1:p9");
   assert.equal(refreshed.terminalId, "term_after_restart");
-  const [stored] = (await loadSupervisorGoals(directory)).active;
+  const storedGoals = (await loadSupervisorGoals(directory)).active;
+  const stored = storedGoals.find((goal) => goal.goalId === binding.goalId);
+  const storedDependent = storedGoals.find((goal) => goal.goalId === dependent.goalId);
   assert.equal(stored.paneId, "w1:p9");
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
+  assert.equal(storedDependent.wait.goalId, binding.goalId);
+  assert.equal(storedDependent.wait.paneId, worker.paneId);
 });

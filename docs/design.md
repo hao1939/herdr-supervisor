@@ -170,7 +170,8 @@ Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
 
-- a direct peer wait records that exact peer so its next event wakes the goal;
+- a direct peer wait resolves the selected pane to the peer's durable goal ID,
+  so its next event still wakes the goal after either worker is relocated;
 - a wait on one exact GitHub PR or ADO build may register a disposable external
   watch chosen by the model;
 - every wait has a bounded recheck;

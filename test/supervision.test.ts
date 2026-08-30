@@ -94,13 +94,13 @@ test("bindings without a deadline receive one recovery review", () => {
 
 test("a worker change selects only waits linked to that exact worker", () => {
   const workers = [
-    { paneId: "w1:p2", wait: { paneId: "w1:p7" } },
-    { paneId: "w1:p3", wait: { paneId: "w1:p8" } },
-    { paneId: "w1:p4", wait: { condition: "an external approval" } },
-    { paneId: "w1:p7" },
+    { goalId: "g_waiting", paneId: "w1:p2", wait: { goalId: "g_peer", paneId: "w1:p7" } },
+    { goalId: "g_other", paneId: "w1:p3", wait: { goalId: "g_else", paneId: "w1:p8" } },
+    { goalId: "g_external", paneId: "w1:p4", wait: { condition: "an external approval" } },
+    { goalId: "g_peer", paneId: "w1:p9" },
   ];
   assert.deepEqual(
-    dependentBindings(workers, "w1:p7").map((worker) => worker.paneId),
+    dependentBindings(workers, workers[3]).map((worker) => worker.paneId),
     ["w1:p2"],
   );
 });

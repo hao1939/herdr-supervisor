@@ -301,7 +301,9 @@ same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
 If that pane disappeared, one `steer` decision may create a new routing pane,
 resume the exact saved native session there, and update the local location
-checkpoint. A pane is not the durable worker identity.
+checkpoint. Recovery reuses the goal's deterministically named empty tab after
+an interrupted creation response, so retry does not multiply panes. A pane is
+not the durable worker identity.
 Supervised Codex processes keep native Goals enabled. `goal.json` remains the
 single portable authority; the native Goal is the worker's persisted execution
 loop and points back to that file. Codex therefore owns ordinary
@@ -315,7 +317,9 @@ turn on the same exact session. If the process has exited, the same action
 recovers that exact session first. Transport is not a model decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
-container recovery without an interactive directory-confirmation gate.
+container recovery without an interactive directory-confirmation gate. The
+empty routing pane may start in the supervisor's stable directory; that is not
+the worker's resumed directory and does not become goal state.
 The last recorded `ask_human` decision restores the goal's human-wait state and
 its bounded reconsideration time.
 Until the human answers, ordinary restart noise and worker events remain quiet.
@@ -488,7 +492,9 @@ the outcome is known, and atomically updates the current goal context.
 `supervisor_leave` also covers a settled worker whose next step has one concrete
 peer or external condition. The model supplies that condition as structured
 input. A direct peer wait also supplies that worker's exact pane identity, so
-code can route its next event without interpreting prose. The runtime assigns
+code can resolve and store the peer's durable goal identity without interpreting
+prose. The pane remains a current routing hint; relocating the peer cannot lose
+the relationship. The runtime assigns
 the normal bounded review interval automatically. If current evidence supplies
 an exact retry time, the model may preserve it instead. A settled worker
 without a concrete condition is still rejected. When several goals share

@@ -121,7 +121,8 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
         wait: binding.wait ? {
           condition: binding.wait.condition,
           reviewAt: binding.wait.reviewAt,
-          goalId: bindings.find((candidate) => candidate.paneId === binding.wait.paneId)?.goalId,
+          goalId: binding.wait.goalId
+            || bindings.find((candidate) => candidate.paneId === binding.wait.paneId)?.goalId,
         } : undefined,
         nextReviewAt: binding.nextReviewAt,
         lastDecision: binding.lastDecision ? {

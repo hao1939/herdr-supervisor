@@ -95,6 +95,7 @@ export class ReviewTurnFence {
   }
 
   retarget(paneId, nextPaneId) {
+    if (!this.paneId) return;
     if (this.paneId !== paneId) throw new Error(`This review is scoped to ${this.paneId}, not ${paneId}.`);
     this.paneId = nextPaneId;
   }
