@@ -74,6 +74,24 @@ Detaching from the Herdr client does not stop the server, supervisor, or workers
 Reattach with `docker compose exec herdr herdr`. Compose restarts the service
 after an unexpected failure; an explicit operator stop remains stopped.
 
+### Before recreating the container
+
+Container replacement is safe only when its external contract is preserved.
+Check the resolved Compose configuration with `docker compose config`, then
+confirm that the replacement has:
+
+- the intended host project mounted at `/app`;
+- persistent home storage for Herdr and native agent sessions;
+- the configured model credentials or gateway settings;
+- network access to that gateway and any required source-control provider; and
+- the same supervisor mode and full-access choice.
+
+After replacement, open Herdr, run `/supervised`, and verify one existing goal's
+exact pane and native session before trusting unattended work. Provider login
+is scoped to the environment where the worker runs; logging in on a different
+host or container does not refresh it. Keep machine-specific endpoints, tokens,
+and Compose overrides outside this repository.
+
 ## Local use (without container)
 
 If you have Herdr and Pi installed locally, you can load the extension directly.
@@ -164,6 +182,7 @@ npm test         # node:test suite
 - [Changelog](CHANGELOG.md)
 - [Current design](docs/design.md)
 - [Research landscape](docs/research.md)
+- [Deferred multi-worker exploration](docs/multi-agent-design.md)
 - [Proof-of-concept validation record](docs/poc-design.md)
 
 ## Design rule
@@ -171,3 +190,7 @@ npm test         # node:test suite
 Herdr owns runtime truth. The supervisor owns judgment about whether a
 registered worker is still moving toward its stated goal. It must not copy
 Herdr's lifecycle into a parallel queue, task graph, or status database.
+
+Implement only the small deterministic foundation shared by most goals. Keep
+uncommon recovery and workflow choices in model guidance until repeated live
+evidence proves a generic code primitive is necessary.

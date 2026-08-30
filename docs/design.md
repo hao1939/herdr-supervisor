@@ -14,6 +14,34 @@ The core rule is:
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
 
+## Scope discipline
+
+The Supervisor implements the small foundation that every goal needs and lets
+the model handle situational judgment. The practical heuristic is **solidify
+the common 20%; teach the model the remaining 80%**. This is not a feature
+quota. It is a test for whether a behavior belongs in code.
+
+Put behavior in code only when it is:
+
+- common to many goals rather than one observed incident;
+- deterministic identity, persistence, scheduling, or effect execution;
+- unsafe or unreliable to reproduce through ordinary model judgment; and
+- small enough to state as an invariant and prove with focused tests.
+
+Keep behavior in prompts, operational guidance, or the goal's own context when
+the model can inspect current facts and choose a safe action. One missing pane,
+one provider quirk, or imperfect reconstruction after restart does not justify
+a new recovery subsystem. Prefer a visible failure and a fresh model decision;
+some repeated work or model cost is acceptable when the final result remains
+correct.
+
+The foundation is therefore limited to portable goal contracts, exact worker
+identity, atomic current checkpoints, event wakeups with bounded health checks,
+validated effects, and clear current evidence. Provider integrations are
+optional observation adapters, not new workflow engines. A larger mechanism
+needs repeated live evidence that these primitives and ordinary agent reasoning
+cannot handle the problem cleanly.
+
 ## Mental model
 
 There are three roles:
