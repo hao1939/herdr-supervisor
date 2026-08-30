@@ -138,7 +138,7 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   const processStopped = mismatch === "worker agent process is no longer detected";
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
   const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
-  const externalRereadWorking = externalRereadInFlight && agent.agent_status === "working";
+  const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
   const goalState = mismatch
     ? "needs attention"
     : binding.externalChange

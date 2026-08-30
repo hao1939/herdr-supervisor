@@ -162,7 +162,18 @@ test("recovery resumes only the exact supported session in the same terminal", (
 });
 
 test("stopped process is shown as recoverable supervision work, not changed identity", () => {
-  const current = binding({ goalId: undefined, goal: "finish the goal", progress: undefined });
+  const current = binding({
+    goalId: undefined,
+    goal: "finish the goal",
+    progress: undefined,
+    externalChange: {
+      source: "github-pr",
+      subject: "hao1939/herdr-supervisor#16",
+      revision: "revision-2",
+      observedAt: "2026-08-30T05:01:00.000Z",
+      workerSequence: 7,
+    },
+  });
   assert.equal(
     formatWorker(liveWorker(current, snapshot(null))),
     [
