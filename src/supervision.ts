@@ -183,7 +183,9 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (paneMissing && awaitingHuman) {
-    lines.push("  Next: answer the supervisor's question above; worker recovery can follow your answer");
+    lines.push(sessionRecoverable
+      ? "  Next: answer the supervisor's question above; worker recovery can follow your answer"
+      : "  Next: answer the supervisor's question above; afterward the unsupported worker session still needs repair");
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
     if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
   } else if (paneMissing && sessionRecoverable) lines.push("  Next: supervisor should review whether the exact session can resume in a new pane");
