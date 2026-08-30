@@ -54,6 +54,29 @@ test("startAgent requests one exact agent session in an existing pane", async ()
   }
 });
 
+test("promptAgent can atomically wait for the submitted prompt to start work", async () => {
+  let observed;
+  const fake = await fakeHerdr((request, socket) => {
+    observed = request;
+    socket.write(`${JSON.stringify({ id: request.id, result: { type: "agent_wait_matched" } })}\n`);
+  });
+  try {
+    const client = new HerdrClient({ socketPath: fake.socketPath });
+    await client.promptAgent("w1:p2", "/goal resume", {
+      until: ["working"],
+      timeout_ms: 5000,
+    });
+    assert.equal(observed.method, "agent.prompt");
+    assert.deepEqual(observed.params, {
+      target: "w1:p2",
+      text: "/goal resume",
+      wait: { until: ["working"], timeout_ms: 5000 },
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
 test("splitPane creates an unfocused sibling from an exact supervisor pane", async () => {
   let observed;
   const fake = await fakeHerdr((request, socket) => {

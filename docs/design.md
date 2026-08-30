@@ -64,11 +64,11 @@ An automatic focused review has exactly four semantic decisions:
 `stop` is a separate operator action. It ends supervision when the human asks;
 it is not a model review decision.
 
-Resuming an exited process is also not a model decision. If `steer` is chosen
-and the exact registered Codex process has exited while its pane and native
-session remain recoverable, code resumes that same session and paused native
-Goal before sending the instruction. A missing pane or changed session fails
-closed.
+Resuming a native Goal is also not a model decision. If `steer` is chosen for
+an exact settled Codex worker, code resumes its native Goal before sending the
+instruction into the active turn. If the process exited while its pane and
+native session remain recoverable, code resumes that same session first. A
+missing pane or changed session fails closed.
 
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing

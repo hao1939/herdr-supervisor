@@ -75,8 +75,12 @@ export class HerdrClient {
     });
   }
 
-  async promptAgent(paneId, text) {
-    return this.request("agent.prompt", { target: paneId, text });
+  async promptAgent(paneId, text, wait?) {
+    return this.request("agent.prompt", {
+      target: paneId,
+      text,
+      ...(wait ? { wait } : {}),
+    });
   }
 
   async splitPane({ paneId, direction = "right", cwd, focus = false }) {

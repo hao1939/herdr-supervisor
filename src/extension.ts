@@ -1597,7 +1597,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_steer",
     label: "Continue worker",
-    description: "Give the same supervised worker one useful next action. If its exact registered process exited but the pane is unchanged, the runtime resumes that session automatically; the model does not choose a transport.",
+    description: "Give the same supervised worker one useful next action. The runtime keeps an exact Codex worker's native Goal active and recovers its exact session when needed; the model does not choose a transport.",
     parameters: Type.Object({
       pane_id: Pane,
       message: Type.String({ minLength: 1 }),
@@ -1643,6 +1643,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const livePane = findPane(liveSnapshot, params.pane_id);
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
+        const canResumeNativeGoal = Boolean(
+          liveAgent
+          && binding.agentSession.agent === "codex"
+          && ["idle", "done"].includes(liveAgent.agent_status),
+        );
         if (liveMismatch && !canResumeNow) {
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
@@ -1679,77 +1684,67 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-          const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
-          deliveryBoundary = delivery.boundary;
-          if (delivery.boundaryError) {
-            scheduleReview(continuedBinding);
-            const deliveryProgress = delivery.deliveryError
-              ? "The exact session resumed, but both delivery of its next instruction and the post-delivery reread boundary are uncertain; another bounded review is required."
-              : "The exact session resumed and received its next instruction, but the post-delivery reread boundary could not be observed; another bounded review is required.";
-            const checkpointWarning = await saveUncertainSteer(
-              continuedBinding,
-              instruction,
-              deliveryProgress,
-              params.evidence || continuedBinding.evidence,
-              reviewAt,
-              unavailableRereadBoundary(),
-              resolution.revision,
-            );
-            const deliveryNote = delivery.deliveryError
-              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
-              : "";
-            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not observe a safe boundary after the follow-up delivery attempt: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
-          }
-          if (delivery.deliveryError) {
-            scheduleReview(continuedBinding);
-            const checkpointWarning = await saveUncertainSteer(
-              continuedBinding,
-              instruction,
-              "The exact session resumed, but delivery of its next instruction is uncertain; fresh worker evidence is required.",
-              params.evidence || continuedBinding.evidence,
-              reviewAt,
-              deliveryBoundary,
-              resolution.revision,
-            );
-            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
-          }
-        } else {
-          const delivery = await deliverWorkerInstruction(binding, instruction);
-          deliveryBoundary = delivery.boundary;
-          if (delivery.boundaryError) {
+        } else if (canResumeNativeGoal) {
+          try {
+            await client.promptAgent(params.pane_id, "/goal resume", {
+              until: ["working"],
+              timeout_ms: 5000,
+            });
+          } catch (error) {
+            reviewTurn.close(params.pane_id);
             scheduleReview(binding);
-            const deliveryProgress = delivery.deliveryError
-              ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
-              : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
-            const checkpointWarning = await saveUncertainSteer(
-              binding,
-              instruction,
-              deliveryProgress,
-              params.evidence || binding.evidence,
-              reviewAt,
-              unavailableRereadBoundary(),
-              resolution.revision,
-            );
-            const deliveryNote = delivery.deliveryError
-              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
-              : "";
-            return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+            return text(`Could not confirm that the native Goal resumed in ${params.pane_id}: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
-          if (delivery.deliveryError) {
-            // A transport error cannot prove that Herdr did not accept the
-            // prompt. Fail closed against duplicate delivery.
+          const resumedSnapshot = await client.snapshot();
+          const resumedAgent = findAgent(resumedSnapshot, params.pane_id);
+          const resumedMismatch = identityMismatch(
+            binding,
+            resumedAgent,
+            findPane(resumedSnapshot, params.pane_id),
+          );
+          if (resumedMismatch) {
+            reviewTurn.close(params.pane_id);
             scheduleReview(binding);
-            const checkpointWarning = await saveUncertainSteer(
-              binding,
-              instruction,
-              "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
-              params.evidence || binding.evidence,
-              reviewAt,
-              deliveryBoundary,
-              resolution.revision,
-            );
-            return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+            return text(`The native Goal resumed, but the resulting worker identity did not match: ${resumedMismatch}. No follow-up instruction was sent.\n\nEnd this supervisor turn now and wait for fresh evidence.`, true);
           }
+          continuedBinding = await refreshObservedLocation(binding, resumedAgent);
+          resumed = true;
+        }
+        const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+        deliveryBoundary = delivery.boundary;
+        if (delivery.boundaryError) {
+          scheduleReview(continuedBinding);
+          const deliveryProgress = delivery.deliveryError
+            ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
+            : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
+          const checkpointWarning = await saveUncertainSteer(
+            continuedBinding,
+            instruction,
+            deliveryProgress,
+            params.evidence || continuedBinding.evidence,
+            reviewAt,
+            unavailableRereadBoundary(),
+            resolution.revision,
+          );
+          const deliveryNote = delivery.deliveryError
+            ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
+            : "";
+          return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+        }
+        if (delivery.deliveryError) {
+          // A transport error cannot prove that Herdr did not accept the
+          // prompt. Fail closed against duplicate delivery.
+          scheduleReview(continuedBinding);
+          const checkpointWarning = await saveUncertainSteer(
+            continuedBinding,
+            instruction,
+            "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
+            params.evidence || continuedBinding.evidence,
+            reviewAt,
+            deliveryBoundary,
+            resolution.revision,
+          );
+          return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
@@ -1759,7 +1754,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             continuedBinding,
             instruction,
             resumed
-              ? "The exact native session was resumed and asked to continue."
+              ? "The exact native Goal was resumed and asked to continue."
               : `The worker was steered to continue: ${params.message.trim()}`,
             params.evidence || continuedBinding.evidence,
             reviewAt,
@@ -1769,7 +1764,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
-            ? `Resumed the exact ${binding.agentSession.agent} session and native Goal in ${params.pane_id}, then asked it to continue.`
+            ? `${canResumeNow ? `Resumed the exact ${binding.agentSession.agent} session and native Goal` : "Resumed the exact native Goal"} in ${params.pane_id}, then asked it to continue.`
             : `Steered ${params.pane_id}: ${params.message.trim()}`;
           return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {

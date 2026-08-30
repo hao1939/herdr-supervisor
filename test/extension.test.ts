@@ -1148,10 +1148,12 @@ test("an idle worker cannot be left working and may be steered in the same revie
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
-  let prompts = 0;
+  const prompts = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 0 }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, text, wait) => {
+    prompts.push({ paneId, text, wait });
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1182,7 +1184,15 @@ test("an idle worker cannot be left working and may be steered in the same revie
     evidence: ["The restored worker is idle and the focused proof is still missing."],
   });
   assert.equal(steer.isError, false);
-  assert.equal(prompts, 1);
+  assert.deepEqual(prompts, [{
+    paneId: worker.paneId,
+    text: "/goal resume",
+    wait: { until: ["working"], timeout_ms: 5000 },
+  }, {
+    paneId: worker.paneId,
+    text: "Continue the restored goal from current evidence.",
+    wait: undefined,
+  }]);
   const [continued] = (await loadSupervisorGoals(root)).active;
   assert.deepEqual(continued.evidence, [
     "The restored worker is idle and the focused proof is still missing.",
@@ -1743,14 +1753,16 @@ test("steering fails closed when its post-delivery boundary cannot be observed",
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let reads = 0;
-  let prompts = 0;
+  const prompts = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => {
     reads += 1;
     if (reads > 1) throw new Error("terminal observation unavailable");
     return { read: { text: "The old PR state was pending.", truncated: false } };
   });
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1765,7 +1777,8 @@ test("steering fails closed when its post-delivery boundary cannot be observed",
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /safe boundary could not be observed afterward/);
-  assert.equal(prompts, 1);
+  assert.equal(prompts[0], "/goal resume");
+  assert.match(prompts[1], /Reread the current PR state and continue\./);
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.observationCursor.kind, "reread-boundary-unavailable");
   assert.equal(stored.externalChange.workerSequence, Number.MAX_SAFE_INTEGER);
@@ -2328,6 +2341,7 @@ test("steering drains an in-flight external observation before clearing its watc
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker can continue independently.", truncated: false } }));
   let prompt;
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") return;
     prompt = message;
     throw new Error("prompt response timed out after possible delivery");
   });
@@ -2986,7 +3000,8 @@ test("an uncertain steer keeps an already accepted external reread resolved", as
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "I reread PR 16; its current checks pass.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") return;
     prompts += 1;
     throw new Error("prompt response timed out");
   });
