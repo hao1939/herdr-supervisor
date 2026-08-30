@@ -299,10 +299,11 @@ identity is the native agent session; the Herdr pane is its routing slot and
 the terminal ID is a transient location checkpoint. When Herdr restores the
 same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
-If that pane disappeared, one `steer` decision may create a new routing pane,
-resume the exact saved native session there, and update the local location
-checkpoint. Recovery reuses the goal's deterministically named empty tab after
-an interrupted creation response, so retry does not multiply panes. A pane is
+If that pane disappeared and the recorded session supports exact resume, one
+`steer` decision may create a new routing pane, resume that saved native session
+there, and update the local location checkpoint. Recovery reuses the goal's
+deterministically named empty tab after an interrupted creation response, so
+retry does not multiply panes. A pane is
 not the durable worker identity.
 Supervised Codex processes keep native Goals enabled. `goal.json` remains the
 single portable authority; the native Goal is the worker's persisted execution
@@ -676,7 +677,7 @@ events do not repeat the question before that review.
 | Supervisor or Herdr reconnect | Resume the same Pi session when available, load unfinished goals directly, fetch one snapshot, and re-arm watches |
 | Worker occupant changed       | Stop and ask the human; never prompt the replacement automatically                                 |
 | Exact worker process stopped  | Refresh an empty restored pane's terminal when needed, resume only the exact native session, then continue |
-| Worker pane disappeared       | On `steer`, create a new routing pane and resume only the exact saved native session                  |
+| Worker pane disappeared       | On `steer`, resume a supported exact saved session in a new routing pane; otherwise ask the human    |
 | Malformed or missing decision | Apply no action or checkpoint, record a visible diagnostic, and schedule one bounded retry         |
 | Prompt/send failure           | Re-read current identity and state before one bounded retry                                        |
 | Herdr reports blocked         | Read new native evidence and determine whether existing context can unblock it before asking the human |

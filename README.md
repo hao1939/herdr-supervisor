@@ -117,8 +117,8 @@ Two operations sit outside those review decisions. **stop** is explicit operator
 control that ends supervision without stopping the worker. Exact-session resume
 is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction. If
-its pane disappeared, the executor may create a new routing pane, but only for
-that exact saved session.
+its pane disappeared and the recorded session supports exact resume, the
+executor may create a new routing pane, but only for that saved session.
 
 For a settled goal waiting on one exact GitHub pull request or Azure DevOps
 build, the supervisor can observe that resource between model turns. Unchanged
