@@ -3424,6 +3424,7 @@ test("continuing after restart refreshes an empty pane terminal and resumes the 
   assert.match(result.content[0].text, /Resumed the exact codex session and native Goal/);
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.terminalId, restartedTerminal);
+  assert.equal(stored.progress, "The worker was steered to continue: Continue from current goal evidence.");
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",

@@ -1923,9 +1923,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const warning = await saveSteerCheckpoint(
             continuedBinding,
             instruction,
-            resumed
-              ? "The exact native Goal was resumed and asked to continue."
-              : `The worker was steered to continue: ${params.message.trim()}`,
+            `The worker was steered to continue: ${params.message.trim()}`,
             params.evidence || continuedBinding.evidence,
             reviewAt,
             deliveryBoundary,
