@@ -196,7 +196,9 @@ promise to reconsider, not permission to forget the goal:
 - a wait on one exact GitHub PR or ADO build may register a disposable external
   watch chosen by the model;
 - every wait has a bounded recheck;
-- an exact later time is used only when evidence provides one;
+- the model chooses an evidence-appropriate safety time; a peer decision or
+  external watch still wakes the goal earlier, avoiding repeated short reviews
+  of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
 A human question follows the same rule. It is concrete, asks for the minimum

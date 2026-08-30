@@ -496,10 +496,11 @@ peer or external condition. The model supplies that condition as structured
 input. A direct peer wait also supplies that worker's exact pane identity, so
 code can resolve and store the peer's durable goal identity without interpreting
 prose. The pane remains a last-known routing hint; relocating the peer cannot lose
-the relationship. The runtime assigns
-the normal bounded review interval automatically. If current evidence supplies
-an exact retry time, the model may preserve it instead. A settled worker
-without a concrete condition is still rejected. When several goals share
+the relationship. The runtime assigns the normal bounded review interval when
+the model supplies no exact time. For an event-backed wait, the model may choose
+a slower evidence-appropriate safety check because a peer decision or watched
+external change still wakes the goal earlier. A settled worker without a
+concrete condition is still rejected. When several goals share
 scarce capacity, one active worker may use or probe it. That responsibility ends
 when the worker becomes
 idle or externally blocked: its recorded supervisor decision wakes linked peers

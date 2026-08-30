@@ -1569,7 +1569,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a linked peer decision or watched external change still wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
@@ -1589,7 +1589,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       ], { description: "Optional deterministic observation for the exact external condition. It does not prove completion." })),
       external_change_revision: ExternalChangeRevision,
       evidence: Evidence,
-      review_at: Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 retry time no more than 24 hours ahead. Use null for the normal bounded review interval." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. Use null for the normal interval." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {

@@ -783,6 +783,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
+  assert.match(result.systemPrompt, /peer decision or external watch already wakes the goal early/);
+  assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);

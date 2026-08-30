@@ -182,7 +182,7 @@ const supervisorPolicy = [
     "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
-    "Supply review_at only for a real exact retry time; otherwise let the runtime choose its bounded interval.",
+    "Supply review_at when current evidence justifies a specific safety-check time. A peer decision or external watch already wakes the goal early, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",
     "A human question also receives bounded reconsideration and does not prevent unrelated useful work.",
   ],
