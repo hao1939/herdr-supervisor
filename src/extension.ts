@@ -521,7 +521,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   async function pollDueExternalWatches() {
     const goals = await activeBindings();
     const now = Date.now();
-    const due = goals.active.filter((goal) => goal.externalWatch && goal.externalWatch.nextPollAt <= now);
+    const due = goals.active.filter((goal) => goal.externalWatch
+      && goal.externalWatch.nextPollAt <= now
+      && !externalPoll.isActive(externalWatchKey(goal.externalWatch)));
     if (!due.length) return;
     const dueSubjects = new Set(due.map((goal) => externalWatchKey(goal.externalWatch)));
     const groups = new Map<string, typeof due>();
@@ -533,7 +535,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       group.push(goal);
       groups.set(key, group);
     }
-    await Promise.all([...groups].map(([key, group]) => externalPoll.run(key, async () => {
+    for (const [key, group] of groups) {
+      if (externalPoll.isActive(key)) continue;
+      await externalPoll.run(key, async () => {
       const observations = await observeExternalWatches(group.map((goal) => ({
         goalId: goal.goalId,
         source: goal.externalWatch!.source,
@@ -585,7 +589,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
         });
       }
-    })));
+      });
+    }
   }
 
   async function reviewDueWorkers() {
