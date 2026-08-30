@@ -418,7 +418,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     resolvedExternalChangeRevision?,
   ) {
     try {
-      return await saveSteerCheckpoint(
+      const warning = await saveSteerCheckpoint(
         binding,
         instruction,
         progress,
@@ -427,8 +427,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         boundary,
         resolvedExternalChangeRevision,
       );
+      return { saved: true, warning };
     } catch (error) {
-      return `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
+      return {
+        saved: false,
+        warning: `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`,
+      };
     }
   }
 
@@ -797,6 +801,15 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         key: `peer:${reference.goalId || reference.paneId}:${++workerEventSequence}`,
       });
     }
+  }
+
+  function wakeAfterDurableDecision(
+    peer,
+    reason = `supervisor decision for ${peer.paneId} changed; reconsider whether useful work can proceed`,
+  ) {
+    void wakeDependentWaiters(peer, reason).catch((error) => {
+      reportBackgroundFailure(`Could not wake goals waiting on ${peer.goalId || peer.paneId}`, error);
+    });
   }
 
   async function handleWorkerEvent(paneId: string) {
@@ -1662,6 +1675,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           resolvedExternalChangeRevision: resolution.revision,
         });
         cacheCheckpoint(binding, result.state);
+        wakeAfterDurableDecision(binding);
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = undefined;
         runtime.externalRereadCandidateRevision = undefined;
@@ -1864,7 +1878,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const deliveryProgress = delivery.deliveryError
             ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
             : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
-          const checkpointWarning = await saveUncertainSteer(
+          const checkpoint = await saveUncertainSteer(
             continuedBinding,
             instruction,
             deliveryProgress,
@@ -1873,16 +1887,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             unavailableRereadBoundary(),
             resolution.revision,
           );
+          if (checkpoint.saved) {
+            wakeAfterDurableDecision(continuedBinding);
+          }
           const deliveryNote = delivery.deliveryError
             ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
             : "";
-          return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpoint.warning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
         }
         if (delivery.deliveryError) {
           // A transport error cannot prove that Herdr did not accept the
           // prompt. Fail closed against duplicate delivery.
           scheduleReview(continuedBinding);
-          const checkpointWarning = await saveUncertainSteer(
+          const checkpoint = await saveUncertainSteer(
             continuedBinding,
             instruction,
             "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
@@ -1891,7 +1908,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             deliveryBoundary,
             resolution.revision,
           );
-          return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          if (checkpoint.saved) {
+            wakeAfterDurableDecision(continuedBinding);
+          }
+          return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
@@ -1908,6 +1928,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             deliveryBoundary,
             resolution.revision,
           );
+          wakeAfterDurableDecision(continuedBinding);
           runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
@@ -1979,6 +2000,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             },
           });
           cacheCheckpoint(binding, result.state);
+          wakeAfterDurableDecision(binding);
           runtimeFor(binding).pendingCursor = undefined;
           runtimeFor(binding).externalRereadCandidateRevision = undefined;
           clearExternalWatch(binding);
@@ -2053,7 +2075,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         held.release();
       }
       reviewTurn.close(params.pane_id);
-      await wakeDependentWaiters(
+      wakeAfterDurableDecision(
         binding,
         `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
       );
@@ -2126,7 +2148,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         } finally {
           held.release();
         }
-        await wakeDependentWaiters(
+        wakeAfterDurableDecision(
           binding,
           `supervision of ${paneId} stopped; reconsider whether useful work can proceed`,
         );
@@ -2253,12 +2275,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           runtime.missingDecisionRetries = 0;
           if (!runtime.awaitingHuman) scheduleReview(binding);
         }
-      }
-      if (decisionApplied) {
-        await wakeDependentWaiters(
-          reviewedPane,
-          `supervisor decision for ${reviewedPane} changed; reconsider whether useful work can proceed`,
-        );
       }
     }
     await drainSignals();

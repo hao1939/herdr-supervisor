@@ -2976,7 +2976,6 @@ test("an exact steering review survives restart and cannot be suppressed as quie
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  const reviewAt = new Date(Date.now() + 1400).toISOString();
   const firstPi = fakePi({ reviewMs: "1000" });
   herdrSupervisor(firstPi);
   await firstPi.events.get("session_start")({}, { ui: { setStatus() {} } });
@@ -2990,6 +2989,7 @@ test("an exact steering review survives restart and cannot be suppressed as quie
   });
   assert.equal(invalid.isError, true);
   assert.equal(prompts, 0, "an invalid deadline must fail before prompting the worker");
+  const reviewAt = new Date(Date.now() + 1400).toISOString();
   const steer = await firstPi.tools.get("supervisor_steer").execute("steer", {
     pane_id: worker.paneId,
     message: "Retry once at the exact boundary.",
