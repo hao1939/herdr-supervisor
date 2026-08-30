@@ -185,6 +185,15 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
+    if (decision === "accept" && current.externalChange) {
+      throw new Error("the watched external resource changed before acceptance");
+    }
+    if (
+      decision === "steer"
+      && current.externalChange?.revision !== input.externalChangeRevision
+    ) {
+      throw new Error("the watched external resource changed while steering was in progress");
+    }
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

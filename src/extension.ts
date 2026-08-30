@@ -269,6 +269,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
+      externalChangeRevision: binding.externalChange?.revision,
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
@@ -1429,6 +1430,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
+        stopExternalWatch(binding);
         let continuedBinding = binding;
         let resumed = false;
         const instruction = workerInstruction(binding, params.message);
@@ -1448,14 +1450,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             });
           } catch (error) {
             if (!resumeAccepted) throw error;
-            stopExternalWatch(binding);
             scheduleReview(binding);
             return text(`Herdr accepted the exact-session resume for ${params.pane_id}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
             reviewTurn.close(params.pane_id);
-            stopExternalWatch(binding);
             scheduleReview(binding);
             return text(`The exact-session resume ran, but the resulting worker identity did not match: ${resumedMismatch}. No further message was sent.\n\nEnd this supervisor turn now; do not retry without fresh evidence.`, true);
           }
@@ -1464,7 +1464,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           try {
             await client.promptAgent(params.pane_id, instruction);
           } catch (error) {
-            stopExternalWatch(continuedBinding);
             scheduleReview(continuedBinding);
             const checkpointWarning = await saveUncertainSteer(
               continuedBinding,
@@ -1482,7 +1481,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
             reviewTurn.close(params.pane_id);
-            stopExternalWatch(binding);
             scheduleReview(binding);
             const checkpointWarning = await saveUncertainSteer(
               binding,
@@ -1497,7 +1495,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
         reviewTurn.close(params.pane_id);
-        stopExternalWatch(continuedBinding);
         try {
           const warning = await saveSteerCheckpoint(
             continuedBinding,
@@ -1596,13 +1593,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      const result = await recordDecision(binding, "accept", {
-        progress: params.summary.trim(),
-        action: "Accepted the verified goal.",
-        evidence: params.evidence,
-        observationCursor: runtimeFor(binding).pendingCursor,
-        terminal: { state: "accepted", summary: params.summary.trim() },
-      });
+      stopExternalWatch(binding);
+      let result;
+      try {
+        result = await recordDecision(binding, "accept", {
+          progress: params.summary.trim(),
+          action: "Accepted the verified goal.",
+          evidence: params.evidence,
+          observationCursor: runtimeFor(binding).pendingCursor,
+          terminal: { state: "accepted", summary: params.summary.trim() },
+        });
+      } catch (error) {
+        const reloadWarning = await reconcileCacheAfterWriteFailure();
+        scheduleReview(binding);
+        return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
+      }
       runtimeFor(binding).pendingCursor = undefined;
       cacheCheckpoint(binding, result.state);
       reviewTurn.close(params.pane_id);

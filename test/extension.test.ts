@@ -1425,6 +1425,7 @@ test("restart retains an external reread until a later native final response", a
     progress: "The worker was told to reread PR 16.",
     action: "Reread current PR 16 checks.",
     observationCursor: cursor,
+    externalChangeRevision: "changed-revision",
   }, root, () => "2026-08-30T05:02:00.000Z");
 
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -1475,6 +1476,42 @@ test("restart retains an external reread until a later native final response", a
   }, undefined, undefined, { ui: { setStatus() {} } });
   assert.equal(finish.isError, false);
   afterEvidence.events.get("session_shutdown")();
+});
+
+test("acceptance rejects an external change recorded after its cached read", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The old result looked complete.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-after-cache",
+    observedAt: new Date().toISOString(),
+  }, root);
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-stale", {
+    pane_id: worker.paneId,
+    summary: "The old result passed.",
+    evidence: ["Only the old result was observed."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(finish.isError, true);
+  assert.match(finish.content[0].text, /changed before acceptance/);
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  pi.events.get("session_shutdown")();
 });
 
 test("a slow failing provider stays single-flight while the bounded review still runs", async (t) => {

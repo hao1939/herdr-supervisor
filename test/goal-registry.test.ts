@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   loadSupervisorGoals,
   recordDecision,
+  recordExternalChange,
   refineSupervisorGoal,
   refreshWorkerLocation,
   registerSupervisedGoal,
@@ -194,6 +195,34 @@ test("restart reloads concurrent goals independently and reconsiders fresh Herdr
   };
   assert.equal(shouldWake({ ...restarted.active[0], lastReviewStateChangeSeq: 0 }, alphaAgent, alphaAgent).wake, false);
   assert.equal(shouldWake({ ...restarted.active[1], lastReviewStateChangeSeq: 0 }, betaAgent, betaAgent).wake, true);
+});
+
+test("stale decisions cannot bypass a newly recorded external change", async () => {
+  const directory = await root();
+  const stale = await registerSupervisedGoal(worker, {
+    objective: "Verify the current external result.",
+    acceptance: ["The changed result is reread."],
+  }, directory, { goalId: "g_external_race", at: "2026-08-30T05:00:00.000Z" });
+  await recordExternalChange(stale, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-2",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, directory, () => "2026-08-30T05:01:00.000Z");
+
+  await assert.rejects(recordDecision(stale, "accept", {
+    progress: "The stale snapshot looked complete.",
+    action: "Accept stale evidence.",
+    terminal: { state: "accepted", summary: "Stale acceptance." },
+  }, directory), /changed before acceptance/);
+  await assert.rejects(recordDecision(stale, "steer", {
+    progress: "An unrelated instruction was sent.",
+    action: "Continue unrelated work.",
+  }, directory), /changed while steering/);
+
+  const [current] = (await loadSupervisorGoals(directory)).active;
+  assert.ok(current.externalChange);
+  assert.equal(current.lastDecision, undefined);
 });
 
 test("the same native session may refresh its transient terminal after restart", async () => {
