@@ -1585,6 +1585,67 @@ test("steering records a fresh delivery boundary instead of earlier review evide
   afterSteer.events.get("session_shutdown")();
 });
 
+test("Codex fallback cannot treat a non-assistant record as reread evidence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-codex-fallback-"));
+  const sessionFile = join(root, "worker.jsonl");
+  const oldLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old checks are pending." }] },
+  })}\n`;
+  await writeFile(sessionFile, oldLine);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Verify PR 16 after its checks change.",
+    acceptance: ["Current authoritative checks are reread and handled."],
+  }, root, { goalId: "g_codex_fallback", at: "2026-08-30T05:00:00.000Z" });
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(oldLine) },
+    externalChangeRevision: "changed-revision",
+    workerSequence: 2,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  await appendFile(sessionFile, `${JSON.stringify({
+    timestamp: "2026-08-30T05:03:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Reread PR 16." }] },
+  })}\n`);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "blocked",
+    state_change_seq: 3,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The old terminal text is unchanged.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-non-assistant", { pane_id: worker.paneId });
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  pi.events.get("session_shutdown")();
+});
+
 test("acceptance rejects an external change recorded after its cached read", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

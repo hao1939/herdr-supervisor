@@ -280,6 +280,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     ))
       && cursorAdvanced(binding.observationCursor, observation.cursor);
     const terminalResult = observation.source === "terminal-fallback"
+      && binding.observationCursor?.kind === "terminal-output"
+      && observation.cursor?.kind === "terminal-output"
       && agent.agent_status !== "working"
       && observation.messages.some((message) => message.text.trim())
       && cursorAdvanced(binding.observationCursor, observation.cursor)
