@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sameAgentSession } from "../src/identity.ts";
 import {
   captureIdentity,
   dependentBindings,
@@ -71,6 +72,13 @@ test("worker identity captures the exact native session", () => {
     terminalId: "term-1",
     agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" },
   });
+});
+
+test("native session equality has one exact identity contract", () => {
+  const session = agent().agent_session;
+  assert.equal(sameAgentSession(session, { ...session }), true);
+  assert.equal(sameAgentSession(session, { ...session, value: "replacement" }), false);
+  assert.equal(sameAgentSession(session, undefined), false);
 });
 
 test("one nearest deadline selects only workers due for review", () => {

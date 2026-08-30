@@ -10,6 +10,7 @@ import {
   updateGoalContract,
   updateGoalState,
 } from "./goal-store.ts";
+import { sameAgentSession } from "./identity.ts";
 import type { GoalBinding } from "./types.ts";
 
 export const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
@@ -159,9 +160,7 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
 }
 
 export async function refreshWorkerLocation(binding, worker, root?, now?) {
-  if (["source", "agent", "kind", "value"].some(
-    (field) => worker.agentSession?.[field] !== binding.agentSession?.[field],
-  )) {
+  if (!sameAgentSession(worker.agentSession, binding.agentSession)) {
     throw new Error("the native agent session changed");
   }
   if (worker.paneId === binding.paneId && worker.terminalId === binding.terminalId) return binding;

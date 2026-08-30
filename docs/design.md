@@ -250,6 +250,7 @@ events and internal metadata do not compete with the useful outcome.
 - `extension.ts` wires Pi tools, Herdr events, timers, and validated effects.
 - `prompts.ts` contains readable model and worker policy.
 - `types.ts` distinguishes durable goal bindings from transient runtime state.
+- `identity.ts` owns exact native-session equality shared across boundaries.
 - `goal-store.ts` validates and atomically persists contracts, checkpoints, and
   audit entries.
 - `goal-registry.ts` maps stored goal records to active bindings.

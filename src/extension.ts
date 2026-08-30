@@ -15,6 +15,7 @@ import {
 } from "./goal-registry.ts";
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
+import { sameAgentSession } from "./identity.ts";
 import {
   ExternalPollFence,
   observeExternalWatches,
@@ -116,10 +117,7 @@ function workerNameForGoal(goalId: string) {
 
 function exactSessionAgent(snapshot, session) {
   return snapshot.agents?.find((agent) => (
-    agent.agent_session
-    && ["source", "agent", "kind", "value"].every(
-      (field) => agent.agent_session[field] === session[field],
-    )
+    sameAgentSession(agent.agent_session, session)
   ));
 }
 
@@ -460,9 +458,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       candidate.goalId !== binding.goalId
       && (
         candidate.paneId === paneId
-        || ["source", "agent", "kind", "value"].every(
-          (field) => candidate.agentSession[field] === binding.agentSession[field],
-        )
+        || sameAgentSession(candidate.agentSession, binding.agentSession)
       )
     ));
     if (conflict) {

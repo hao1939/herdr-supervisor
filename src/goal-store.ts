@@ -2,6 +2,7 @@ import { open, mkdir, readFile, readdir, rename, unlink } from "node:fs/promises
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
 export const STATE_VERSION = 1;
@@ -369,9 +370,7 @@ export async function updateGoalState(
     }
     if (
       (!allowWorkerRelocation && next.worker.paneId !== current.worker.paneId)
-      || ["source", "agent", "kind", "value"].some(
-        (field) => next.worker.agentSession?.[field] !== current.worker.agentSession?.[field],
-      )
+      || !sameAgentSession(next.worker.agentSession, current.worker.agentSession)
     ) {
       throw new Error("a goal state update cannot replace its worker pane or native session");
     }
