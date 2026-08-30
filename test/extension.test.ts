@@ -3800,7 +3800,7 @@ test("missing-pane recovery refuses a pane assigned to another active goal", asy
   pi.events.get("session_shutdown")();
 });
 
-test("an accepted resume is not repeated when readiness checking fails", async (t) => {
+test("an uncertain resume response is not repeated in the same turn", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3810,10 +3810,9 @@ test("an accepted resume is not repeated when readiness checking fails", async (
   });
   let resumes = 0;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (_request, _timeout, onStarted) => {
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => {
     resumes += 1;
-    onStarted();
-    throw new Error("readiness timed out");
+    throw new Error("agent.start connection closed");
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -3829,8 +3828,8 @@ test("an accepted resume is not repeated when readiness checking fails", async (
 
   assert.equal(resumes, 1);
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /Herdr accepted the exact-session resume/);
-  assert.match(result.content[0].text, /Do not resume it again/);
+  assert.match(result.content[0].text, /resume may have started/);
+  assert.match(result.content[0].text, /Do not resume it again in this turn/);
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",

@@ -396,7 +396,8 @@ Supervisor restart or resumed session
 | `blocked`                                | Review immediately and determine whether the worker or human can answer |
 | `idle` or Herdr `done`                   | Review the result; never assume goal completion                         |
 | Agent process exits but pane remains     | Continue the goal; code resumes the exact session                        |
-| Pane disappears or occupant changes      | Fail closed and ask the human only when a decision is needed             |
+| Pane disappears                          | Let `steer` relocate and resume only the exact saved native session      |
+| Pane occupant changes                     | Fail closed; ask the human only when a real decision is needed           |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
 | Linked worker records a decision         | Reconsider only goals explicitly waiting on that worker                 |

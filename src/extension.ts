@@ -1814,17 +1814,16 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           // steering; otherwise Codex waits at an interactive "Resume goal?"
           // gate and the apparently recovered worker never moves.
           request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
-          let resumeAccepted = false;
+          reviewTurn.close(binding.paneId);
           let resumedAgent;
           try {
-            resumedAgent = await client.startAndWaitAgent(request, 30_000, () => {
-              resumeAccepted = true;
-              reviewTurn.close(binding.paneId);
-            });
+            resumedAgent = await client.startAndWaitAgent(request, 30_000);
           } catch (error) {
-            if (!resumeAccepted) throw error;
             scheduleReview(binding);
-            return text(`Herdr accepted the exact-session resume for ${binding.paneId}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            let warning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+            return text(`Could not confirm the exact-session resume for ${binding.paneId}: ${error.message}. The resume may have started, but no follow-up instruction was sent.${warning}\n\nDo not resume it again in this turn. The bounded review will reread current worker state and continue safely.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
