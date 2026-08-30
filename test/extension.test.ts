@@ -3783,6 +3783,57 @@ test("missing-pane recovery rejects duplicate processes for one native session",
   pi.events.get("session_shutdown")();
 });
 
+test("post-relocation observation failure closes the turn and schedules recovery", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const movedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    agent_status: "working",
+    state_change_seq: 3,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+  };
+  let snapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshots += 1;
+    if (snapshots === 3) throw new Error("post-relocation snapshot failed");
+    return {
+      agents: [movedAgent],
+      panes: [{ pane_id: movedAgent.pane_id, terminal_id: movedAgent.terminal_id }],
+    };
+  });
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /post-relocation snapshot failed/);
+  assert.match(result.content[0].text, /bounded review will reread current state/);
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.equal(prompts, 0);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, movedAgent.pane_id);
+  pi.events.get("session_shutdown")();
+});
+
 test("missing-pane recovery refuses a pane assigned to another active goal", async (t) => {
   const root = await fixture();
   const otherWorker = {

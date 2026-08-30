@@ -1731,6 +1731,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
       let releaseExternalPolling = () => {};
+      let relocatedBinding: ActiveGoal | undefined;
       try {
         const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
@@ -1786,6 +1787,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           relocated = binding.paneId !== previousPaneId;
           if (relocated) {
             reviewTurn.retarget(params.pane_id, binding.paneId);
+            relocatedBinding = binding;
             try {
               await connectObserver();
             } catch (error) {
@@ -1804,6 +1806,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           && ["idle", "done"].includes(liveAgent.agent_status),
         );
         if (liveMismatch && !canResumeNow) {
+          if (relocatedBinding) throw new Error(liveMismatch);
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
         let continuedBinding = binding;
@@ -1875,6 +1878,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           resumed = true;
         }
         const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+        relocatedBinding = undefined;
         deliveryBoundary = delivery.boundary;
         if (delivery.boundaryError) {
           scheduleReview(continuedBinding);
@@ -1951,7 +1955,17 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           scheduleReview(continuedBinding);
           return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
         }
-      } catch (error) { return text(`Could not continue worker: ${error.message}`, true); }
+      } catch (error) {
+        if (relocatedBinding) {
+          reviewTurn.close(relocatedBinding.paneId);
+          scheduleReview(relocatedBinding);
+          let warning = "";
+          try { await armReviewTimer(); }
+          catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+          return text(`Could not finish the relocated worker action: ${error.message}. Recovery may have partly applied, but no action was retried.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
+        }
+        return text(`Could not continue worker: ${error.message}`, true);
+      }
       finally { releaseExternalPolling(); }
     },
   });
