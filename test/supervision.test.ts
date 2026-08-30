@@ -395,6 +395,8 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
   assert.match(message, /confirm that the condition still exists/);
+  assert.match(message, /fresh evidence must cover every part you claim remains unchanged/);
+  assert.match(message, /steer the worker to reread it rather than infer unchanged state from silence or older evidence/);
   assert.match(message, /continue any independent useful work/);
   assert.match(message, /durable goal is still coherent, useful, and achievable/);
   assert.match(message, /current blocker stops the whole outcome or only one path/);
