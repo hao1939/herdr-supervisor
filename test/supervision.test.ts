@@ -193,6 +193,18 @@ test("stopped process is shown as recoverable supervision work, not changed iden
   );
 });
 
+test("an empty replacement terminal is shown as recoverable supervision work", () => {
+  const current = binding({ goalId: "g_restarted" });
+  const output = formatWorker(liveWorker(current, {
+    agents: [],
+    panes: [{ pane_id: "w1:p2", terminal_id: "term-replaced" }],
+  }));
+
+  assert.match(output, /Worker: codex w1:p2 · terminal replaced/);
+  assert.match(output, /Next: supervisor should review whether the exact session can resume/);
+  assert.doesNotMatch(output, /Needs you/);
+});
+
 test("a missing pane is recoverable supervision work, not human work", () => {
   const current = binding({ goalId: "g_open" });
   const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
