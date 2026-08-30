@@ -109,7 +109,11 @@ This conservative boundary may ignore output produced during delivery, but it
 cannot mistake earlier output for the reread. The change clears only after a
 later native final response advances that cursor. A worker without a native
 transcript instead requires a later settled Herdr transition and a changed
-terminal fingerprint.
+terminal fingerprint. That fingerprint covers a fixed terminal suffix, so
+changing the number of displayed lines does not manufacture progress. If the
+post-delivery observation itself fails, the supervisor saves a fail-closed
+boundary that cannot clear automatically; a later bounded review may steer the
+same worker again and replace it with a real boundary.
 
 A decision that stops watching first drains the in-flight read for that exact
 external subject; an unrelated slow provider does not delay it. The final state

@@ -96,6 +96,14 @@ test("pull request traceability never publishes a path-backed session locator", 
   assert.doesNotMatch(trace, /\/private\/home/);
 });
 
+test("terminal cursors do not change when an observation includes more older lines", () => {
+  const recent = Array.from({ length: 10 }, (_, index) => `recent line ${index + 1}`).join("\n");
+  assert.deepEqual(
+    terminalOutputCursor(`older line 1\nolder line 2\n${recent}`),
+    terminalOutputCursor(recent),
+  );
+});
+
 test("pull request traceability stays bounded for a long goal and requires the current contract", () => {
   const trace = pullRequestTraceability({
     goalId: "g_long",
@@ -1688,6 +1696,52 @@ test("steering records a delivery boundary after its prompt is accepted", async 
     "output produced during delivery cannot satisfy the reread",
   );
   afterSteer.events.get("session_shutdown")();
+});
+
+test("steering fails closed when its post-delivery boundary cannot be observed", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let reads = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => {
+    reads += 1;
+    if (reads > 1) throw new Error("terminal observation unavailable");
+    return { read: { text: "The old PR state was pending.", truncated: false } };
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread the current PR state and continue.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /safe boundary could not be observed afterward/);
+  assert.equal(prompts, 1);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.observationCursor.kind, "reread-boundary-unavailable");
+  assert.equal(stored.externalChange.workerSequence, Number.MAX_SAFE_INTEGER);
+  assert.equal(stored.lastDecision.decision, "steer");
+  pi.events.get("session_shutdown")();
 });
 
 test("Codex fallback cannot treat a non-assistant record as reread evidence", async (t) => {

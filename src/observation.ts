@@ -4,11 +4,13 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 const resolvedSessions = new Map();
+const TERMINAL_CURSOR_LINES = 10;
 
 export function terminalOutputCursor(text: string) {
+  const suffix = text.replaceAll("\r\n", "\n").split("\n").slice(-TERMINAL_CURSOR_LINES).join("\n");
   return {
     kind: "terminal-output",
-    fingerprint: createHash("sha256").update(text).digest("hex"),
+    fingerprint: createHash("sha256").update(suffix).digest("hex"),
   };
 }
 

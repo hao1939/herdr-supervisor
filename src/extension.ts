@@ -304,15 +304,28 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   async function deliverWorkerInstruction(binding, instruction) {
     let deliveryError;
+    let boundary;
+    let boundaryError;
     try {
       await client.promptAgent(binding.paneId, instruction);
     } catch (error) {
       deliveryError = error;
     }
     reviewTurn.close(binding.paneId);
-    const boundary = await capturePostDeliveryBoundary(binding);
+    try {
+      boundary = await capturePostDeliveryBoundary(binding);
+    } catch (error) {
+      boundaryError = error;
+    }
     stopExternalWatch(binding);
-    return { boundary, deliveryError };
+    return { boundary, boundaryError, deliveryError };
+  }
+
+  function unavailableRereadBoundary() {
+    return {
+      observationCursor: { kind: "reread-boundary-unavailable" },
+      workerSequence: Number.MAX_SAFE_INTEGER,
+    };
   }
 
   function workerInstruction(binding, message) {
@@ -1557,6 +1570,24 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           resumed = true;
           const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
           deliveryBoundary = delivery.boundary;
+          if (delivery.boundaryError) {
+            scheduleReview(continuedBinding);
+            const deliveryProgress = delivery.deliveryError
+              ? "The exact session resumed, but both delivery of its next instruction and the post-delivery reread boundary are uncertain; another bounded review is required."
+              : "The exact session resumed and received its next instruction, but the post-delivery reread boundary could not be observed; another bounded review is required.";
+            const checkpointWarning = await saveUncertainSteer(
+              continuedBinding,
+              instruction,
+              deliveryProgress,
+              params.evidence || continuedBinding.evidence,
+              reviewAt,
+              unavailableRereadBoundary(),
+            );
+            const deliveryNote = delivery.deliveryError
+              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
+              : "";
+            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not observe a safe boundary after the follow-up delivery attempt: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          }
           if (delivery.deliveryError) {
             scheduleReview(continuedBinding);
             const checkpointWarning = await saveUncertainSteer(
@@ -1572,6 +1603,24 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         } else {
           const delivery = await deliverWorkerInstruction(binding, instruction);
           deliveryBoundary = delivery.boundary;
+          if (delivery.boundaryError) {
+            scheduleReview(binding);
+            const deliveryProgress = delivery.deliveryError
+              ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
+              : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
+            const checkpointWarning = await saveUncertainSteer(
+              binding,
+              instruction,
+              deliveryProgress,
+              params.evidence || binding.evidence,
+              reviewAt,
+              unavailableRereadBoundary(),
+            );
+            const deliveryNote = delivery.deliveryError
+              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
+              : "";
+            return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          }
           if (delivery.deliveryError) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
