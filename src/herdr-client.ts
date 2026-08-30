@@ -104,40 +104,53 @@ export class HerdrClient {
     });
   }
 
-  async startAgent({ name, kind, paneId, args = [] }) {
+  async startAgent({ name, kind, paneId, args = [] }, timeoutMs = 31_000) {
+    const serverTimeoutMs = Math.min(30_000, Math.max(1, timeoutMs - 100));
     return this.request("agent.start", {
       name,
       kind,
       pane_id: paneId,
       args,
-      timeout_ms: 30_000,
-    });
+      timeout_ms: serverTimeoutMs,
+    }, timeoutMs);
   }
 
-  async getAgent(paneId) {
-    const result = await this.request("agent.get", { target: paneId });
+  async getAgent(paneId, timeoutMs = this.timeoutMs) {
+    const result = await this.request("agent.get", { target: paneId }, timeoutMs);
     return result.agent;
   }
 
   async startAndWaitAgent(request, timeoutMs = 30_000, onStarted = () => {}) {
-    await this.startAgent(request);
-    onStarted();
     const deadline = Date.now() + timeoutMs;
+    await this.startAgent(request, timeoutMs);
+    onStarted();
     for (;;) {
-      const agent = await this.getAgent(request.paneId);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`Herdr agent ${request.paneId} did not become ready`);
+      let agent;
+      try {
+        agent = await this.getAgent(request.paneId, remaining);
+      } catch (error) {
+        if (!/agent target .* not found/i.test(error?.message || "")) throw error;
+      }
       if (agent?.interactive_ready) return agent;
-      if (Date.now() >= deadline) throw new Error(`Herdr agent ${request.paneId} did not become ready`);
-      await wait(200);
+      await wait(Math.min(200, Math.max(1, deadline - Date.now())));
     }
   }
 
   async waitForAgentSession(paneId, timeoutMs = 30_000) {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      const agent = await this.getAgent(paneId);
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`Herdr agent ${paneId} did not report a native session`);
+      let agent;
+      try {
+        agent = await this.getAgent(paneId, remaining);
+      } catch (error) {
+        if (!/agent target .* not found/i.test(error?.message || "")) throw error;
+      }
       if (agent?.agent_session) return agent;
-      if (Date.now() >= deadline) throw new Error(`Herdr agent ${paneId} did not report a native session`);
-      await wait(200);
+      await wait(Math.min(200, Math.max(1, deadline - Date.now())));
     }
   }
 

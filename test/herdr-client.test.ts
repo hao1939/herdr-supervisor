@@ -54,6 +54,30 @@ test("startAgent requests one exact agent session in an existing pane", async ()
   }
 });
 
+test("startAgent keeps the transport open for Herdr's start deadline", async (t) => {
+  const client = new HerdrClient();
+  let observed;
+  t.mock.method(client, "request", async (method, params, timeoutMs) => {
+    observed = { method, params, timeoutMs };
+    return { type: "agent_started" };
+  });
+  await client.startAgent({ name: "codex", kind: "codex", paneId: "w1:p2" });
+  assert.equal(observed.timeoutMs, 31_000);
+  assert.equal(observed.params.timeout_ms, 30_000);
+});
+
+test("startAgent keeps a response margin inside a shorter caller deadline", async (t) => {
+  const client = new HerdrClient();
+  let observed;
+  t.mock.method(client, "request", async (method, params, timeoutMs) => {
+    observed = { method, params, timeoutMs };
+    return { type: "agent_started" };
+  });
+  await client.startAgent({ name: "codex", kind: "codex", paneId: "w1:p2" }, 5_000);
+  assert.equal(observed.timeoutMs, 5_000);
+  assert.equal(observed.params.timeout_ms, 4_900);
+});
+
 test("promptAgent can atomically wait for the submitted prompt to start work", async () => {
   let observed;
   const fake = await fakeHerdr((request, socket) => {
@@ -189,6 +213,33 @@ test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () =
   } finally {
     await fake.close();
   }
+});
+
+test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) => {
+  const client = new HerdrClient();
+  let reads = 0;
+  t.mock.method(client, "startAgent", async () => ({ type: "agent_started" }));
+  t.mock.method(client, "getAgent", async () => {
+    reads += 1;
+    if (reads === 1) throw new Error("agent target w1:p2 not found");
+    return { pane_id: "w1:p2", interactive_ready: true };
+  });
+  const agent = await client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000);
+  assert.equal(agent.pane_id, "w1:p2");
+  assert.equal(reads, 2);
+});
+
+test("native session discovery tolerates a brief missing-agent transition", async (t) => {
+  const client = new HerdrClient();
+  let reads = 0;
+  t.mock.method(client, "getAgent", async () => {
+    reads += 1;
+    if (reads === 1) throw new Error("agent target w1:p2 not found");
+    return { pane_id: "w1:p2", agent_session: { value: "session-1" } };
+  });
+  const agent = await client.waitForAgentSession("w1:p2", 1_000);
+  assert.equal(agent.agent_session.value, "session-1");
+  assert.equal(reads, 2);
 });
 
 test("subscription returns immediately and forwards events", async () => {
