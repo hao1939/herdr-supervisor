@@ -1,7 +1,6 @@
 export class ReviewTurnFence {
   paneId: string | undefined;
   reason: string | undefined;
-  requiresWorkerReread = false;
   phase: "idle" | "preparing" | "active" = "idle";
   observing = false;
   observed = false;
@@ -11,10 +10,9 @@ export class ReviewTurnFence {
     this.end();
   }
 
-  begin(paneId, reason?, options: { requiresWorkerReread?: boolean } = {}) {
+  begin(paneId, reason?) {
     this.paneId = paneId;
     this.reason = reason;
-    this.requiresWorkerReread = Boolean(options.requiresWorkerReread);
     this.phase = "active";
     this.observing = false;
     this.observed = false;
@@ -24,7 +22,6 @@ export class ReviewTurnFence {
   end() {
     this.paneId = undefined;
     this.reason = undefined;
-    this.requiresWorkerReread = false;
     this.phase = "idle";
     this.observing = false;
     this.observed = false;
@@ -33,7 +30,6 @@ export class ReviewTurnFence {
 
   prepare(paneId) {
     this.paneId = paneId;
-    this.requiresWorkerReread = false;
     this.phase = "preparing";
     this.observing = false;
     this.observed = false;

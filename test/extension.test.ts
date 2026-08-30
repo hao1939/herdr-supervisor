@@ -1431,7 +1431,7 @@ test("missing-decision retries keep requiring a reread after an external change 
     external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
   });
   assert.equal(firstLeave.isError, true);
-  assert.match(firstLeave.content[0].text, /external watch change triggered this review/);
+  assert.match(firstLeave.content[0].text, /authoritative reread evidence is still pending/);
 
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 2);
@@ -1445,7 +1445,7 @@ test("missing-decision retries keep requiring a reread after an external change 
     external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
   });
   assert.equal(retryLeave.isError, true);
-  assert.match(retryLeave.content[0].text, /external watch change triggered this review/);
+  assert.match(retryLeave.content[0].text, /authoritative reread evidence is still pending/);
   pi.events.get("session_shutdown")();
 });
 
