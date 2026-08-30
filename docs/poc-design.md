@@ -537,8 +537,9 @@ the goal is practical and whether the condition blocks the whole outcome or
 only one route, looks for safe mitigation or alternative proof, and continues
 independent useful work or preparation. It may wait again only when fresh
 evidence shows that nothing meaningful can move and supplies the next exact
-boundary. A linked worker's change triggers the same reconsideration
-immediately.
+boundary. A linked peer's next recorded supervisor decision triggers the same
+reconsideration immediately; its raw lifecycle changes wake only that peer's
+own goal.
 
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
