@@ -54,7 +54,7 @@ async function responseJson(response: Response, label: string) {
 }
 
 function parseGitHubSubject(subject: string) {
-  const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(subject);
+  const match = /^([^/]+)\/([^/#]+)#([1-9]\d*)$/.exec(subject);
   if (!match) throw new Error("GitHub PR subject must look like owner/repository#number");
   return { owner: match[1], repository: match[2], number: Number(match[3]) };
 }

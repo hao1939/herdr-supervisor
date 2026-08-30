@@ -1175,12 +1175,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       external_watch: Type.Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
-          subject: Type.String({ pattern: "^[^/]+/[^#]+#[1-9][0-9]*$", description: "Exact GitHub identity: owner/repository#number." }),
+          subject: Type.String({ minLength: 1, maxLength: 2000, pattern: "^[^/]+/[^/#]+#[1-9][0-9]*$", description: "Exact GitHub identity: owner/repository#number." }),
           revision: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Omit it to establish a quiet baseline." })),
         }),
         Type.Object({
           source: Type.Literal("ado-build"),
-          subject: Type.String({ pattern: "^[^/]+/[^/]+/[1-9][0-9]*$", description: "Exact ADO identity: organization/project/build-id." }),
+          subject: Type.String({ minLength: 1, maxLength: 2000, pattern: "^[^/]+/[^/]+/[1-9][0-9]*$", description: "Exact ADO identity: organization/project/build-id." }),
           revision: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Omit it to establish a quiet baseline." })),
         }),
       ], { description: "Optional deterministic observation for the exact external condition. It does not prove completion." })),
