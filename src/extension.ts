@@ -273,15 +273,18 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return previous && current && JSON.stringify(previous) !== JSON.stringify(current);
   }
 
+  function nativeCursorAdvanced(previous, current) {
+    return previous?.kind === "codex-jsonl"
+      && current?.kind === "codex-jsonl"
+      && previous.path === current.path
+      && current.offset > previous.offset;
+  }
+
   function externalRereadObserved(binding, observation, agent) {
     if (!externalRereadInFlight(binding)) return false;
-    const instructionAt = Date.parse(binding.lastDecision.at);
-    const nativeFinal = observation.messages.some((message) => (
-      message.phase === "final_answer"
-      && Number.isFinite(Date.parse(message.timestamp))
-      && Date.parse(message.timestamp) > instructionAt
-    ))
-      && cursorAdvanced(binding.observationCursor, observation.cursor);
+    const nativeFinal = observation.source === "codex-session"
+      && nativeCursorAdvanced(binding.observationCursor, observation.cursor)
+      && observation.messages.some((message) => message.phase === "final_answer");
     const terminalResult = observation.source === "terminal-fallback"
       && binding.observationCursor?.kind === "terminal-output"
       && observation.cursor?.kind === "terminal-output"
