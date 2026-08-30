@@ -14,6 +14,22 @@ The core rule is:
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
 
+Before adding a mechanism, apply this feature test in order:
+
+1. Can the worker or supervisor model handle the situation with its existing
+   facts and tools? If so, improve the goal, prompt, or documented knowledge.
+2. If it could handle the situation, was it reliably woken? If not, connect the
+   condition to the existing event subscription or nearest-deadline safenet.
+3. If it was woken, did it receive enough current evidence to decide? If not,
+   add the smallest deterministic observation needed for the model to judge.
+4. Add code only when a reusable observation or action primitive is genuinely
+   missing. Do not encode one workflow's semantic answer in branches, queues,
+   retry state, or another lifecycle.
+
+Live repetition is evidence for promoting knowledge into code; a single rare
+rough edge is not. Eventual correct progress is preferred to perfect recovery
+that materially enlarges the system.
+
 ## Mental model
 
 There are three roles:
