@@ -3232,8 +3232,9 @@ test("a global review exposes unstarted goals without pretending they have worke
 
 test("a global review reloads goal contracts copied in after session start", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-extension-"));
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   const reviewState = await loadGlobalReviewState(root);
-  reviewState.nextReviewAt = new Date(Date.now() + 250).toISOString();
+  reviewState.nextReviewAt = new Date(Date.now() + 60_000).toISOString();
   await saveGlobalReviewState(reviewState, root);
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3251,11 +3252,26 @@ test("a global review reloads goal contracts copied in after session start", asy
     objective: "Resume the copied release migration.",
     acceptance: ["The migration is verified."],
   }, root, { goalId: "g_copied" });
-  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-global-review"));
+  t.mock.timers.tick(60_000);
+  for (let attempt = 0; attempt < 100 && !pi.messages.some(
+    (message) => message.customType === "herdr-supervisor-global-review"
+  ); attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
   const review = pi.messages.find((message) => message.customType === "herdr-supervisor-global-review");
   assert.ok(review);
   assert.match(review.content, /"goalId": "g_copied"/);
   assert.match(review.content, /"workerState": "unstarted"/);
+  const result = await pi.tools.get("supervisor_global_result").execute("copied-finding", {
+    summary: "A copied goal has not been started.",
+    findings: [{
+      problem: "A saved goal has no worker",
+      evidence: ["Its worker state is unstarted"],
+      affected_goal_ids: ["g_copied"],
+    }],
+    reconsider: [],
+  });
+  assert.equal(result.isError, false);
   pi.events.get("session_shutdown")();
 });
 

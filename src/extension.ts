@@ -756,9 +756,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function handleGlobalReview(reason: string) {
-    const [, snapshot] = await Promise.all([reloadGoals(), client.snapshot()]);
-    const goals = await activeBindings();
-    const compactSnapshot = buildGlobalSnapshot(goals.active, goals.unstarted, snapshot, {
+    const [storedGoals, snapshot] = await Promise.all([loadSupervisorGoals(), client.snapshot()]);
+    const bindings = storedGoals.active.map((binding): ActiveGoal => ({
+      ...binding,
+      ...runtimeFor(binding),
+    }));
+    const compactSnapshot = buildGlobalSnapshot(bindings, storedGoals.unstarted, snapshot, {
       observerConnected: Boolean(stopSubscription),
       pendingFocusedReviews: pendingSignals.size,
       activeReview: reviewTurn.isActive() ? `goal:${reviewTurn.paneId}` : "global",
@@ -1301,7 +1304,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       if (!activeGlobalReview) return text("No global supervision review is active.", true);
       if (globalDecisionApplied) return text("The global supervision review already has a result.", true);
-      const goals = await activeBindings();
+      const goals = await loadSupervisorGoals();
       const byGoalId = new Map(goals.active.map((binding) => [binding.goalId, binding]));
       const unstartedGoalIds = new Set(goals.unstarted.map((goal) => goal.goalId));
       const knownGoalIds = new Set([...byGoalId.keys(), ...unstartedGoalIds]);
