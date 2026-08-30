@@ -1381,6 +1381,103 @@ test("a native Goal that settles again does not receive a tactical instruction",
   pi.events.get("session_shutdown")();
 });
 
+test("a native Goal resume that cannot be confirmed fails closed without retrying", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    throw new Error("agent.prompt wait timed out");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
+  assert.match(result.content[0].text, /Do not resume it again/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a native Goal resume that changes worker identity fails closed without a follow-up instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+    agent_session: resumed
+      ? { source: "herdr:codex", agent: "codex", kind: "id", value: "session_other" }
+      : worker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /resulting worker identity did not match/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
 test("leaving a worker revalidates its current state after polling drains", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
