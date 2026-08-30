@@ -3233,7 +3233,7 @@ test("a global review exposes unstarted goals without pretending they have worke
 test("a global review reloads goal contracts copied in after session start", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-extension-"));
   const reviewState = await loadGlobalReviewState(root);
-  reviewState.nextReviewAt = new Date(Date.now() + 100).toISOString();
+  reviewState.nextReviewAt = new Date(Date.now() + 250).toISOString();
   await saveGlobalReviewState(reviewState, root);
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3251,10 +3251,11 @@ test("a global review reloads goal contracts copied in after session start", asy
     objective: "Resume the copied release migration.",
     acceptance: ["The migration is verified."],
   }, root, { goalId: "g_copied" });
-
-  await waitFor(() => pi.messages.length === 1);
-  assert.match(pi.messages[0].content, /"goalId": "g_copied"/);
-  assert.match(pi.messages[0].content, /"workerState": "unstarted"/);
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-global-review"));
+  const review = pi.messages.find((message) => message.customType === "herdr-supervisor-global-review");
+  assert.ok(review);
+  assert.match(review.content, /"goalId": "g_copied"/);
+  assert.match(review.content, /"workerState": "unstarted"/);
   pi.events.get("session_shutdown")();
 });
 
@@ -3319,6 +3320,7 @@ test("an invalid global result has no partial routing", async (t) => {
     reconsider: [],
   });
   assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /not found among active or unstarted goals/);
   assert.match(invalid.content[0].text, /No focused reviews were queued/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("valid", {

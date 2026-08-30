@@ -1311,7 +1311,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       ]);
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals are not currently unfinished: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+        return text(`Cannot route the global result because these goals were not found among active or unstarted goals: ${unknown.join(", ")}. No focused reviews were queued.`, true);
       }
       const unstartedReconsider = [...new Set(params.reconsider
         .map((item) => item.goal_id)
