@@ -3,6 +3,7 @@ import { appendFile, mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, recordExternalChange, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
@@ -73,6 +74,29 @@ async function fixture() {
   }, root, { goalId: "g_test" });
   return root;
 }
+
+test("optional supervisor tool fields accept null without placeholder values", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+
+  assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+    evidence: null,
+    external_change_revision: null,
+    review_at: null,
+  }), true);
+  assert.equal(Compile(pi.tools.get("supervisor_leave").parameters).Check({
+    pane_id: worker.paneId,
+    progress: "The worker is making useful progress.",
+    waiting_for: null,
+    waiting_on_pane: null,
+    external_watch: null,
+    evidence: null,
+    external_change_revision: null,
+    review_at: null,
+  }), true);
+});
 
 test("pull request traceability never publishes a path-backed session locator", () => {
   const trace = pullRequestTraceability({

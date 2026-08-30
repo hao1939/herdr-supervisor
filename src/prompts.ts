@@ -131,6 +131,7 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
       "Leave it waiting again only when fresh evidence shows nothing useful can move and supplies the next exact boundary.",
       "If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling.",
       "Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.",
+      "For every optional tool argument that does not apply, use JSON null; never invent a placeholder value, identity, revision, watch, wait, or deadline.",
     ].join(" "),
   ].join("\n");
 }

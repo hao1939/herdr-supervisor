@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
@@ -65,11 +65,12 @@ const EvidenceItems = Type.Array(
   Type.String({ minLength: 1, maxLength: 4000 }),
   { minItems: 1, maxItems: 8 },
 );
-const Evidence = Type.Optional(EvidenceItems);
-const ExternalChangeRevision = Type.Optional(Type.String({
+const Optional = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
+const Evidence = Optional(EvidenceItems);
+const ExternalChangeRevision = Optional(Type.String({
   minLength: 1,
   maxLength: 2000,
-  description: "Exact pending external revision, only when the fresh worker result just observed proves it performed the authoritative reread. Omit it to keep the obligation pending.",
+  description: "Exact pending external revision, only when the fresh worker result just observed proves it performed the authoritative reread. Use null when no reread is being accepted; never invent a placeholder revision.",
 }));
 const client = new HerdrClient();
 const supervisorTools = [
@@ -1110,7 +1111,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     description: "Create one Codex worker, give it one explicit goal and completion criteria, and supervise it. Use for a direct human request that needs durable work. Continue a matching existing goal instead of calling this tool again. The worker, not the supervisor, chooses and manages any Git worktrees needed by the goal.",
     parameters: Type.Object({
       goal: Type.String({ minLength: 1, description: "The durable outcome the worker must fully achieve." }),
-      context: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+      context: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
         description: "Durable facts the worker needs to pursue this goal. Keep transient worker state, credentials, waits, and coordination in current evidence instead.",
       })),
@@ -1119,7 +1120,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         maxItems: 10,
         description: "Concrete evidence that proves the goal is complete.",
       }),
-      constraints: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+      constraints: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
         description: "Boundaries the worker must preserve, such as using isolated worktrees in a shared repository.",
       })),
@@ -1134,7 +1135,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }),
       ], { description: "Create a new worker tab, or join the tab of one exact active related worker." }),
       working_directory: Type.String({ minLength: 1, description: "Absolute project or discovery root where the worker starts. It is independent of the supervisor directory; the worker manages any required worktrees." }),
-      direction: Type.Optional(Type.Union([Type.Literal("right"), Type.Literal("down")], { description: "Where to place the worker pane. Defaults to right." })),
+      direction: Optional(Type.Union([Type.Literal("right"), Type.Literal("down")], { description: "Where to place the worker pane. Use null to default to right." })),
     }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       try {
@@ -1157,7 +1158,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     parameters: Type.Object({
       pane_id: Pane,
       goal: Type.String({ minLength: 1, description: "The complete revised durable outcome." }),
-      context: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+      context: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
         description: "The complete revised set of durable facts needed to pursue the goal. Exclude transient execution evidence.",
       })),
@@ -1166,7 +1167,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         maxItems: 10,
         description: "The complete revised set of concrete completion criteria.",
       }),
-      constraints: Type.Optional(Type.Array(Type.String({ minLength: 1 }), {
+      constraints: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
         description: "The complete revised set of boundaries the worker must preserve.",
       })),
@@ -1232,7 +1233,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     name: "supervisor_status",
     label: "Supervised workers",
     description: "Show supervised goals against fresh Herdr worker state. The all-worker view is bounded; pass pane_id for that goal's full contract. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
-    parameters: Type.Object({ pane_id: Type.Optional(Pane) }),
+    parameters: Type.Object({ pane_id: Optional(Pane) }),
     executionMode: "parallel",
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const fenceError = reviewTurn.guard();
@@ -1293,7 +1294,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         goal_id: Type.String({ minLength: 1 }),
         reason: Type.String({ minLength: 1, maxLength: 2000 }),
       }), { maxItems: 10 }),
-      next_review_at: Type.Optional(Type.String({ minLength: 1 })),
+      next_review_at: Optional(Type.String({ minLength: 1 })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1372,7 +1373,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     name: "supervisor_observe",
     label: "Review worker",
     description: "Read bounded current output from one supervised worker after validating its exact terminal and native agent-session identity.",
-    parameters: Type.Object({ pane_id: Pane, lines: Type.Optional(Type.Integer({ minimum: 10, maximum: 200 })) }),
+    parameters: Type.Object({ pane_id: Pane, lines: Optional(Type.Integer({ minimum: 10, maximum: 200 })) }),
     executionMode: "parallel",
     async execute(_id, params) {
       const fenceError = reviewTurn.beginObservation(params.pane_id);
@@ -1427,23 +1428,23 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
-      waiting_for: Type.Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker." })),
-      waiting_on_pane: Type.Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Omit for self or external waits." })),
-      external_watch: Type.Optional(Type.Union([
+      waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
+      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Use null for self or external waits." })),
+      external_watch: Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
           subject: Type.String({ minLength: 1, maxLength: 2000, pattern: "^[^/]+/[^/#]+#[1-9][0-9]*$", description: "Exact GitHub identity: owner/repository#number." }),
-          revision: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Omit it to establish a quiet baseline." })),
+          revision: Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Use null to establish a quiet baseline." })),
         }),
         Type.Object({
           source: Type.Literal("ado-build"),
           subject: Type.String({ minLength: 1, maxLength: 2000, pattern: "^[^/]+/[^/]+/[1-9][0-9]*$", description: "Exact ADO identity: organization/project/build-id." }),
-          revision: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Omit it to establish a quiet baseline." })),
+          revision: Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Use null to establish a quiet baseline." })),
         }),
       ], { description: "Optional deterministic observation for the exact external condition. It does not prove completion." })),
       external_change_revision: ExternalChangeRevision,
       evidence: Evidence,
-      review_at: Type.Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 retry time no more than 24 hours ahead. Omit it to use the normal bounded review interval." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 retry time no more than 24 hours ahead. Use null for the normal bounded review interval." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1590,7 +1591,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       message: Type.String({ minLength: 1 }),
       evidence: Evidence,
       external_change_revision: ExternalChangeRevision,
-      review_at: Type.Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 time, no more than 24 hours ahead, when this instruction must be reconsidered even if the worker still appears busy. Omit it for routine event-driven supervision." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 time, no more than 24 hours ahead, when this instruction must be reconsidered even if the worker still appears busy. Use null for routine event-driven supervision." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1778,7 +1779,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       question: Type.String({ minLength: 1 }),
       evidence: Evidence,
       external_change_revision: ExternalChangeRevision,
-      review_at: Type.Optional(Type.String({ minLength: 1, description: "Bounded time to reconsider whether the human answer is still required or useful work can proceed without it." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Bounded time to reconsider whether the human answer is still required or useful work can proceed without it. Use null for the normal bounded review interval." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
