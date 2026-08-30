@@ -47,6 +47,23 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
   }, directory), /native agent session already pursues goal g_test/);
 });
 
+test("concurrent registration cannot assign one native session twice", async () => {
+  const directory = await root();
+  const results = await Promise.allSettled([
+    registerSupervisedGoal(worker, { objective: "Finish Alpha." }, directory, { goalId: "g_alpha" }),
+    registerSupervisedGoal({
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_other",
+    }, { objective: "Finish Beta." }, directory, { goalId: "g_beta" }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /native agent session already pursues goal/);
+  assert.equal((await loadSupervisorGoals(directory)).active.length, 1);
+});
+
 test("refining a goal replaces its contract without replacing its worker", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
@@ -166,6 +183,29 @@ test("the supervisor starts a copied contract through its single writer", async 
     paneId: "w1:p9",
     terminalId: "term_other",
   }, directory), /native agent session already pursues goal g_copied/);
+});
+
+test("concurrent installed goals cannot claim one native session twice", async () => {
+  const directory = await root();
+  for (const goalId of ["g_alpha", "g_beta"]) {
+    await installGoal(goalId, createGoalContract({
+      objective: `Finish ${goalId}.`,
+      acceptance: ["The goal is verified."],
+    }), directory);
+  }
+  const results = await Promise.allSettled([
+    startInstalledGoal("g_alpha", worker, directory),
+    startInstalledGoal("g_beta", {
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_other",
+    }, directory),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /native agent session already pursues goal/);
+  assert.equal((await loadSupervisorGoals(directory)).active.length, 1);
 });
 
 test("restart reloads concurrent goals independently and reconsiders fresh Herdr state", async () => {

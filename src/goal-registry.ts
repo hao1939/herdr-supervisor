@@ -9,6 +9,7 @@ import {
   startGoal,
   updateGoalContract,
   updateGoalState,
+  withGoalRootLock,
 } from "./goal-store.ts";
 import { sameAgentSession } from "./identity.ts";
 import type { GoalBinding } from "./types.ts";
@@ -83,29 +84,33 @@ export async function installSupervisorGoal(input, root?, options: any = {}) {
 }
 
 export async function registerSupervisedGoal(worker, input, root?, options: any = {}) {
-  const goals = await loadSupervisorGoals(root);
-  if (goals.errors.length) {
-    throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
-  }
-  assertWorkerAvailable(goals.active, worker);
-  const { goalId, contract } = await installSupervisorGoal(input, root, options);
-  const state = await startGoal(goalId, worker, root, { at: options.at });
-  return bindingFromRecord({ goalId, contract, state });
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    assertWorkerAvailable(goals.active, worker);
+    const { goalId, contract } = await installSupervisorGoal(input, root, options);
+    const state = await startGoal(goalId, worker, root, { at: options.at });
+    return bindingFromRecord({ goalId, contract, state });
+  });
 }
 
 export async function startInstalledGoal(goalId, worker, root?, options: any = {}) {
-  const goals = await loadSupervisorGoals(root);
-  if (goals.errors.length) {
-    throw new Error(`repair unreadable goals before starting another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
-  }
-  assertWorkerAvailable(goals.active, worker);
-  const installed = goals.unstarted.find((record) => record.goalId === goalId);
-  if (!installed) {
-    await loadGoalContract(goalId, root);
-    throw new Error(`goal ${goalId} already has local execution state`);
-  }
-  const state = await startGoal(goalId, worker, root, { at: options.at });
-  return bindingFromRecord({ goalId, contract: installed.contract, state });
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before starting another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    assertWorkerAvailable(goals.active, worker);
+    const installed = goals.unstarted.find((record) => record.goalId === goalId);
+    if (!installed) {
+      await loadGoalContract(goalId, root);
+      throw new Error(`goal ${goalId} already has local execution state`);
+    }
+    const state = await startGoal(goalId, worker, root, { at: options.at });
+    return bindingFromRecord({ goalId, contract: installed.contract, state });
+  });
 }
 
 export async function refineSupervisorGoal(goalId, input, root?, options: any = {}) {

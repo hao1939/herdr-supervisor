@@ -1,7 +1,7 @@
 import { open, mkdir, readFile, readdir, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
@@ -49,6 +49,10 @@ function serializeWrite(key, operation) {
     if (writes.get(key) === settled) writes.delete(key);
   });
   return update;
+}
+
+export function withGoalRootLock(root, operation) {
+  return serializeWrite(`${resolve(root || defaultGoalsRoot())}\0root`, operation);
 }
 
 export function defaultGoalsRoot(env = process.env) {

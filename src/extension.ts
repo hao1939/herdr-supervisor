@@ -448,16 +448,18 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     ) {
       return binding;
     }
-    const relocated = agent.pane_id !== binding.paneId;
     const refreshed = await refreshWorkerLocation(binding, captureIdentity(agent));
-    if (relocated) {
-      await reloadGoals();
-      const current = goalCache?.active.get(binding.goalId);
-      if (!current) throw new Error(`relocated goal ${binding.goalId} could not be reloaded`);
-      return { ...current, ...runtimeFor(current) };
-    }
+    return rememberWorkerLocation(binding, refreshed);
+  }
+
+  async function rememberWorkerLocation(previous, refreshed) {
     cacheBinding(refreshed);
-    return { ...refreshed, ...runtimeFor(refreshed) };
+    if (previous.paneId !== refreshed.paneId) {
+      try { await reloadGoals(); }
+      catch (error) { reportBackgroundFailure("Could not refresh relocated worker cache", error); }
+    }
+    const current = goalCache?.active.get(refreshed.goalId) || refreshed;
+    return { ...current, ...runtimeFor(current) };
   }
 
   async function assertRecoveryIdentityAvailable(binding, paneId) {
@@ -540,8 +542,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       terminalId: pane.terminal_id,
       agentSession: session,
     });
-    await reloadGoals();
-    return relocated;
+    return rememberWorkerLocation(binding, relocated);
   }
 
   async function reconcileCacheAfterWriteFailure() {
@@ -1912,7 +1913,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const deliveryNote = delivery.deliveryError
             ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
             : "";
-          return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpoint.warning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          return text(`Steering for ${continuedBinding.paneId} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpoint.warning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
         }
         if (delivery.deliveryError) {
           // A transport error cannot prove that Herdr did not accept the
@@ -1930,7 +1931,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           if (checkpoint.saved) {
             wakeAfterDurableDecision(continuedBinding);
           }
-          return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
