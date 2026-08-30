@@ -268,6 +268,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return nativeFinal || terminalResult;
   }
 
+  function externalRereadRequired(binding: GoalBinding) {
+    if (!binding.externalChange) return false;
+    if (binding.lastDecision?.decision !== "steer") return true;
+    return Date.parse(binding.lastDecision.at) < Date.parse(binding.externalChange.observedAt);
+  }
+
   function workerInstruction(binding, message) {
     const change = binding.externalChange;
     if (!change) return message.trim();
@@ -659,12 +665,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       : currentDecision;
     const change = binding.externalChange;
     const rereadWorking = externalRereadInFlight(binding) && agent?.agent_status === "working";
+    const requiresWorkerReread = externalRereadRequired(binding);
     const decision = change && !rereadWorking && !mismatch && !signal?.key.startsWith("external:")
       ? {
           wake: true,
           reason: `${change.source} ${change.subject} changed and its authoritative reread is still pending. Have the same worker reread it before deciding what the change means.`,
           sequence: agent ? Number(agent.state_change_seq || 0) : undefined,
-          key: `external-pending:${change.source}:${change.subject}:${change.revision}:${agent?.state_change_seq || "missing"}`,
+          key: `external-pending:${change.source}:${change.subject}:${change.revision}:${agent?.state_change_seq || "missing"}${signal?.key ? `:${signal.key}` : ""}`,
         }
       : signaledDecision;
     const runtime = runtimeFor(binding);
@@ -718,7 +725,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     runtime.pendingObservationHasMessages = undefined;
     const currentMode = mode();
     if (currentMode !== "observe") {
-      reviewTurn.begin(paneId, decision.reason);
+      reviewTurn.begin(paneId, decision.reason, { requiresWorkerReread });
     }
     try {
       pi.sendMessage(
@@ -1293,8 +1300,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (fenceError) return text(fenceError, true);
       const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+      if (reviewTurn.requiresWorkerReread) {
+        return text("An external watch change triggered this review. Continue the same worker now so it can reread current authority before deciding whether to wait again.", true);
+      }
       if (binding.externalChange) {
-        return text("The watched external resource changed, but this worker has not reread it yet. Continue the same worker to read current authority before deciding whether to wait again.", true);
+        return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.", true);
       }
       const agent = findAgent(snapshot, params.pane_id);
       const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
@@ -1602,8 +1612,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (fenceError) return text(fenceError, true);
       const binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+      if (reviewTurn.requiresWorkerReread) {
+        return text("An external watch change triggered this review. Continue the same worker now so it can reread current authority before accepting the goal.", true);
+      }
       if (binding.externalChange) {
-        return text("The watched external resource changed, but this worker has not reread it yet. Continue the same worker before accepting the goal.", true);
+        return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before accepting the goal.", true);
       }
       if (mode() !== "live") {
         reviewTurn.close(params.pane_id);

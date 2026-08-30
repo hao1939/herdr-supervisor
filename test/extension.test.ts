@@ -1372,14 +1372,14 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
   });
   assert.equal(staleRenewal.isError, true);
-  assert.match(staleRenewal.content[0].text, /worker has not reread it yet/);
+  assert.match(staleRenewal.content[0].text, /(external watch change triggered this review|authoritative reread evidence is still pending)/);
   const staleFinish = await pi.tools.get("supervisor_finish").execute("finish-without-reread", {
     pane_id: worker.paneId,
     summary: "The old PR snapshot looked complete.",
     evidence: ["Only the pre-change snapshot is available."],
   }, undefined, undefined, { ui: { setStatus() {} } });
   assert.equal(staleFinish.isError, true);
-  assert.match(staleFinish.content[0].text, /worker has not reread it yet/);
+  assert.match(staleFinish.content[0].text, /(external watch change triggered this review|authoritative reread evidence is still pending)/);
   const fetchesBeforeSecondChange = fetches;
   conclusion = "failure";
   await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -1394,6 +1394,58 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   await pi.events.get("agent_settled")();
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(pi.messages.length, 2, "clearing the watch also removes its stale queued wake");
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-decision retries keep requiring a reread after an external change wake", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const binding = (await loadSupervisorGoals(root)).active[0];
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 4 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-initial", { pane_id: worker.paneId });
+  const firstLeave = await pi.tools.get("supervisor_leave").execute("leave-initial", {
+    pane_id: worker.paneId,
+    progress: "The old PR snapshot still looks healthy.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(firstLeave.isError, true);
+  assert.match(firstLeave.content[0].text, /external watch change triggered this review/);
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /authoritative reread is still pending/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-retry", { pane_id: worker.paneId });
+  const retryLeave = await pi.tools.get("supervisor_leave").execute("leave-retry", {
+    pane_id: worker.paneId,
+    progress: "Still no new authoritative read.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(retryLeave.isError, true);
+  assert.match(retryLeave.content[0].text, /external watch change triggered this review/);
   pi.events.get("session_shutdown")();
 });
 
