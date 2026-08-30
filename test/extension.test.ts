@@ -79,6 +79,7 @@ test("optional supervisor tool fields accept null without placeholder values", (
   const pi = fakePi();
   herdrSupervisor(pi);
 
+  assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
   assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
     pane_id: worker.paneId,
     message: "Continue the same goal.",
@@ -2494,6 +2495,15 @@ test("a working worker cannot be mislabeled as waiting for its own next checkpoi
   });
   assert.equal(invalidWait.isError, true);
   assert.match(invalidWait.content[0].text, /working worker is active, not waiting/);
+  assert.match(invalidWait.content[0].text, /Use null for waiting_for/);
+
+  const invalidRevision = await pi.tools.get("supervisor_leave").execute("leave-revision", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively producing the next checkpoint.",
+    external_change_revision: "not-applicable",
+  });
+  assert.equal(invalidRevision.isError, true);
+  assert.match(invalidRevision.content[0].text, /use null for external_change_revision/);
 
   const active = await pi.tools.get("supervisor_leave").execute("leave-working", {
     pane_id: worker.paneId,
