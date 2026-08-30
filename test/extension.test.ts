@@ -3573,7 +3573,7 @@ test("a direct human steer relocates a missing-pane worker and resumes the exact
   pi.events.get("session_shutdown")();
 });
 
-test("missing-pane recovery adopts an exact session restored while its tab is created", async (t) => {
+test("missing-pane recovery adopts an exact session restored after its tab is created", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
@@ -3604,14 +3604,18 @@ test("missing-pane recovery adopts an exact session restored while its tab is cr
     name: "already-restored",
   };
   let created = false;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: created ? [restoredAgent] : [],
-    panes: [
-      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
-      ...(created ? [createdPane, restoredAgent] : []),
-    ],
-    tabs: [],
-  }));
+  let snapshotsAfterCreate = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (created) snapshotsAfterCreate += 1;
+    return {
+      agents: snapshotsAfterCreate > 1 ? [restoredAgent] : [],
+      panes: [
+        { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+        ...(created ? [createdPane, restoredAgent] : []),
+      ],
+      tabs: [],
+    };
+  });
   let creates = 0;
   t.mock.method(HerdrClient.prototype, "createTab", async () => {
     creates += 1;

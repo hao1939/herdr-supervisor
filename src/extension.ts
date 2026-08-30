@@ -474,6 +474,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
   }
 
+  async function adoptExactSession(binding, snapshot) {
+    const agent = exactSessionAgent(snapshot, binding.agentSession);
+    if (!agent) return;
+    await assertRecoveryIdentityAvailable(binding, agent.pane_id);
+    return refreshObservedLocation(binding, agent);
+  }
+
   function reusableRecoveryPane(snapshot, workspaceId, goalId) {
     const tabs = snapshot.tabs?.filter((tab) => (
       tab.workspace_id === workspaceId && tab.label === workerNameForGoal(goalId)
@@ -493,11 +500,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (session.agent !== "codex" || session.kind !== "id") {
       throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
     }
-    const existingAgent = exactSessionAgent(snapshot, session);
-    if (existingAgent) {
-      await assertRecoveryIdentityAvailable(binding, existingAgent.pane_id);
-      return refreshObservedLocation(binding, existingAgent);
-    }
+    const existingBinding = await adoptExactSession(binding, snapshot);
+    if (existingBinding) return existingBinding;
     const currentPane = findPane(snapshot, binding.paneId);
     if (currentPane) {
       await assertRecoveryIdentityAvailable(binding, currentPane.pane_id);
@@ -525,11 +529,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const paneId = created?.root_pane?.pane_id;
       if (!paneId) throw new Error("Herdr created recovery space but did not return its pane identity");
       const freshSnapshot = await client.snapshot();
-      const restoredAgent = exactSessionAgent(freshSnapshot, session);
-      if (restoredAgent) {
-        await assertRecoveryIdentityAvailable(binding, restoredAgent.pane_id);
-        return refreshObservedLocation(binding, restoredAgent);
-      }
+      const restoredBinding = await adoptExactSession(binding, freshSnapshot);
+      if (restoredBinding) return restoredBinding;
       pane = findPane(freshSnapshot, paneId);
     }
     if (!pane?.terminal_id) throw new Error(`Herdr did not expose the recovery pane for goal ${binding.goalId}`);
@@ -1788,13 +1789,24 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           if (relocated) {
             reviewTurn.retarget(params.pane_id, binding.paneId);
             relocatedBinding = binding;
+          }
+          liveSnapshot = await client.snapshot();
+          const latestBinding = await adoptExactSession(binding, liveSnapshot);
+          if (latestBinding && latestBinding.paneId !== binding.paneId) {
+            reviewTurn.retarget(binding.paneId, latestBinding.paneId);
+            binding = latestBinding;
+            relocated = true;
+            relocatedBinding = binding;
+          } else if (latestBinding) {
+            binding = latestBinding;
+          }
+          if (relocated) {
             try {
               await connectObserver();
             } catch (error) {
               reportBackgroundFailure("Could not watch the relocated worker", error);
             }
           }
-          liveSnapshot = await client.snapshot();
           liveAgent = findAgent(liveSnapshot, binding.paneId);
           livePane = findPane(liveSnapshot, binding.paneId);
         }
