@@ -1355,8 +1355,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         await armReviewTimer();
         observed = true;
         const trigger = reviewTurn.reason ? `Review trigger: ${reviewTurn.reason}\n` : "";
+        const externalTrigger = currentBinding.externalChange
+          ? `Pending external change: ${currentBinding.externalChange.source} ${currentBinding.externalChange.subject} at revision ${currentBinding.externalChange.revision}\n`
+          : "";
         const progress = currentBinding.progress ? `\nCurrent progress: ${currentBinding.progress}` : "";
-        return text(`${trigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}${checkpointWarning}\n\n${formatObservation(observation)}`);
+        return text(`${trigger}${externalTrigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}${checkpointWarning}\n\n${formatObservation(observation)}`);
       } catch (error) { return text(`Could not observe worker: ${error.message}`, true); }
       finally { reviewTurn.finishObservation(observed); }
     },

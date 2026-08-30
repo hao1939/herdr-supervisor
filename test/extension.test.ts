@@ -1991,6 +1991,7 @@ test("a newer external change cannot fail the observation that discharged the ol
   const observation = await pi.tools.get("supervisor_observe").execute("observe-after-second-change", { pane_id: worker.paneId });
   assert.equal(observation.isError, false, "a superseding external change must not lose the worker evidence");
   assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  assert.match(observation.content[0].text, /Pending external change: github-pr hao1939\/herdr-supervisor#16 at revision second-revision/);
   assert.match(observation.content[0].text, /Checkpoint warning/);
   assert.equal(
     (await loadSupervisorGoals(root)).active[0].externalChange?.revision,
