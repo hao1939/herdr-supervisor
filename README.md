@@ -80,6 +80,9 @@ Container replacement is safe only when its external contract is preserved.
 Check the resolved Compose configuration with `docker compose config`, then
 confirm that the replacement has:
 
+- the same explicit Compose project name and volume namespace as the running
+  instance;
+- the intended source checkout as its resolved build context;
 - the intended host project mounted at `/app`;
 - persistent home storage for Herdr and native agent sessions;
 - the configured model credentials or gateway settings;
