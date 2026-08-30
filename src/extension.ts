@@ -276,7 +276,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const nativeFinal = observation.messages.some((message) => (
       message.phase === "final_answer"
       && Number.isFinite(Date.parse(message.timestamp))
-      && Date.parse(message.timestamp) >= instructionAt
+      && Date.parse(message.timestamp) > instructionAt
     ))
       && cursorAdvanced(binding.observationCursor, observation.cursor);
     const terminalResult = observation.source === "terminal-fallback"
