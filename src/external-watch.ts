@@ -53,6 +53,28 @@ async function responseJson(response: Response, label: string) {
   return response.json();
 }
 
+async function pagedItems(
+  fetchImpl: typeof fetch,
+  url: string,
+  headers: Record<string, string>,
+  field: string,
+  label: string,
+) {
+  const items: any[] = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const separator = url.includes("?") ? "&" : "?";
+    const value: any = await responseJson(await fetchImpl(
+      `${url}${separator}per_page=100&page=${page}`,
+      { headers, signal: AbortSignal.timeout(30_000) },
+    ), label);
+    const batch = value[field];
+    if (!Array.isArray(batch)) throw new Error(`${label} returned an invalid ${field} list`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+  throw new Error(`${label} exceeded the bounded 2,000-item observation limit`);
+}
+
 function parseGitHubSubject(subject: string) {
   const match = /^([^/]+)\/([^/#]+)#([1-9]\d*)$/.exec(subject);
   if (!match) throw new Error("GitHub PR subject must look like owner/repository#number");
@@ -77,29 +99,36 @@ export function githubPullRequestSource({
         await fetchImpl(`${base}/pulls/${number}`, { headers, signal: AbortSignal.timeout(30_000) }),
         "GitHub pull request",
       );
-      const checks: any = await responseJson(
-        await fetchImpl(`${base}/commits/${encodeURIComponent(pull.head.sha)}/check-runs?per_page=100`, {
-          headers,
-          signal: AbortSignal.timeout(30_000),
-        }),
-        "GitHub check runs",
-      );
-      const compactChecks = (checks.check_runs || []).map((check) => ({
+      const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
+      const [checks, statuses] = await Promise.all([
+        pagedItems(fetchImpl, `${commit}/check-runs?filter=latest`, headers, "check_runs", "GitHub check runs"),
+        pagedItems(fetchImpl, `${commit}/status`, headers, "statuses", "GitHub commit statuses"),
+      ]);
+      const compactChecks = checks.map((check) => ({
+        id: check.id,
         name: String(check.name).slice(0, 200),
         status: check.status,
         conclusion: check.conclusion,
-      })).sort((left, right) => left.name.localeCompare(right.name));
+      })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      const compactStatuses = statuses.map((status) => ({
+        id: status.id,
+        context: String(status.context).slice(0, 200),
+        state: status.state,
+      })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
       const stable = {
         headSha: pull.head.sha,
         state: pull.state,
         draft: pull.draft,
         mergeable: pull.mergeable,
         checks: compactChecks,
+        statuses: compactStatuses,
       };
-      const completed = compactChecks.filter((check) => check.status === "completed").length;
+      const completed = compactChecks.filter((check) => check.status === "completed").length
+        + compactStatuses.filter((status) => status.state !== "pending").length;
+      const total = compactChecks.length + compactStatuses.length;
       return {
         revision: stableRevision(stable),
-        summary: `GitHub PR ${owner}/${repository}#${number} is ${pull.state}; ${completed}/${compactChecks.length} checks completed`,
+        summary: `GitHub PR ${owner}/${repository}#${number} is ${pull.state}; ${completed}/${total} checks completed`,
       };
     },
   };

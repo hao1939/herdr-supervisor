@@ -356,6 +356,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function runScheduledObservations() {
+    if (externalPollRunning) {
+      await reviewDueWorkers();
+      return;
+    }
     externalPollRunning = true;
     try {
       // Goal deadlines remain responsive even when an external provider is
@@ -1256,6 +1260,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`
+          + (externalWatch ? `\nWatching: ${externalWatch.source} ${externalWatch.subject.trim()}` : "")
         : params.progress.trim();
       if (mode() === "live") {
         const result = await recordDecision(binding, "leave", {
