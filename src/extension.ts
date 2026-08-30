@@ -1714,6 +1714,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             scheduleReview(binding);
             return text(`The native Goal resumed, but the resulting worker identity did not match: ${resumedMismatch}. No follow-up instruction was sent.\n\nEnd this supervisor turn now and wait for fresh evidence.`, true);
           }
+          if (resumedAgent.agent_status !== "working") {
+            scheduleReview(binding);
+            return text(`The native Goal resumed in ${params.pane_id}, but it settled again before the follow-up instruction could be sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+          }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
         }
