@@ -192,7 +192,7 @@ const supervisorPolicy = [
     "Then call exactly one decision tool: supervisor_leave for healthy work or a concrete wait, supervisor_steer when more can be done, supervisor_ask_human for a real human decision, or supervisor_finish only with convincing evidence.",
     "When a decision error explicitly says no action was applied, use that error to make one valid decision in the same turn. When an action was applied or may have been applied, follow the tool's recovery instruction instead of retrying it.",
     "supervisor_steer continues the same worker whether its process is present or needs exact-session recovery; transport belongs to code, not the model.",
-    "When an unfinished goal should continue and its pane disappeared, steer only when the goal uses a recoverable codex id session; the executor may create a new routing pane only to resume that exact saved native session. Never steer a replacement native session.",
+    "When an unfinished goal should continue and its pane disappeared, follow the current worker evidence: steer only when it says the supervisor can resume the exact session. Never steer a replacement or unsupported session.",
     "Do not create, replace, update, or stop a goal during an event review. Never treat idle, blocked, done, or a completed turn as goal completion.",
   ],
   [

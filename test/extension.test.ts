@@ -791,8 +791,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
   assert.match(result.systemPrompt, /error explicitly says no action was applied/);
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
-  assert.match(result.systemPrompt, /its pane disappeared, steer only when the goal uses a recoverable codex id session/);
-  assert.match(result.systemPrompt, /create a new routing pane only to resume that exact saved native session/);
+  assert.match(result.systemPrompt, /follow the current worker evidence/);
+  assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
   pi.events.get("session_shutdown")();
 });
 
