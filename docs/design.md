@@ -143,6 +143,8 @@ alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
 
 - a direct peer wait records that exact peer so its next event wakes the goal;
+- a wait on one exact GitHub PR or ADO build may register a disposable external
+  watch chosen by the model;
 - every wait has a bounded recheck;
 - an exact later time is used only when evidence provides one;
 - when a wait expires, current evidence must confirm it before waiting again.
@@ -150,6 +152,15 @@ promise to reconsider, not permission to forget the goal:
 A human question follows the same rule. It is concrete, asks for the minimum
 input that changes the work, and receives a bounded reconsideration so
 unrelated useful work can continue.
+
+External watches run as small deterministic reads inside the existing Pi
+extension process. They share the nearest-deadline timer and the per-goal
+review signal map. An unchanged revision schedules another read without a
+model turn. A changed revision queues the ordinary focused review, where the
+model asks the same worker to reread provider authority before judging it.
+Watch registration is process-local in the first version: after restart, the
+ordinary bounded goal review can register it again. This keeps provider polling
+an optimization rather than another durable task or event system.
 
 ## Concurrency
 

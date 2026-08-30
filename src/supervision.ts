@@ -177,6 +177,9 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   else if (binding.wait) {
     const condition = detailed ? binding.wait.condition : compact(binding.wait.condition, 360);
     lines.push(`  Next: wait for ${condition}`);
+    if (binding.externalWatch) {
+      lines.push(`  Watching: ${binding.externalWatch.source} ${binding.externalWatch.subject}`);
+    }
     lines.push(`  Review at: ${binding.wait.reviewAt}`);
   }
   else lines.push(`  Next: supervisor should review current evidence`);

@@ -172,6 +172,8 @@ const supervisorPolicy = [
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
     "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
+    "When one exact GitHub PR or ADO build can resume the goal, add external_watch to supervisor_leave. Choose its exact source and subject semantically; never infer it with keyword routing.",
+    "An external-watch change is only a wake hint. Have the same worker reread the authoritative PR or build before deciding whether to continue, wait again, or finish.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "Supply review_at only for a real exact retry time; otherwise let the runtime choose its bounded interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",
