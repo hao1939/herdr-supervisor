@@ -289,7 +289,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return nativeFinal || terminalResult;
   }
 
-  async function externalDeliveryBoundary(binding) {
+  async function capturePostDeliveryBoundary(binding) {
     if (!binding.externalChange) return undefined;
     const observation = await observeWorker(binding, client);
     const snapshot = await client.snapshot();
@@ -297,7 +297,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const mismatch = identityMismatch(binding, agent, findPane(snapshot, binding.paneId));
     if (mismatch) throw new Error(`cannot establish the external reread boundary: ${mismatch}`);
     return {
-      at: new Date().toISOString(),
       observationCursor: observation.cursor,
       workerSequence: Number(agent.state_change_seq || 0),
     };
@@ -311,7 +310,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       deliveryError = error;
     }
     reviewTurn.close(binding.paneId);
-    const boundary = await externalDeliveryBoundary(binding);
+    const boundary = await capturePostDeliveryBoundary(binding);
     stopExternalWatch(binding);
     return { boundary, deliveryError };
   }
@@ -333,7 +332,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       reviewAt: effectiveReviewAt,
       externalChangeRevision: binding.externalChange?.revision,
       workerSequence: boundary?.workerSequence ?? runtimeFor(binding).lastReviewStateChangeSeq,
-    }, undefined, boundary?.at ? () => boundary.at : undefined);
+    });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
     return result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
@@ -491,9 +490,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const now = Date.now();
     const due = goals.active.filter((goal) => goal.externalWatch && goal.externalWatch.nextPollAt <= now);
     if (!due.length) return;
+    const dueSubjects = new Set(due.map((goal) => externalWatchKey(goal.externalWatch)));
     const groups = new Map<string, typeof due>();
-    for (const goal of due) {
+    for (const goal of goals.active) {
+      if (!goal.externalWatch) continue;
       const key = externalWatchKey(goal.externalWatch);
+      if (!dueSubjects.has(key)) continue;
       const group = groups.get(key) || [];
       group.push(goal);
       groups.set(key, group);
