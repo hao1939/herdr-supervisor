@@ -194,3 +194,9 @@ Herdr's lifecycle into a parallel queue, task graph, or status database.
 Implement only the small deterministic foundation shared by most goals. Keep
 uncommon recovery and workflow choices in model guidance until repeated live
 evidence proves a generic code primitive is necessary.
+
+For each new feature or failure, first ask whether the agent can handle it with
+current primitives, whether an event or bounded check will wake the agent, and
+whether it has enough knowledge and context. If so, teach the behavior rather
+than coding another mechanism. Add code only for a proven missing primitive or
+a recurring problem with clear general benefit.

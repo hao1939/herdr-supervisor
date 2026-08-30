@@ -21,6 +21,28 @@ the model handle situational judgment. The practical heuristic is **solidify
 the common 20%; teach the model the remaining 80%**. This is not a feature
 quota. It is a test for whether a behavior belongs in code.
 
+The minimal core lets an agent:
+
+- **observe** current worker and external facts;
+- **decide** what those facts mean for the goal;
+- **act** through small validated effects;
+- **remember** the portable goal and latest local checkpoint; and
+- **wake** on meaningful events or a bounded health check.
+
+For every new request or failure, ask in order:
+
+1. Can the agent handle it with those existing primitives?
+2. Will the agent reliably be triggered to handle it?
+3. Does the agent receive enough durable knowledge and current context to
+   choose well?
+
+If all three answers are yes, add no runtime feature. Improve the goal context,
+prompt, or operational documentation when useful, then let the agent do the
+work. If an answer is no, fix the smallest missing foundation: capability,
+trigger, or knowledge. Promote a behavior into code only when it recurs, is
+unsafe or materially unreliable as judgment, wastes meaningful resources, or
+has another clear general benefit.
+
 Put behavior in code only when it is:
 
 - common to many goals rather than one observed incident;
