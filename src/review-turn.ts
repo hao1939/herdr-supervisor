@@ -1,5 +1,6 @@
 export class ReviewTurnFence {
   paneId: string | undefined;
+  reason: string | undefined;
   phase: "idle" | "preparing" | "active" = "idle";
   observing = false;
   observed = false;
@@ -9,8 +10,9 @@ export class ReviewTurnFence {
     this.end();
   }
 
-  begin(paneId) {
+  begin(paneId, reason?) {
     this.paneId = paneId;
+    this.reason = reason;
     this.phase = "active";
     this.observing = false;
     this.observed = false;
@@ -19,6 +21,7 @@ export class ReviewTurnFence {
 
   end() {
     this.paneId = undefined;
+    this.reason = undefined;
     this.phase = "idle";
     this.observing = false;
     this.observed = false;

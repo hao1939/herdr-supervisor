@@ -1361,7 +1361,8 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   assert.match(pi.messages[1].content, /w1:p2/);
   assert.doesNotMatch(pi.messages[1].content, /w1:p9/);
 
-  await pi.tools.get("supervisor_observe").execute("observe-change", { pane_id: worker.paneId });
+  const changedObservation = await pi.tools.get("supervisor_observe").execute("observe-change", { pane_id: worker.paneId });
+  assert.match(changedObservation.content[0].text, /Review trigger: GitHub PR hao1939\/herdr-supervisor#16 is open; 1\/1 checks completed/);
   const fetchesBeforeSecondChange = fetches;
   conclusion = "failure";
   await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -1585,7 +1586,7 @@ test("a working worker cannot be mislabeled as waiting for its own next checkpoi
   pi.events.get("session_shutdown")();
 });
 
-test("an invalid optional peer hint cannot discard a valid bounded external wait", async (t) => {
+test("a self peer hint cannot block an exact external watch", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -1605,15 +1606,17 @@ test("an invalid optional peer hint cannot discard a valid bounded external wait
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "The exact external build remains active.",
-    waiting_for: "build 123 to finish",
-    waiting_on_pane: ":",
+    waiting_for: "PR checks to change",
+    waiting_on_pane: worker.paneId,
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
     review_at: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(leave.isError, false);
-  assert.match(leave.content[0].text, /ignored unknown worker/);
+  assert.match(leave.content[0].text, /ignored a self-reference/);
+  assert.match(leave.content[0].text, /Watching github-pr hao1939\/herdr-supervisor#16/);
   const [stored] = (await loadSupervisorGoals(root)).active;
-  assert.equal(stored.wait.condition, "build 123 to finish");
+  assert.equal(stored.wait.condition, "PR checks to change");
   assert.equal(stored.wait.paneId, undefined);
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();

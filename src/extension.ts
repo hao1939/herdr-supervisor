@@ -633,7 +633,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     runtime.pendingObservationHasMessages = undefined;
     const currentMode = mode();
     if (currentMode !== "observe") {
-      reviewTurn.begin(paneId);
+      reviewTurn.begin(paneId, decision.reason);
     }
     try {
       pi.sendMessage(
@@ -1164,8 +1164,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         scheduleReview(binding);
         await armReviewTimer();
         observed = true;
+        const trigger = reviewTurn.reason ? `Review trigger: ${reviewTurn.reason}\n` : "";
         const progress = binding.progress ? `\nCurrent progress: ${binding.progress}` : "";
-        return text(`Goal: ${binding.goal}${progress}\nHerdr state: ${agent.agent_status}\n\n${formatObservation(observation)}`);
+        return text(`${trigger}Goal: ${binding.goal}${progress}\nHerdr state: ${agent.agent_status}\n\n${formatObservation(observation)}`);
       } catch (error) { return text(`Could not observe worker: ${error.message}`, true); }
       finally { reviewTurn.finishObservation(observed); }
     },
@@ -1179,7 +1180,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Type.Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker." })),
-      waiting_on_pane: Type.Optional(Type.String({ minLength: 1, description: "Exact supervised worker whose change should wake this wait. Use only for a direct peer wait." })),
+      waiting_on_pane: Type.Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Omit for self or external waits." })),
       external_watch: Type.Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
@@ -1215,7 +1216,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (externalWatch && !waitingFor) {
         return text("external_watch requires a concrete waiting_for condition.", true);
       }
-      if (externalWatch && waitingOnPane) {
+      if (waitingOnPane === params.pane_id) {
+        effectiveWaitingOnPane = undefined;
+        warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
+      }
+      if (externalWatch && effectiveWaitingOnPane) {
         return text("Choose either waiting_on_pane or external_watch for one wait, not both.", true);
       }
       if (agent.agent_status === "working" && waitingFor) {
@@ -1231,10 +1236,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         && runtimeFor(binding).pendingObservationHasMessages === false
       ) {
         return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
-      }
-      if (waitingOnPane === params.pane_id) {
-        effectiveWaitingOnPane = undefined;
-        warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
       }
       if (effectiveWaitingOnPane) {
         const peerPane = effectiveWaitingOnPane;
