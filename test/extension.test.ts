@@ -1254,6 +1254,96 @@ test("an accepted native Goal resume fails closed when its snapshot is unavailab
   pi.events.get("session_shutdown")();
 });
 
+test("an uncertain native Goal resume cannot send or retry a tactical instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    throw new Error("prompt response timed out after possible delivery");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a replacement session after native Goal resume receives no tactical instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    agent_session: resumed
+      ? { ...worker.agentSession, value: "replacement_session" }
+      : worker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /resulting worker identity did not match/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
 test("a native Goal that settles again does not receive a tactical instruction", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
