@@ -87,12 +87,6 @@ const supervisorTools = [
 ];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
-const diagnosticMessageType = "herdr-supervisor-error";
-const automatedMessageTypes = new Set([
-  reviewMessageType,
-  globalReviewMessageType,
-  diagnosticMessageType,
-]);
 const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 5 * 60 * 1000;
 type SupervisorMode = "observe" | "dry-run" | "live";
 
@@ -450,16 +444,15 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   function reportBackgroundFailure(label: string, error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    const message = `${label}: ${detail}`;
+    const message = `${label}: ${error.message}`;
     if (message === lastBackgroundError || shuttingDown) return;
     lastBackgroundError = message;
     try {
       pi.sendMessage({
-        customType: diagnosticMessageType,
+        customType: "herdr-supervisor-error",
         content: message,
         display: true,
-      }, { triggerTurn: mode() !== "observe", deliverAs: "followUp" });
+      }, { triggerTurn: false, deliverAs: "followUp" });
     } catch {
       // A failed diagnostic must not become another background failure.
     }
@@ -2017,24 +2010,24 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   });
 
   pi.on("context", (event) => {
-    let latestAutomatedTurn = -1;
+    let latestReview = -1;
     for (let index = event.messages.length - 1; index >= 0; index -= 1) {
-      if (automatedMessageTypes.has((event.messages[index] as any).customType)) {
-        latestAutomatedTurn = index;
+      if ([reviewMessageType, globalReviewMessageType].includes((event.messages[index] as any).customType)) {
+        latestReview = index;
         break;
       }
     }
-    if (latestAutomatedTurn < 0) return;
+    if (latestReview < 0) return;
 
-    let insideOldAutomatedTurn = false;
+    let insideOldReview = false;
     return {
       messages: event.messages.filter((message, index) => {
-        if (automatedMessageTypes.has((message as any).customType)) {
-          insideOldAutomatedTurn = index !== latestAutomatedTurn;
-          return index === latestAutomatedTurn;
+        if ([reviewMessageType, globalReviewMessageType].includes((message as any).customType)) {
+          insideOldReview = index !== latestReview;
+          return index === latestReview;
         }
-        if (insideOldAutomatedTurn && message.role === "user") insideOldAutomatedTurn = false;
-        return !insideOldAutomatedTurn;
+        if (insideOldReview && message.role === "user") insideOldReview = false;
+        return !insideOldReview;
       }),
     };
   });

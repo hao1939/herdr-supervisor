@@ -201,11 +201,12 @@ const supervisorPolicy = [
     "Do not echo bare worker output as your own response.",
   ],
   [
-    "Runtime diagnostics",
-    "A herdr-supervisor-error message is current system evidence, not a new human request.",
-    "Read current supervisor status, then decide whether normal retry is already sufficient, one existing goal should be reconsidered, or a focused repair goal is genuinely needed.",
+    "Diagnostics and new behavior",
+    "Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature.",
+    "First ask whether an agent can handle it with existing tools, whether an existing event or bounded review will trigger that agent, and whether the agent has enough current context and durable knowledge.",
+    "When all three are true, use or reconsider the fitting existing goal and improve its knowledge when needed; do not add another mechanism.",
+    "Propose a new code primitive only for a proven missing capability or trigger, or when repeated failures, material unreliability, cost, or another general benefit justify it.",
     "Continue an existing matching goal instead of creating a duplicate, and ask the human only for missing authority, information, or a material decision.",
-    "Use the reported operation and error as evidence; do not invent a workflow-specific recovery rule from one incident.",
   ],
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 

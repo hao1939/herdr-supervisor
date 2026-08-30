@@ -17,7 +17,7 @@ const worker = {
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
 
-function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000", mode = "live" } = {}): any {
+function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000" } = {}): any {
   const commands = new Map();
   const tools = new Map();
   const events = new Map();
@@ -29,7 +29,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     messages,
     registerFlag() {},
     getFlag(name) {
-      if (name === "supervisor-mode") return mode;
+      if (name === "supervisor-mode") return "live";
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
       if (name === "supervisor-external-watch-ms") return externalWatchMs;
@@ -37,7 +37,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) { events.set(name, handler); },
-    sendMessage(message, options) { messages.push({ ...message, options }); },
+    sendMessage(message) { messages.push(message); },
     setActiveTools() {},
   };
 }
@@ -784,6 +784,12 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
+  assert.match(result.systemPrompt, /Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature/);
+  assert.match(result.systemPrompt, /whether an agent can handle it with existing tools/);
+  assert.match(result.systemPrompt, /whether an existing event or bounded review will trigger that agent/);
+  assert.match(result.systemPrompt, /whether the agent has enough current context and durable knowledge/);
+  assert.match(result.systemPrompt, /do not add another mechanism/);
+  assert.match(result.systemPrompt, /Propose a new code primitive only for a proven missing capability or trigger/);
   pi.events.get("session_shutdown")();
 });
 
@@ -2529,14 +2535,9 @@ test("a slow failing provider stays single-flight while the bounded review still
   failRead();
   await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-error"));
   assert.equal(
-    pi.messages.find((message) => message.customType === "herdr-supervisor-error").options.triggerTurn,
-    true,
-    "a live diagnostic must wake the existing supervisor agent loop",
-  );
-  assert.equal(
     pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
     2,
-    "a diagnostic turn must not fabricate another focused worker review",
+    "a provider diagnostic must not start another model review",
   );
   pi.events.get("session_shutdown")();
 });
@@ -3159,7 +3160,7 @@ test("restart restores a settled wait without a no-change review before its dead
   pi.events.get("session_shutdown")();
 });
 
-test("only the current automated turn remains in model context", () => {
+test("only the current automated review remains in model context", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
   const context = pi.events.get("context")({
@@ -3175,7 +3176,6 @@ test("only the current automated turn remains in model context", () => {
       { role: "custom", customType: "herdr-supervisor-review", content: "current goal" },
       { role: "assistant", content: "current tool call" },
       { role: "toolResult", content: "current observation" },
-      { role: "custom", customType: "herdr-supervisor-error", content: "current diagnostic" },
     ],
   });
 
@@ -3184,7 +3184,9 @@ test("only the current automated turn remains in model context", () => {
     "I will.",
     "Also prefer plain language.",
     "Understood.",
-    "current diagnostic",
+    "current goal",
+    "current tool call",
+    "current observation",
   ]);
 });
 
