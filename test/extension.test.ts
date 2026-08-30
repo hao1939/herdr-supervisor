@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
-import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
+import { installSupervisorGoal, loadSupervisorGoals, recordDecision, recordExternalChange, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
@@ -1390,10 +1390,91 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     message: "Recheck the failed PR checks and continue the same goal.",
   });
   assert.equal(steer.isError, false);
+  assert.ok((await loadSupervisorGoals(root)).active.find((item) => item.goalId === "g_test")?.externalChange);
   await pi.events.get("agent_settled")();
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(pi.messages.length, 2, "clearing the watch also removes its stale queued wake");
   pi.events.get("session_shutdown")();
+});
+
+test("restart retains an external reread until a later native final response", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-external-restart-"));
+  const sessionFile = join(root, "worker.jsonl");
+  const firstLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old checks are pending." }] },
+  })}\n`;
+  await writeFile(sessionFile, firstLine);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Verify PR 16 after its checks change.",
+    acceptance: ["Current authoritative checks are reread and handled."],
+  }, root, { goalId: "g_external_restart", at: "2026-08-30T05:00:00.000Z" });
+  const cursor = { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(firstLine) };
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    observationCursor: cursor,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 4,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const beforeEvidence = fakePi();
+  herdrSupervisor(beforeEvidence);
+  await beforeEvidence.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeEvidence.messages.length === 1);
+  assert.match(beforeEvidence.messages[0].content, /authoritative reread is still pending/);
+  await beforeEvidence.tools.get("supervisor_observe").execute("observe-before-evidence", { pane_id: worker.paneId });
+  const staleFinish = await beforeEvidence.tools.get("supervisor_finish").execute("finish-before-evidence", {
+    pane_id: worker.paneId,
+    summary: "The old evidence looked complete.",
+    evidence: ["Only old evidence exists."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(staleFinish.isError, true);
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  beforeEvidence.events.get("session_shutdown")();
+
+  const secondLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:03:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "I reread PR 16; all current checks pass." }] },
+  })}\n`;
+  await appendFile(sessionFile, secondLine);
+  const afterEvidence = fakePi();
+  herdrSupervisor(afterEvidence);
+  await afterEvidence.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterEvidence.messages.length === 1);
+  const observation = await afterEvidence.tools.get("supervisor_observe").execute("observe-after-evidence", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /I reread PR 16; all current checks pass/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
+  const finish = await afterEvidence.tools.get("supervisor_finish").execute("finish-after-evidence", {
+    pane_id: worker.paneId,
+    summary: "The worker reread PR 16 and verified the current checks.",
+    evidence: ["The post-change native Codex message reports all current checks pass."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, false);
+  afterEvidence.events.get("session_shutdown")();
 });
 
 test("a slow failing provider stays single-flight while the bounded review still runs", async (t) => {
@@ -1995,6 +2076,13 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
 
 test("an uncertain steer delivery fails closed until fresh evidence", async (t) => {
   const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: new Date(Date.now() - 1000).toISOString(),
+  }, root);
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
   t.after(() => {
@@ -2024,6 +2112,10 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
   assert.match(result.content[0].text, /Do not send it again/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.lastDecision.decision, "steer");
+  assert.ok(stored.externalChange, "uncertain delivery must retain the reread obligation");
+  assert.match(stored.lastDecision.action, /watched github-pr hao1939\/herdr-supervisor#16 changed/);
   const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
     message: "Run the focused proof.",

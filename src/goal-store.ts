@@ -24,12 +24,14 @@ const stateFields = new Set([
   "wait",
   "terminal",
   "observationCursor",
+  "externalChange",
 ]);
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
 const waitFields = new Set(["condition", "reviewAt", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
+const externalChangeFields = new Set(["source", "subject", "revision", "observedAt"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
 // `recover` was written by an earlier v1 implementation. It remains readable
@@ -192,6 +194,18 @@ export function validateGoalState(state) {
       throw new Error("goal state observationCursor must be an object");
     }
     requiredString(state.observationCursor.kind, "observationCursor.kind");
+  }
+  if (state.externalChange !== undefined) {
+    if (!state.externalChange || typeof state.externalChange !== "object" || Array.isArray(state.externalChange)) {
+      throw new Error("goal externalChange must be an object");
+    }
+    onlyFields(state.externalChange, externalChangeFields, "externalChange");
+    for (const field of ["source", "subject", "revision", "observedAt"]) {
+      requiredString(state.externalChange[field], `externalChange.${field}`);
+    }
+    if (!Number.isFinite(Date.parse(state.externalChange.observedAt))) {
+      throw new Error("externalChange.observedAt must be an ISO timestamp");
+    }
   }
   return state;
 }

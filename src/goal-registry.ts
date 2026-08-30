@@ -31,8 +31,23 @@ export function bindingFromRecord(record): GoalBinding {
     lastDecision: record.state.lastDecision,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
+    externalChange: record.state.externalChange ? structuredClone(record.state.externalChange) : undefined,
     updatedAt: record.state.updatedAt,
   };
+}
+
+export async function recordExternalChange(binding, change, root?, now?) {
+  return updateGoalState(binding.goalId, (current) => {
+    current.externalChange = structuredClone(change);
+    return current;
+  }, root, now);
+}
+
+export async function clearExternalChange(binding, root?, now?) {
+  return updateGoalState(binding.goalId, (current) => {
+    delete current.externalChange;
+    return current;
+  }, root, now);
 }
 
 export async function loadSupervisorGoals(root?) {
@@ -117,15 +132,17 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
   };
   const at = options.at || new Date().toISOString();
   const answeredPreviousQuestion = binding.lastDecision?.decision === "ask_human";
-  if (binding.wait || binding.reviewAt || answeredPreviousQuestion) {
+  if (binding.wait || binding.reviewAt || binding.externalChange || answeredPreviousQuestion) {
     await updateGoalState(goalId, (state) => {
       delete state.wait;
       delete state.reviewAt;
+      delete state.externalChange;
       if (answeredPreviousQuestion) delete state.lastDecision;
       return state;
     }, root, () => at);
     delete binding.wait;
     delete binding.reviewAt;
+    delete binding.externalChange;
     if (answeredPreviousQuestion) {
       delete binding.lastDecision;
     }

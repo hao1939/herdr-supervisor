@@ -325,6 +325,9 @@ requires its original runtime and native session.
 Pending signals and the one armed timer stay in memory. A concrete wait's
 condition and absolute review deadline live in `current.json`, as does a human
 wait through its last decision and wait record, so restart does not lose either.
+When a watched external revision changes, that one unresolved change also lives
+in `current.json` until a later native final response advances the saved cursor.
+Polling schedules remain disposable and are not rebuilt as durable workflow.
 None of these files contains raw events, terminal output, reconnects, or copied
 Herdr status.
 The PoC needs no task store, replay framework, export command, archive

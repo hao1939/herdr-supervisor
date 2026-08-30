@@ -187,6 +187,27 @@ test("state updates atomically replace the current view and advance its revision
   assert.equal(JSON.parse(await readFile(goalPaths("g_test", root).current, "utf8")).revision, 2);
 });
 
+test("the local checkpoint retains one unresolved external change", async () => {
+  const root = await goalsRoot();
+  await runningGoal(root);
+  await updateGoalState("g_test", (current) => {
+    current.externalChange = {
+      source: "github-pr",
+      subject: "hao1939/herdr-supervisor#16",
+      revision: "revision-2",
+      observedAt: "2026-08-30T10:05:00.000Z",
+    };
+    return current;
+  }, root, () => "2026-08-30T10:05:00.000Z");
+
+  assert.deepEqual((await loadGoalState("g_test", root)).externalChange, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-2",
+    observedAt: "2026-08-30T10:05:00.000Z",
+  });
+});
+
 test("the local checkpoint rejects a malformed exact review time", async () => {
   const root = await goalsRoot();
   await runningGoal(root);
