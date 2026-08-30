@@ -25,6 +25,9 @@ test("global snapshot is compact current state rather than goal history", () => 
     nextReviewAt: "2026-08-29T02:00:00.000Z",
     evidence: ["stored evidence is intentionally not replayed here"],
     wait: { condition: "the pipeline result", reviewAt: "2026-08-29T02:00:00.000Z" },
+  }], [{
+    goalId: "g_unstarted",
+    contract: { objective: "Run the saved migration." },
   }], {
     agents: [{ pane_id: "w1:p2", terminal_id: "term_one", agent_session: session, agent_status: "idle" }],
     panes: [{ pane_id: "w1:p2", terminal_id: "term_one" }],
@@ -33,6 +36,11 @@ test("global snapshot is compact current state rather than goal history", () => 
   assert.equal(snapshot.goals[0].workerState, "idle");
   assert.equal(snapshot.goals[0].progressAgeMs, 3_600_000);
   assert.equal(snapshot.goals[0].wait.condition, "the pipeline result");
+  assert.deepEqual(snapshot.goals[1], {
+    goalId: "g_unstarted",
+    outcome: "Run the saved migration.",
+    workerState: "unstarted",
+  });
   assert.doesNotMatch(JSON.stringify(snapshot), /stored evidence|journal|messages|terminal output/);
 });
 

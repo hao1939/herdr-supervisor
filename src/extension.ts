@@ -756,8 +756,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function handleGlobalReview(reason: string) {
-    const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
-    const compactSnapshot = buildGlobalSnapshot(goals.active, snapshot, {
+    const [storedGoals, snapshot] = await Promise.all([loadSupervisorGoals(), client.snapshot()]);
+    const bindings = storedGoals.active.map((binding): ActiveGoal => ({
+      ...binding,
+      ...runtimeFor(binding),
+    }));
+    const compactSnapshot = buildGlobalSnapshot(bindings, storedGoals.unstarted, snapshot, {
       observerConnected: Boolean(stopSubscription),
       pendingFocusedReviews: pendingSignals.size,
       activeReview: reviewTurn.isActive() ? `goal:${reviewTurn.paneId}` : "global",
@@ -1300,15 +1304,23 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       if (!activeGlobalReview) return text("No global supervision review is active.", true);
       if (globalDecisionApplied) return text("The global supervision review already has a result.", true);
-      const goals = await activeBindings();
+      const goals = await loadSupervisorGoals();
       const byGoalId = new Map(goals.active.map((binding) => [binding.goalId, binding]));
+      const unstartedGoalIds = new Set(goals.unstarted.map((goal) => goal.goalId));
+      const knownGoalIds = new Set([...byGoalId.keys(), ...unstartedGoalIds]);
       const referenced = new Set([
         ...params.findings.flatMap((finding) => finding.affected_goal_ids),
         ...params.reconsider.map((item) => item.goal_id),
       ]);
-      const unknown = [...referenced].filter((goalId) => !byGoalId.has(goalId));
+      const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals are not active: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+        return text(`Cannot route the global result because these goals were not found among active or unstarted goals: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+      }
+      const unstartedReconsider = [...new Set(params.reconsider
+        .map((item) => item.goal_id)
+        .filter((goalId) => unstartedGoalIds.has(goalId)))];
+      if (unstartedReconsider.length) {
+        return text(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts. No focused reviews were queued.`, true);
       }
       const now = new Date();
       const nextReviewAt = params.next_review_at?.trim()

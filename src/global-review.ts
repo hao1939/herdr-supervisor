@@ -96,7 +96,7 @@ export function globalFindingHash(findings) {
   return stableHash(normalized);
 }
 
-export function buildGlobalSnapshot(bindings, herdr, health, now = new Date()) {
+export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = new Date()) {
   const timestamp = now.getTime();
   return {
     supervisorHealth: {
@@ -131,10 +131,14 @@ export function buildGlobalSnapshot(bindings, herdr, health, now = new Date()) {
         } : undefined,
         currentResources: { paneId: binding.paneId, agent: binding.agentSession.agent },
       };
-    }),
+    }).concat(unstarted.map((goal) => ({
+      goalId: goal.goalId,
+      outcome: goal.contract.objective,
+      workerState: "unstarted",
+    }))),
   };
 }
 
 export function globalReviewMessage(snapshot, reason, now = new Date()) {
-  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. Do not inspect full logs and do not act on workers here. Call supervisor_global_result exactly once. Findings may name the existing goals they affect, but findings are reports and do not schedule work. Add a goal to reconsider only when it actually needs a fresh ordinary focused review now; otherwise leave reconsider empty. If the system is healthy, return no findings and schedule the next low-frequency review.`;
+  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. A goal whose workerState is unstarted has a saved contract but no local worker; report unexpected unstarted work as a finding, but do not put it in reconsider because there is no worker to review. Do not inspect full logs and do not act on workers here. Call supervisor_global_result exactly once. Findings may name the existing goals they affect, but findings are reports and do not schedule work. Add an active goal to reconsider only when it actually needs a fresh ordinary focused review now; otherwise leave reconsider empty. If the system is healthy, return no findings and schedule the next low-frequency review.`;
 }

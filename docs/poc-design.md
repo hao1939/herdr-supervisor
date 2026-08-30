@@ -628,11 +628,14 @@ Do not continuously poll workers or replay their logs globally. Focused stale
 reviews still read current Herdr state and bounded native messages because an
 event may have been missed or delayed. In addition, one deliberately
 low-frequency global review receives only the compact current projection across
-goals. It catches circular waits, several goals affected by one runtime fault,
-and a stuck supervision path that no single goal can explain. A finding names
-the goals it concerns for a human-readable report. Only the separate
-`reconsider` decision queues an ordinary focused review, so reporting a shared
-condition does not itself spend one model turn per affected goal. The next
+goals. That projection includes saved unstarted contracts as `workerState:
+"unstarted"`, so a failed launch or copied contract cannot disappear merely
+because it has no checkpoint or worker. It catches circular waits, several
+goals affected by one runtime fault, and a stuck supervision path that no single
+goal can explain. A finding names the goals it concerns for a human-readable
+report. Only the separate `reconsider` decision queues an ordinary focused
+review, and only for a goal with a worker, so reporting a shared condition does
+not itself spend one model turn per affected goal. The next
 focused deadline starts after its review turn settles, so a slow model turn
 cannot enqueue another review behind itself.
 
@@ -792,6 +795,9 @@ stores or displays copied live status as goal truth.
   before recording findings, and queues the existing focused review path only
   for explicit `reconsider` decisions. It never reads worker logs or acts on
   several workers itself.
+- **Implemented:** saved contracts without workers appear in the same compact
+  goal projection as `unstarted`; they may be reported as findings but cannot be
+  sent through the focused worker-review path.
 - **Implemented:** a small atomic checkpoint restores the next deadline after
   restart, retries one missing decision, and suppresses unchanged findings.
 - **Verified:** focused tests cover compact context, priority, atomic reference
