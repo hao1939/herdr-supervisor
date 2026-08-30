@@ -399,9 +399,25 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
   }
 
-  async function saveUncertainSteer(binding, instruction, progress, evidence, reviewAt, boundary?) {
+  async function saveUncertainSteer(
+    binding,
+    instruction,
+    progress,
+    evidence,
+    reviewAt,
+    boundary?,
+    resolvedExternalChangeRevision?,
+  ) {
     try {
-      return await saveSteerCheckpoint(binding, instruction, progress, evidence, reviewAt, boundary);
+      return await saveSteerCheckpoint(
+        binding,
+        instruction,
+        progress,
+        evidence,
+        reviewAt,
+        boundary,
+        resolvedExternalChangeRevision,
+      );
     } catch (error) {
       return `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
     }
@@ -1664,6 +1680,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               params.evidence || continuedBinding.evidence,
               reviewAt,
               unavailableRereadBoundary(),
+              resolution.revision,
             );
             const deliveryNote = delivery.deliveryError
               ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
@@ -1679,6 +1696,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               params.evidence || continuedBinding.evidence,
               reviewAt,
               deliveryBoundary,
+              resolution.revision,
             );
             return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
@@ -1697,6 +1715,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               params.evidence || binding.evidence,
               reviewAt,
               unavailableRereadBoundary(),
+              resolution.revision,
             );
             const deliveryNote = delivery.deliveryError
               ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
@@ -1714,6 +1733,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               params.evidence || binding.evidence,
               reviewAt,
               deliveryBoundary,
+              resolution.revision,
             );
             return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
           }

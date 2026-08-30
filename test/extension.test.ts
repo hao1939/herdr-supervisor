@@ -2922,6 +2922,62 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   pi.events.get("session_shutdown")();
 });
 
+test("an uncertain steer keeps an already accepted external reread resolved", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const oldOutput = "The old PR state was pending.";
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "changed-revision",
+    workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "I reread PR 16; its current checks pass.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+    prompts += 1;
+    throw new Error("prompt response timed out");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-reread", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /Fresh post-instruction worker result available/);
+  const result = await pi.tools.get("supervisor_steer").execute("steer-after-reread", {
+    pane_id: worker.paneId,
+    message: "Continue with the remaining goal work.",
+    external_change_revision: "changed-revision",
+  });
+
+  assert.equal(prompts, 1);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.externalChange, undefined, "delivery uncertainty must not resurrect an accepted reread");
+  assert.equal(stored.lastDecision.decision, "steer");
+  assert.doesNotMatch(stored.lastDecision.action, /watched github-pr/);
+  pi.events.get("session_shutdown")();
+});
+
 test("continuing a stopped worker resumes the exact session atomically", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
