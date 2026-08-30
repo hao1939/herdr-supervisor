@@ -229,6 +229,30 @@ test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) =
   assert.equal(reads, 2);
 });
 
+test("startAndWaitAgent shares one deterministic launch and readiness deadline", async (t) => {
+  const client = new HerdrClient();
+  let now = 1_000;
+  let readinessTimeout;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(client, "startAgent", async (_request, timeoutMs) => {
+    assert.equal(timeoutMs, 1_000);
+    now += 400;
+    return { type: "agent_started" };
+  });
+  t.mock.method(client, "getAgent", async (_paneId, timeoutMs) => {
+    readinessTimeout = timeoutMs;
+    now += timeoutMs;
+    throw new Error("agent target w1:p2 not found");
+  });
+
+  await assert.rejects(
+    client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000),
+    /did not become ready/,
+  );
+  assert.equal(readinessTimeout, 600);
+  assert.equal(now, 2_000);
+});
+
 test("native session discovery tolerates a brief missing-agent transition", async (t) => {
   const client = new HerdrClient();
   let reads = 0;
