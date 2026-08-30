@@ -1656,7 +1656,7 @@ test("steering records a delivery boundary after its prompt is accepted", async 
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: sequence }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
-    workerOutput = "The worker settled before accepting the reread instruction.";
+    workerOutput = "The worker settled while the reread instruction was delivered.";
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -1665,7 +1665,6 @@ test("steering records a delivery boundary after its prompt is accepted", async 
   await beforeSteer.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => beforeSteer.messages.length === 1);
   await beforeSteer.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
-  workerOutput = "The worker settled while the supervisor was deciding.";
   const steer = await beforeSteer.tools.get("supervisor_steer").execute("steer-reread", {
     pane_id: worker.paneId,
     message: "Reread the current PR state and continue.",
@@ -1674,7 +1673,7 @@ test("steering records a delivery boundary after its prompt is accepted", async 
   assert.deepEqual(
     (await loadSupervisorGoals(root)).active[0].observationCursor,
     terminalOutputCursor(workerOutput),
-    "the checkpoint uses evidence captured after delivery",
+    "the checkpoint conservatively includes output produced during delivery",
   );
   beforeSteer.events.get("session_shutdown")();
 
@@ -1686,7 +1685,7 @@ test("steering records a delivery boundary after its prompt is accepted", async 
   await afterSteer.tools.get("supervisor_observe").execute("observe-same-output", { pane_id: worker.paneId });
   assert.ok(
     (await loadSupervisorGoals(root)).active[0].externalChange,
-    "output produced before delivery cannot satisfy the reread",
+    "output produced during delivery cannot satisfy the reread",
   );
   afterSteer.events.get("session_shutdown")();
 });

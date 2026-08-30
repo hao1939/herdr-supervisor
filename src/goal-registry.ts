@@ -195,11 +195,11 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
+    if (["leave", "ask_human"].includes(decision) && current.externalChange) {
+      throw new Error("the watched external resource changed before the decision was recorded");
+    }
     if (decision === "accept" && current.externalChange) {
       throw new Error("the watched external resource changed before acceptance");
-    }
-    if (decision === "ask_human" && current.externalChange) {
-      throw new Error("the watched external resource changed before asking the human");
     }
     if (
       decision === "steer"

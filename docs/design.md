@@ -103,12 +103,13 @@ Herdr.
 
 Polling schedules remain disposable memory. If a watched PR or build changes,
 only that unresolved fact is saved in `current.json`. It survives restart and
-cannot be cleared by merely sending a prompt. Immediately before the reread
-instruction, the supervisor saves the current transcript cursor or terminal
-fingerprint. It clears the change only after a later native final response
-advances that cursor. A worker without a native transcript instead requires a
-later settled Herdr transition and a changed terminal fingerprint. Both paths
-prove the same worker produced evidence after the instruction.
+cannot be cleared by merely sending a prompt. After the reread delivery attempt,
+the supervisor saves the current transcript cursor or terminal fingerprint.
+This conservative boundary may ignore output produced during delivery, but it
+cannot mistake earlier output for the reread. The change clears only after a
+later native final response advances that cursor. A worker without a native
+transcript instead requires a later settled Herdr transition and a changed
+terminal fingerprint.
 
 A decision that stops watching first drains the in-flight read for that exact
 external subject; an unrelated slow provider does not delay it. The final state

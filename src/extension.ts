@@ -240,12 +240,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return await bindingForPane(binding.paneId) || binding;
   }
 
-  async function stopExternalWatchAfterPolling(binding) {
-    const current = await bindingAfterExternalPolling(binding);
-    stopExternalWatch(current);
-    return current;
-  }
-
   function cacheBinding(binding) {
     goalCache?.active.set(binding.goalId, binding);
   }
@@ -307,6 +301,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       observationCursor: observation.cursor,
       workerSequence: Number(agent.state_change_seq || 0),
     };
+  }
+
+  async function deliverWorkerInstruction(binding, instruction) {
+    let deliveryError;
+    try {
+      await client.promptAgent(binding.paneId, instruction);
+    } catch (error) {
+      deliveryError = error;
+    }
+    reviewTurn.close(binding.paneId);
+    const boundary = await externalDeliveryBoundary(binding);
+    stopExternalWatch(binding);
+    return { boundary, deliveryError };
   }
 
   function workerInstruction(binding, message) {
@@ -1089,7 +1096,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       try {
         let binding = await bindingForPane(params.pane_id);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-        binding = await stopExternalWatchAfterPolling(binding);
+        binding = await bindingAfterExternalPolling(binding);
         const result = await refineSupervisorGoal(binding.goalId, {
           objective: params.goal.trim(),
           context: (params.context || []).map((item) => item.trim()).filter(Boolean),
@@ -1097,15 +1104,17 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
           summary: params.summary.trim(),
         });
-        cacheBinding(result.binding);
-        scheduleReview(result.binding);
+        await reloadGoals();
+        const refinedBinding = await bindingForPane(params.pane_id) || result.binding;
+        stopExternalWatch(refinedBinding);
+        scheduleReview(refinedBinding);
         let deliveryWarning = "";
         if (mode() === "live") {
           try {
             const snapshot = await client.snapshot();
             const agent = findAgent(snapshot, binding.paneId);
             const mismatch = identityMismatch(
-              result.binding,
+              refinedBinding,
               agent,
               findPane(snapshot, binding.paneId),
             );
@@ -1114,7 +1123,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             } else if (typeof agent.name !== "string" || !agent.name.trim()) {
               deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
-              await client.promptAgent(binding.paneId, refinedGoalPrompt(result.binding, agent.name));
+              await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
             }
           } catch (error) {
             deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
@@ -1364,27 +1373,18 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (externalWatch && effectiveWaitingOnPane) {
         return text("Choose either waiting_on_pane or external_watch for one wait, not both.", true);
       }
-      let suspendedExternalWatch;
       if (mode() === "live") {
         binding = await bindingAfterExternalPolling(binding);
-        suspendedExternalWatch = runtimeFor(binding).externalWatch;
-        stopExternalWatch(binding);
         snapshot = await client.snapshot();
       }
-      const rejectLeave = (message: string) => {
-        if (suspendedExternalWatch) {
-          runtimeFor(binding).externalWatch = suspendedExternalWatch;
-        }
-        return text(message, true);
-      };
       if (binding.externalChange) {
-        return rejectLeave("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.");
+        return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.", true);
       }
       const agent = findAgent(snapshot, params.pane_id);
       const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
-      if (mismatch) return rejectLeave(`Cannot leave this worker working: ${mismatch}.`);
+      if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
       if (agent.agent_status === "working" && waitingFor) {
-        return rejectLeave("A working worker is active, not waiting. Omit waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.");
+        return text("A working worker is active, not waiting. Omit waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
       }
       const previousReviewAt = Date.parse(binding.wait?.reviewAt || "");
       if (
@@ -1395,7 +1395,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         && previousReviewAt <= Date.now()
         && runtimeFor(binding).pendingObservationHasMessages === false
       ) {
-        return rejectLeave("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.");
+        return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
       }
       if (effectiveWaitingOnPane) {
         const peerPane = effectiveWaitingOnPane;
@@ -1408,12 +1408,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const peerProblem = identityMismatch(peer, peerAgent, findPane(snapshot, peerPane));
           if (peerProblem || peerAgent?.agent_status !== "working") {
             const peerState = peerProblem || `worker is ${peerAgent?.agent_status || "not running"}`;
-            return rejectLeave(`Cannot leave ${params.pane_id} waiting on ${peerPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`);
+            return text(`Cannot leave ${params.pane_id} waiting on ${peerPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
           }
         }
       }
       if (agent.agent_status !== "working" && !waitingFor) {
-        return rejectLeave(`Cannot leave ${params.pane_id} alone because it is ${agent.agent_status} and no concrete wait condition was supplied. Choose a real next action or name what can resume it.`);
+        return text(`Cannot leave ${params.pane_id} alone because it is ${agent.agent_status} and no concrete wait condition was supplied. Choose a real next action or name what can resume it.`, true);
       }
       const reviewAt = params.review_at?.trim()
         || (waitingFor ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
@@ -1421,7 +1421,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       try {
         if (reviewAt) deadline = reviewDeadline(reviewAt);
       } catch (error) {
-        return rejectLeave(`Cannot schedule review_at ${reviewAt}; ${error.message}.`);
+        return text(`Cannot schedule review_at ${reviewAt}; ${error.message}.`, true);
       }
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`
@@ -1513,7 +1513,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
-        binding = await stopExternalWatchAfterPolling(binding);
+        binding = await bindingAfterExternalPolling(binding);
         const liveSnapshot = await client.snapshot();
         const liveAgent = findAgent(liveSnapshot, params.pane_id);
         const livePane = findPane(liveSnapshot, params.pane_id);
@@ -1553,10 +1553,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-          try {
-            await client.promptAgent(params.pane_id, instruction);
-            deliveryBoundary = await externalDeliveryBoundary(continuedBinding);
-          } catch (error) {
+          const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+          deliveryBoundary = delivery.boundary;
+          if (delivery.deliveryError) {
             scheduleReview(continuedBinding);
             const checkpointWarning = await saveUncertainSteer(
               continuedBinding,
@@ -1566,16 +1565,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               reviewAt,
               deliveryBoundary,
             );
-            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${error.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
         } else {
-          try {
-            await client.promptAgent(params.pane_id, instruction);
-            deliveryBoundary = await externalDeliveryBoundary(binding);
-          } catch (error) {
+          const delivery = await deliverWorkerInstruction(binding, instruction);
+          deliveryBoundary = delivery.boundary;
+          if (delivery.deliveryError) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
-            reviewTurn.close(params.pane_id);
             scheduleReview(binding);
             const checkpointWarning = await saveUncertainSteer(
               binding,
@@ -1585,7 +1582,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
               reviewAt,
               deliveryBoundary,
             );
-            return text(`Could not confirm whether ${params.pane_id} received the instruction: ${error.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+            return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
           }
         }
         // The worker action has happened. Close the turn before bookkeeping so
@@ -1646,7 +1643,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         if (binding.externalChange) {
           return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
         }
-        stopExternalWatch(binding);
         const result = await recordDecision(binding, "ask_human", {
           progress: `Human input is required: ${params.question.trim()}`,
           action: params.question.trim(),
@@ -1695,7 +1691,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      binding = await stopExternalWatchAfterPolling(binding);
+      binding = await bindingAfterExternalPolling(binding);
       if (binding.externalChange) {
         return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
       }
