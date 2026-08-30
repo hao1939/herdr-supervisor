@@ -3891,7 +3891,7 @@ test("missing-pane recovery refuses a pane assigned to another active goal", asy
   });
 
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /already assigned to goal g_other/);
+  assert.match(result.content[0].text, /already pursues goal g_other/);
   assert.equal(prompts, 0);
   pi.events.get("session_shutdown")();
 });

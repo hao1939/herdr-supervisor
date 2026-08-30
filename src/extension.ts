@@ -462,24 +462,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return { ...current, ...runtimeFor(current) };
   }
 
-  async function assertRecoveryIdentityAvailable(binding, paneId) {
-    const goals = await activeBindings();
-    const conflict = goals.active.find((candidate) => (
-      candidate.goalId !== binding.goalId
-      && (
-        candidate.paneId === paneId
-        || sameAgentSession(candidate.agentSession, binding.agentSession)
-      )
-    ));
-    if (conflict) {
-      throw new Error(`recovery identity is already assigned to goal ${conflict.goalId}`);
-    }
-  }
-
   async function adoptExactSession(binding, snapshot) {
     const agent = exactSessionAgent(snapshot, binding.agentSession);
     if (!agent) return;
-    await assertRecoveryIdentityAvailable(binding, agent.pane_id);
     return refreshObservedLocation(binding, agent);
   }
 
@@ -506,7 +491,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (existingBinding) return existingBinding;
     const currentPane = findPane(snapshot, binding.paneId);
     if (currentPane) {
-      await assertRecoveryIdentityAvailable(binding, currentPane.pane_id);
       const refreshed = await refreshWorkerLocation(binding, {
         paneId: currentPane.pane_id,
         terminalId: currentPane.terminal_id,
@@ -536,7 +520,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane = findPane(freshSnapshot, paneId);
     }
     if (!pane?.terminal_id) throw new Error(`Herdr did not expose the recovery pane for goal ${binding.goalId}`);
-    await assertRecoveryIdentityAvailable(binding, pane.pane_id);
     const relocated = await refreshWorkerLocation(binding, {
       paneId: pane.pane_id,
       terminalId: pane.terminal_id,
