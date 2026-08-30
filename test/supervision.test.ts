@@ -228,9 +228,15 @@ test("a settled future wait shows its condition and review time", () => {
       condition: "the capacity owner to release the shared pipeline slot",
       reviewAt: "2026-08-29T09:53:30.000Z",
     },
+    externalWatch: {
+      source: "github-pr",
+      subject: "hao1939/herdr-supervisor#16",
+      nextPollAt: Date.parse("2026-08-29T09:50:00.000Z"),
+    },
   });
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
   assert.match(output, /Next: wait for the capacity owner to release the shared pipeline slot/);
+  assert.match(output, /Watching: github-pr hao1939\/herdr-supervisor#16/);
   assert.match(output, /Review at: 2026-08-29T09:53:30.000Z/);
   assert.doesNotMatch(output, /review current evidence/);
 });

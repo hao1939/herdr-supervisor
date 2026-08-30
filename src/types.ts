@@ -1,3 +1,5 @@
+import type { ExternalWatch } from "./external-watch.ts";
+
 export type AgentSession = {
   source: string;
   agent: string;
@@ -75,6 +77,7 @@ export type GoalRuntime = {
   missingDecisionRetries: number;
   pendingCursor?: ObservationCursor;
   pendingObservationHasMessages?: boolean;
+  externalWatch?: ExternalWatch;
 };
 
 export type ActiveGoal = GoalBinding & GoalRuntime;

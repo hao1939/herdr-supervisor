@@ -118,6 +118,14 @@ control that ends supervision without stopping the worker. Exact-session resume
 is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction.
 
+For a settled goal waiting on one exact GitHub pull request or Azure DevOps
+build, the supervisor can observe that resource between model turns. Unchanged
+reads stay quiet. A changed revision wakes the ordinary focused review, and the
+worker rereads the provider before the supervisor decides what the change
+means. This uses the existing timer and review path; it is not another daemon
+or task system. The normal bounded review remains the fallback after restart or
+a provider failure.
+
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
 (execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is
 enough to start that goal with a new worker elsewhere.

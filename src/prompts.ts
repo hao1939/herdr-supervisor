@@ -14,6 +14,13 @@ const workerExecutionBoundary = [
   "Do not assume that authentication in one host, container, identity, or service changes another.",
 ].join(" ");
 
+const externalWatchPolicy = [
+  "External watches",
+  "When one exact GitHub PR or ADO build can resume the goal, add external_watch to supervisor_leave.",
+  "Choose its exact source and subject semantically; never infer it with keyword routing.",
+  "An external-watch change is only a wake hint. Have the same worker reread the authoritative PR or build before deciding whether to continue, wait again, or finish.",
+].join(" ");
+
 export const workerInitializationPrompt =
   "Initialize this worker session only. Do not inspect or change files. Wait for the goal.";
 
@@ -197,5 +204,5 @@ const globalReviewPolicy =
   "A global supervision review is a compact, low-frequency health check across goals. In that turn, call supervisor_global_result exactly once. Identify relationships and affected existing goals, but never inspect logs, steer workers, create goals, or make focused decisions.";
 
 export function supervisorSystemPrompt(basePrompt: string) {
-  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}`;
+  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}\n\n${externalWatchPolicy}`;
 }
