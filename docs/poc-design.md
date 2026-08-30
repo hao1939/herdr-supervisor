@@ -383,7 +383,7 @@ Supervisor restart or resumed session
   -> fetch one fresh Herdr snapshot
   -> restore exact wait deadlines
   -> reread bounded worker evidence before waking an unchanged settled wait
-  -> reconsider expired waits, linked-worker changes, new evidence,
+  -> reconsider expired waits, recorded peer decisions, new evidence,
      and failures from current facts
   -> continue normal event-driven supervision
 ```
@@ -399,7 +399,7 @@ Supervisor restart or resumed session
 | Pane disappears or occupant changes      | Fail closed and ask the human only when a decision is needed             |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
-| Linked worker changes                    | Reconsider only goals explicitly waiting on that worker                 |
+| Linked worker records a decision         | Reconsider only goals explicitly waiting on that worker                 |
 
 The event means "reconsider this goal now." It never decides success by
 itself.
@@ -493,15 +493,17 @@ the outcome is known, and atomically updates the current goal context.
 peer or external condition. The model supplies that condition as structured
 input. A direct peer wait also supplies that worker's exact pane identity, so
 code can resolve and store the peer's durable goal identity without interpreting
-prose. The pane remains a current routing hint; relocating the peer cannot lose
+prose. The pane remains a last-known routing hint; relocating the peer cannot lose
 the relationship. The runtime assigns
 the normal bounded review interval automatically. If current evidence supplies
 an exact retry time, the model may preserve it instead. A settled worker
 without a concrete condition is still rejected. When several goals share
 scarce capacity, one active worker may use or probe it. That responsibility ends
 when the worker becomes
-idle or externally blocked: linked peers wake and the LLM decides which useful
-work can proceed. This avoids both a resource scheduler and an idle convoy.
+idle or externally blocked: its recorded supervisor decision wakes linked peers
+and the LLM decides which useful work can proceed. Raw lifecycle changes wake
+only their own goal; they do not spend speculative peer reviews. This avoids
+both a resource scheduler and an idle convoy.
 The peer identity is only an early-wake hint: an invalid or self-referential
 hint is dropped while the concrete condition and bounded deadline remain
 authoritative. Events improve latency; they are never required for eventual
@@ -520,7 +522,7 @@ code supplies the normal review interval when the model omits it; the model
 copies a later time only when current evidence provides a real exact retry
 boundary. The same field can accompany a `steer` decision when a worker should
 continue now but one named operation must be checked at an exact later time.
-A linked peer event may wake the goal earlier. Exact deadlines are checkpointed,
+A linked peer decision may wake the goal earlier. Exact deadlines are checkpointed,
 restored after restart, and never suppressed as routine activity. A bounded
 native-evidence check suppresses routine working/no-change model turns; new
 evidence, exact deadlines, settled workers, and real failures still wake
@@ -981,10 +983,10 @@ stores or displays copied live status as goal truth.
   enabled on new and restored sessions. Contract refinements update the same
   file and notify the same worker instead of creating or synchronizing a second
   durable goal record.
-- **Implemented:** the restart-stable worker name is derived from the goal UUID
-  but shortened to Herdr's 32-character agent-name limit. The retained 108-bit
-  UUID prefix keeps names practical to correlate without using an invalid full
-  UUID.
+- **Implemented:** the restart-stable worker name is derived from a 108-bit
+  hash of the complete goal ID and shortened to Herdr's 32-character
+  agent-name limit. Names remain practical to correlate without treating a
+  normalized or truncated goal prefix as ownership.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
   Codex worker with native Goals enabled, persists one goal contract and
   checkpoint, sends `/goal` only after the binding exists, and keeps human

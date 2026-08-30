@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
+import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
@@ -109,8 +110,17 @@ function codexLaunchArgs(cwd?: string) {
 }
 
 function workerNameForGoal(goalId: string) {
-  const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
-  return `goal-${suffix.slice(0, 27)}`;
+  const suffix = createHash("sha256").update(goalId).digest("hex").slice(0, 27);
+  return `goal-${suffix}`;
+}
+
+function exactSessionAgent(snapshot, session) {
+  return snapshot.agents?.find((agent) => (
+    agent.agent_session
+    && ["source", "agent", "kind", "value"].every(
+      (field) => agent.agent_session[field] === session[field],
+    )
+  ));
 }
 
 export default function herdrSupervisor(pi: ExtensionAPI) {
@@ -479,12 +489,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (session.agent !== "codex" || session.kind !== "id") {
       throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
     }
-    const existingAgent = snapshot.agents?.find((agent) => (
-      agent.agent_session
-      && ["source", "agent", "kind", "value"].every(
-        (field) => agent.agent_session[field] === session[field],
-      )
-    ));
+    const existingAgent = exactSessionAgent(snapshot, session);
     if (existingAgent) {
       await assertRecoveryIdentityAvailable(binding, existingAgent.pane_id);
       return refreshObservedLocation(binding, existingAgent);
@@ -516,6 +521,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const paneId = created?.root_pane?.pane_id;
       if (!paneId) throw new Error("Herdr created recovery space but did not return its pane identity");
       const freshSnapshot = await client.snapshot();
+      const restoredAgent = exactSessionAgent(freshSnapshot, session);
+      if (restoredAgent) {
+        await assertRecoveryIdentityAvailable(binding, restoredAgent.pane_id);
+        return refreshObservedLocation(binding, restoredAgent);
+      }
       pane = findPane(freshSnapshot, paneId);
     }
     if (!pane?.terminal_id) throw new Error(`Herdr did not expose the recovery pane for goal ${binding.goalId}`);
@@ -795,10 +805,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   async function handleWorkerEvent(paneId: string) {
     handleSignal(paneId);
-    await wakeDependentWaiters(
-      paneId,
-      `supervised worker ${paneId} changed; reconsider whether useful work can proceed`,
-    );
   }
 
   async function reconsiderCurrentBindings() {
@@ -1745,6 +1751,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const held = await holdExternalPolling(binding);
         binding = held.binding;
         releaseExternalPolling = held.release;
+        const resolution = externalResolution(binding, params.external_change_revision);
+        if (resolution.error) return text(resolution.error, true);
         let liveSnapshot = await client.snapshot();
         let liveAgent = findAgent(liveSnapshot, params.pane_id);
         let livePane = findPane(liveSnapshot, params.pane_id);
@@ -1775,8 +1783,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         if (liveMismatch && !canResumeNow) {
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
-        const resolution = externalResolution(binding, params.external_change_revision);
-        if (resolution.error) return text(resolution.error, true);
         let continuedBinding = binding;
         let resumed = false;
         let deliveryBoundary;

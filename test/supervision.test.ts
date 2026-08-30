@@ -92,7 +92,7 @@ test("bindings without a deadline receive one recovery review", () => {
   assert.deepEqual(dueBindings(workers).map((worker) => worker.paneId), ["w1:p1"]);
 });
 
-test("a worker change selects only waits linked to that exact worker", () => {
+test("a durable peer identity selects only waits linked to that exact goal", () => {
   const workers = [
     { goalId: "g_waiting", paneId: "w1:p2", wait: { goalId: "g_peer", paneId: "w1:p7" } },
     { goalId: "g_other", paneId: "w1:p3", wait: { goalId: "g_else", paneId: "w1:p8" } },
