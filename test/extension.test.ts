@@ -17,7 +17,7 @@ const worker = {
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
 
-function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000" } = {}): any {
+function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000", mode = "live" } = {}): any {
   const commands = new Map();
   const tools = new Map();
   const events = new Map();
@@ -29,7 +29,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     messages,
     registerFlag() {},
     getFlag(name) {
-      if (name === "supervisor-mode") return "live";
+      if (name === "supervisor-mode") return mode;
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
       if (name === "supervisor-external-watch-ms") return externalWatchMs;
@@ -37,7 +37,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) { events.set(name, handler); },
-    sendMessage(message) { messages.push(message); },
+    sendMessage(message, options) { messages.push({ ...message, options }); },
     setActiveTools() {},
   };
 }
@@ -2529,9 +2529,14 @@ test("a slow failing provider stays single-flight while the bounded review still
   failRead();
   await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-error"));
   assert.equal(
+    pi.messages.find((message) => message.customType === "herdr-supervisor-error").options.triggerTurn,
+    true,
+    "a live diagnostic must wake the existing supervisor agent loop",
+  );
+  assert.equal(
     pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
     2,
-    "a provider diagnostic must not start another model review",
+    "a diagnostic turn must not fabricate another focused worker review",
   );
   pi.events.get("session_shutdown")();
 });
@@ -3154,7 +3159,7 @@ test("restart restores a settled wait without a no-change review before its dead
   pi.events.get("session_shutdown")();
 });
 
-test("only the current automated review remains in model context", () => {
+test("only the current automated turn remains in model context", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
   const context = pi.events.get("context")({
@@ -3170,6 +3175,7 @@ test("only the current automated review remains in model context", () => {
       { role: "custom", customType: "herdr-supervisor-review", content: "current goal" },
       { role: "assistant", content: "current tool call" },
       { role: "toolResult", content: "current observation" },
+      { role: "custom", customType: "herdr-supervisor-error", content: "current diagnostic" },
     ],
   });
 
@@ -3178,9 +3184,7 @@ test("only the current automated review remains in model context", () => {
     "I will.",
     "Also prefer plain language.",
     "Understood.",
-    "current goal",
-    "current tool call",
-    "current observation",
+    "current diagnostic",
   ]);
 });
 

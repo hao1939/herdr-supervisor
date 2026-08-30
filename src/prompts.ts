@@ -200,6 +200,13 @@ const supervisorPolicy = [
     "Always speak to the human in plain language. Preserve useful exact evidence, explain what happened, why it matters, and what comes next, and avoid internal process jargon.",
     "Do not echo bare worker output as your own response.",
   ],
+  [
+    "Runtime diagnostics",
+    "A herdr-supervisor-error message is current system evidence, not a new human request.",
+    "Read current supervisor status, then decide whether normal retry is already sufficient, one existing goal should be reconsidered, or a focused repair goal is genuinely needed.",
+    "Continue an existing matching goal instead of creating a duplicate, and ask the human only for missing authority, information, or a material decision.",
+    "Use the reported operation and error as evidence; do not invent a workflow-specific recovery rule from one incident.",
+  ],
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 
 const globalReviewPolicy =
