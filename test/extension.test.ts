@@ -2145,6 +2145,80 @@ test("a slow failing provider stays single-flight while the bounded review still
   pi.events.get("session_shutdown")();
 });
 
+test("a decision reserves its exact external subject and rearms polling after it commits", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousGitHubToken = process.env.GITHUB_TOKEN;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.GITHUB_TOKEN = "test-token";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousGitHubToken;
+  });
+  let reads = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (String(url).includes("/pulls/")) {
+      reads += 1;
+      return Response.json({ head: { sha: "abc123" }, state: "open", draft: false, mergeable: true });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({ check_runs: [{ id: 1, name: "test", status: "in_progress", conclusion: null }] });
+  });
+  let gatedSnapshots = 0;
+  let releaseSnapshot;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (gatedSnapshots > 0) {
+      gatedSnapshots -= 1;
+      if (!gatedSnapshots) await new Promise((resolve) => { releaseSnapshot = resolve; });
+    }
+    return snapshot({ agent_status: "idle", state_change_seq: 3 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ externalWatchMs: "100" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker is waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => reads >= 1);
+  await pi.tools.get("supervisor_reconsider").execute("reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "confirm the wait is still correct",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  await pi.tools.get("supervisor_observe").execute("observe-again", { pane_id: worker.paneId });
+
+  gatedSnapshots = 2;
+  const renewal = pi.tools.get("supervisor_leave").execute("renew", {
+    pane_id: worker.paneId,
+    progress: "The worker is still waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  await waitFor(() => releaseSnapshot !== undefined);
+  const readsWhileHeld = reads;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(reads, readsWhileHeld, "no poll may start between the drain and the decision");
+
+  releaseSnapshot();
+  const renewed = await renewal;
+  assert.equal(renewed.isError, false, renewed.content[0].text);
+  await waitFor(() => reads > readsWhileHeld);
+  pi.events.get("session_shutdown")();
+});
+
 test("steering drains an in-flight external observation before clearing its watch", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

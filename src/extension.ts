@@ -236,9 +236,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   async function holdExternalPolling(binding) {
     const watch = runtimeFor(binding).externalWatch;
-    const release = watch
-      ? await externalPoll.hold(externalWatchKey(watch))
-      : () => {};
+    const held = watch ? await externalPoll.hold(externalWatchKey(watch)) : undefined;
+    let released = false;
+    // A held subject is excluded from the polling schedule, so the decision's
+    // own timer arming cannot see it. Rearm once the hold is released.
+    const release = () => {
+      if (!held || released) return;
+      released = true;
+      held();
+      void armReviewTimer().catch((error) => reportBackgroundFailure(
+        "Could not resume external polling after a decision",
+        error,
+      ));
+    };
     try {
       return {
         binding: await bindingForPane(binding.paneId) || binding,
