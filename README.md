@@ -125,6 +125,15 @@ durable contract and informs the same worker — no sibling goals or temporary
 steering. For operator control, `/supervise <pane> <goal>` attaches an existing
 worker, and `/supervise <pane> --goal-id <id>` starts a copied contract.
 
+When a worker creates or updates a pull request, its native Goal asks it to add
+a small `Supervision` block to the description containing the readable goal,
+exact goal ID, observed Herdr worker name, and Herdr pane ID. The worker reads
+the current objective from the canonical `goal.json` whenever it creates or
+updates the PR, so a refined goal does not leave stale text behind. A public native Codex
+session ID is included when the binding has one. Path-backed bindings never
+publish their local session path. The PR title and main summary stay about the
+change; the metadata only makes the originating supervised work easy to trace.
+
 ### Current limitations
 
 - **Codex only.** Worker startup, message-level observation, and exact-session
@@ -151,4 +160,3 @@ npm test         # node:test suite
 Herdr owns runtime truth. The supervisor owns judgment about whether a
 registered worker is still moving toward its stated goal. It must not copy
 Herdr's lifecycle into a parallel queue, task graph, or status database.
-test

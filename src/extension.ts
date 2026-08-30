@@ -94,24 +94,48 @@ function codexLaunchArgs(cwd?: string) {
 const workerExecutionBoundary = "You own only execution spaces that you explicitly create or claim for this goal. Treat the starting project directory and every other worker's worktree as read-only discovery sources. Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison. Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap. Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information. Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it. Do not assume that authentication in one host, container, identity, or service changes another.";
 const workerInitializationPrompt = "Initialize this worker session only. Do not inspect or change files. Wait for the goal.";
 
-function nativeGoalPrompt(goalId: string) {
+export function pullRequestTraceability(binding, workerName: string) {
+  if (!workerName.trim()) throw new Error("pull request traceability requires the observed Herdr worker name");
+  const fields = [
+    "- Goal: <copy the current objective from the canonical goal.json>",
+    `- Goal ID: ${JSON.stringify(binding.goalId)}`,
+    `- Worker: ${JSON.stringify(workerName)}`,
+  ];
+  if (binding.agentSession.kind === "id") {
+    fields.push(`- Codex session: ${JSON.stringify(binding.agentSession.value)}`);
+  }
+  fields.push(`- Pane: ${JSON.stringify(binding.paneId)}`);
+  return [
+    "When you create or update a pull request for this goal, re-read the canonical goal.json and use this traceability format in its description:",
+    "## Supervision",
+    ...fields,
+    "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
+    "Keep the PR title and main summary focused on the code change. This metadata identifies its originating supervised work but is not completion evidence. Never publish a local session path or another private native-session locator.",
+  ].join("\n");
+}
+
+function nativeGoalPrompt(binding, workerName: string) {
+  const { goalId } = binding;
   const contract = resolve(goalPaths(goalId).contract);
   const objective = [
     `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
     "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
     workerExecutionBoundary,
     "Work proactively from current evidence. Keep independent useful paths moving when one path waits. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
+    pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
   ].join(" ");
   if (objective.length > 4000) throw new Error("the native Codex Goal objective exceeds 4,000 characters");
   return `/goal ${objective}`;
 }
 
-function refinedGoalPrompt(goalId: string) {
+function refinedGoalPrompt(binding, workerName: string) {
+  const goalId = binding.goalId;
   return [
     `The human refined the canonical contract for your active Codex Goal at ${JSON.stringify(resolve(goalPaths(goalId).contract))}.`,
     "Re-read the complete goal.json now and continue under its latest objective, context, completion criteria, and constraints.",
     "Keep the native Goal active until the revised contract is fully proved. If you had already completed it, start the same native Goal again from this canonical contract.",
+    pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language.",
   ].join(" ");
 }
@@ -195,6 +219,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   async function refreshStatus(ctx) {
     const goals = await activeBindings();
     ctx.ui.setStatus("herdr-supervisor", goals.active.length ? `supervising ${goals.active.length}` : undefined);
+  }
+
+  async function deliverNativeGoal(binding) {
+    const snapshot = await client.snapshot();
+    const agent = findAgent(snapshot, binding.paneId);
+    const mismatch = identityMismatch(
+      binding,
+      agent,
+      findPane(snapshot, binding.paneId),
+    );
+    if (mismatch) throw new Error(`refusing stale native Goal delivery: ${mismatch}`);
+    if (typeof agent.name !== "string" || !agent.name.trim()) {
+      throw new Error("refusing native Goal delivery because the Herdr worker has no stable name");
+    }
+    await client.promptAgent(binding.paneId, nativeGoalPrompt(binding, agent.name));
   }
 
   function scheduleReview(binding, delay = reviewIntervalMs()) {
@@ -639,7 +678,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     if (mode() === "live") {
       try {
-        await client.promptAgent(paneId, nativeGoalPrompt(binding.goalId));
+        await deliverNativeGoal(binding);
       } catch (error) {
         warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
       }
@@ -754,10 +793,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       throw new Error(`Started identified Codex worker ${paneId}, but could not record its goal: ${error.message}. The goal was not delivered; do not create another worker.`);
     }
 
-    const prompt = nativeGoalPrompt(goalId);
     let promptWarning = "";
     try {
-      await client.promptAgent(paneId, prompt);
+      await deliverNativeGoal(result.binding);
     } catch (error) {
       promptWarning = ` Initial native Goal delivery could not be confirmed: ${error.message}.`;
     }
@@ -784,7 +822,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     if (activateNativeGoal && mode() === "live") {
       try {
-        await client.promptAgent(paneId, nativeGoalPrompt(goalId));
+        await deliverNativeGoal(binding);
       } catch (error) {
         warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
       }
@@ -880,18 +918,20 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         scheduleReview(result.binding);
         let deliveryWarning = "";
         if (mode() === "live") {
-          const prompt = refinedGoalPrompt(binding.goalId);
           try {
             const snapshot = await client.snapshot();
+            const agent = findAgent(snapshot, binding.paneId);
             const mismatch = identityMismatch(
               result.binding,
-              findAgent(snapshot, binding.paneId),
+              agent,
               findPane(snapshot, binding.paneId),
             );
             if (mismatch) {
               deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
+            } else if (typeof agent.name !== "string" || !agent.name.trim()) {
+              deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
-              await client.promptAgent(binding.paneId, prompt);
+              await client.promptAgent(binding.paneId, refinedGoalPrompt(result.binding, agent.name));
             }
           } catch (error) {
             deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
