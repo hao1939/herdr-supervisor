@@ -44,6 +44,39 @@ test("one provider failure does not hide another observation", async () => {
   assert.equal(observations.find((item) => item.goalId === "g_healthy")?.changed, true);
 });
 
+test("distinct subjects are read sequentially to bound provider concurrency", async () => {
+  let active = 0;
+  let maximum = 0;
+  const source = {
+    async read(subject) {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { revision: subject, summary: `${subject} observed` };
+    },
+  };
+  await observeExternalWatches([
+    { goalId: "g_one", source: "github-pr", subject: "example/project#1" },
+    { goalId: "g_two", source: "github-pr", subject: "example/project#2" },
+  ], { "github-pr": source });
+  assert.equal(maximum, 1);
+});
+
+test("GitHub rate-limit responses carry their retry boundary", async () => {
+  const source = githubPullRequestSource({
+    token: "test-token",
+    async fetchImpl() {
+      return new Response(null, { status: 429, headers: { "Retry-After": "7" } });
+    },
+  });
+  const [observation] = await observeExternalWatches([
+    { goalId: "g_rate", source: "github-pr", subject: "example/project#7" },
+  ], { "github-pr": source });
+  assert.equal(observation.ok, false);
+  assert.equal(observation.retryAfterMs, 7_000);
+});
+
 test("GitHub PR revisions are stable when check order changes", async () => {
   let reverse = false;
   const source = githubPullRequestSource({
@@ -72,6 +105,7 @@ test("GitHub PR revisions are stable when check order changes", async () => {
   const second = await source.read("hao1939/herdr-supervisor#18");
   assert.equal(first.revision, second.revision);
   assert.equal(first.summary, "GitHub PR hao1939/herdr-supervisor#18 is open; 1/2 checks completed");
+  assert.equal(first.retryAfterMs, undefined, "authenticated reads use the supervisor interval");
 });
 
 test("GitHub PR revisions include paginated check runs and commit statuses", async () => {

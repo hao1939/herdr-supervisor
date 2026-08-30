@@ -14,6 +14,7 @@ import {
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
 import {
+  ExternalPollFence,
   observeExternalWatches,
 } from "./external-watch.ts";
 import {
@@ -79,7 +80,7 @@ const supervisorTools = [
 ];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
-const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 2 * 60 * 1000;
+const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 5 * 60 * 1000;
 type SupervisorMode = "observe" | "dry-run" | "live";
 
 function text(value: string, isError = false) {
@@ -113,13 +114,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   const pendingSignals = new Map<string, ReviewSignal | undefined>();
   const pendingStarts = new Map<string, string>();
   const runtimeGoals = new Map<string, GoalRuntime>();
+  const externalPoll = new ExternalPollFence();
   let activeGlobalReview = false;
   let globalDecisionApplied = false;
   let pendingGlobalReview: string | undefined;
   let globalMissingDecisionRetries = 0;
   let globalState = emptyGlobalReviewState();
   let reviewPumpRunning = false;
-  let externalPollRunning = false;
   let agentTurnActive = false;
   let shuttingDown = false;
   let lastBackgroundError = "";
@@ -267,6 +268,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
   }
 
+  function clearRecoveredWatchError(watch) {
+    if (!watch.lastError) return;
+    const diagnostic = `Could not observe ${watch.source} ${watch.subject}: ${watch.lastError}`;
+    if (lastBackgroundError === diagnostic) lastBackgroundError = "";
+    watch.lastError = undefined;
+  }
+
   pi.registerFlag("supervisor-mode", {
     description: "Supervision authority: observe, dry-run, or live",
     type: "string",
@@ -338,7 +346,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const goals = await activeBindings();
     const waiting = reviewCandidates(goals.active);
     const reviewDelay = nextReviewDelay(waiting);
-    const watchDeadlines = externalPollRunning ? [] : goals.active
+    const watchDeadlines = externalPoll.active ? [] : goals.active
       .map((goal) => goal.externalWatch?.nextPollAt)
       .filter((deadline): deadline is number => deadline !== undefined);
     const watchDelay = watchDeadlines.length
@@ -356,18 +364,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function runScheduledObservations() {
-    if (externalPollRunning) {
-      await reviewDueWorkers();
-      return;
-    }
-    externalPollRunning = true;
     try {
-      // Goal deadlines remain responsive even when an external provider is
-      // slow. External observation is an optimization, never the recovery net.
-      await reviewDueWorkers();
-      await pollDueExternalWatches();
+      await externalPoll.run(reviewDueWorkers, pollDueExternalWatches);
     } finally {
-      externalPollRunning = false;
       await armReviewTimer();
     }
   }
@@ -394,7 +393,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         || watch.subject !== observation.subject
         || watch.revision !== observation.revision
       ) continue;
-      watch.nextPollAt = Date.now() + externalWatchIntervalMs();
+      watch.nextPollAt = Date.now() + Math.max(
+        externalWatchIntervalMs(),
+        observation.retryAfterMs || 0,
+      );
       if (!observation.ok) {
         if (watch.lastError !== observation.error) {
           watch.lastError = observation.error;
@@ -405,7 +407,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }
         continue;
       }
-      watch.lastError = undefined;
+      clearRecoveredWatchError(watch);
       watch.revision = observation.observedRevision;
       if (!observation.changed) continue;
       handleSignal(binding.paneId, {
@@ -1365,12 +1367,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             });
           } catch (error) {
             if (!resumeAccepted) throw error;
+            clearExternalWatch(binding);
             scheduleReview(binding);
             return text(`Herdr accepted the exact-session resume for ${params.pane_id}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
             reviewTurn.close(params.pane_id);
+            clearExternalWatch(binding);
             scheduleReview(binding);
             return text(`The exact-session resume ran, but the resulting worker identity did not match: ${resumedMismatch}. No further message was sent.\n\nEnd this supervisor turn now; do not retry without fresh evidence.`, true);
           }
@@ -1379,6 +1383,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           try {
             await client.promptAgent(params.pane_id, params.message.trim());
           } catch (error) {
+            clearExternalWatch(continuedBinding);
             scheduleReview(continuedBinding);
             return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${error.message}.\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
@@ -1389,6 +1394,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
             reviewTurn.close(params.pane_id);
+            clearExternalWatch(binding);
             scheduleReview(binding);
             return text(`Could not confirm whether ${params.pane_id} received the instruction: ${error.message}.\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
           }
@@ -1723,7 +1729,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     activeGlobalReview = false;
     globalDecisionApplied = false;
     pendingGlobalReview = undefined;
-    externalPollRunning = false;
     reviewTurn.end();
     lastBackgroundError = "";
     observerInterrupted = false;

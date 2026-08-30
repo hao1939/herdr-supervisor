@@ -18,6 +18,7 @@ export type ExternalWatchRequest = Pick<ExternalWatch, "source" | "subject" | "r
 type ExternalRead = {
   revision: string;
   summary: string;
+  retryAfterMs?: number;
 };
 
 export type ExternalSource = {
@@ -31,11 +32,35 @@ export type ExternalObservation = ExternalWatchRequest & {
   changed?: boolean;
   summary?: string;
   error?: string;
+  retryAfterMs?: number;
 };
 
 const MAX_TEXT = 2_000;
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
+const UNAUTHENTICATED_GITHUB_INTERVAL_MS = 5 * 60 * 1000;
 const execFileAsync = promisify(execFile);
+
+export class ExternalPollFence {
+  #active = false;
+
+  get active() {
+    return this.#active;
+  }
+
+  async run(reviewDue: () => Promise<void>, pollDue: () => Promise<void>) {
+    if (this.#active) {
+      await reviewDue();
+      return;
+    }
+    this.#active = true;
+    try {
+      await reviewDue();
+      await pollDue();
+    } finally {
+      this.#active = false;
+    }
+  }
+}
 
 function requiredText(value: unknown, field: string) {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) {
@@ -48,8 +73,20 @@ function stableRevision(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function responseRetryAfter(response: Response) {
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) return retryAfter * 1000;
+  const reset = Number(response.headers.get("x-ratelimit-reset"));
+  if (Number.isFinite(reset) && reset > 0) return Math.max(1000, reset * 1000 - Date.now());
+  return undefined;
+}
+
 async function responseJson(response: Response, label: string) {
-  if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const error: Error & { retryAfterMs?: number } = new Error(`${label} returned HTTP ${response.status}`);
+    error.retryAfterMs = responseRetryAfter(response);
+    throw error;
+  }
   return response.json();
 }
 
@@ -129,6 +166,7 @@ export function githubPullRequestSource({
       return {
         revision: stableRevision(stable),
         summary: `GitHub PR ${owner}/${repository}#${number} is ${pull.state}; ${completed}/${total} checks completed`,
+        retryAfterMs: token ? undefined : UNAUTHENTICATED_GITHUB_INTERVAL_MS,
       };
     },
   };
@@ -223,30 +261,42 @@ export async function observeExternalWatches(
     groups.set(identity, group);
   }
 
-  const batches = await Promise.all([...groups.values()].map(async (group) => {
+  const observations: ExternalObservation[] = [];
+  for (const group of groups.values()) {
     const source = sources[group.source];
     if (!source) {
-      return group.watches.map((watch) => ({
+      observations.push(...group.watches.map((watch) => ({
         ...watch,
         ok: false,
         error: `unsupported external source ${group.source}`,
-      }));
+      })));
+      continue;
     }
     try {
       const result = await source.read(group.subject);
       const revision = requiredText(result.revision, "observed revision");
       const summary = requiredText(result.summary, "observed summary");
-      return group.watches.map((watch) => ({
+      observations.push(...group.watches.map((watch) => ({
         ...watch,
         ok: true,
         observedRevision: revision,
         changed: watch.revision !== undefined && watch.revision !== revision,
         summary,
-      }));
+        retryAfterMs: result.retryAfterMs,
+      })));
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error).slice(0, MAX_TEXT);
-      return group.watches.map((watch) => ({ ...watch, ok: false, error: message }));
+      const retryAfterMs = typeof error === "object" && error
+        && "retryAfterMs" in error && typeof error.retryAfterMs === "number"
+        ? error.retryAfterMs
+        : undefined;
+      observations.push(...group.watches.map((watch) => ({
+        ...watch,
+        ok: false,
+        error: message,
+        retryAfterMs,
+      })));
     }
-  }));
-  return batches.flat();
+  }
+  return observations;
 }
