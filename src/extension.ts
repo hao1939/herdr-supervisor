@@ -1262,7 +1262,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`
-          + (externalWatch ? `\nWatching: ${externalWatch.source} ${externalWatch.subject.trim()}` : "")
+          + (externalWatch ? `\nExternal watch target: ${externalWatch.source} ${externalWatch.subject.trim()}` : "")
         : params.progress.trim();
       if (mode() === "live") {
         const result = await recordDecision(binding, "leave", {
