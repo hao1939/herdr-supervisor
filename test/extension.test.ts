@@ -481,6 +481,69 @@ test("a human refinement updates the durable goal and informs the same worker", 
   pi.events.get("session_shutdown")();
 });
 
+test("goal refinement drains its exact watch and preserves a change found in flight", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let releasePull;
+  let fetches = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    fetches += 1;
+    if (String(url).includes("/pulls/")) {
+      return new Promise((resolve) => {
+        releasePull = () => resolve(Response.json({
+          head: { sha: "abc123" },
+          state: "open",
+          draft: false,
+          mergeable: true,
+        }));
+      });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({ check_runs: [{ id: 1, name: "test", status: "completed", conclusion: "success" }] });
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3, name: "worker" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is waiting for PR checks.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "Waiting for PR checks.",
+    waiting_for: "PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16", revision: "old" },
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => fetches === 1);
+
+  const refining = pi.tools.get("supervisor_update_goal").execute("refine", {
+    pane_id: worker.paneId,
+    goal: "Finish the exact refined goal.",
+    acceptance: ["The refined proof passes."],
+    summary: "The human refined the outcome.",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal((await loadSupervisorGoals(root)).active[0].goal, "Finish the exact goal.");
+  releasePull();
+  const result = await refining;
+  assert.equal(result.isError, false);
+  const [refined] = (await loadSupervisorGoals(root)).active;
+  assert.equal(refined.goal, "Finish the exact refined goal.");
+  assert.ok(refined.externalChange, "the provider change found during refinement remains unresolved");
+  pi.events.get("session_shutdown")();
+});
+
 test("one transient human fact queues separate focused reviews without rewriting goals", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reconsider-"));
   const secondWorker = {
@@ -1091,6 +1154,41 @@ test("an idle worker cannot be left working and may be steered in the same revie
   ]);
   const continuedAudit = await readAudit("g_test", root);
   assert.deepEqual(continuedAudit.at(-1).evidence, continued.evidence);
+  pi.events.get("session_shutdown")();
+});
+
+test("leaving a worker revalidates its current state after polling drains", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let leaving = false;
+  let leaveSnapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    const status = leaving && ++leaveSnapshots === 2 ? "working" : "idle";
+    return snapshot({ agent_status: status, state_change_seq: 3 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker looked idle before the decision.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  leaving = true;
+  const result = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker appeared idle.",
+    waiting_for: "an external result",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /A working worker is active, not waiting/);
   pi.events.get("session_shutdown")();
 });
 
