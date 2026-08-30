@@ -6,6 +6,7 @@ import { findAgent, findPane, identityMismatch } from "./supervision.ts";
 
 export const DEFAULT_GLOBAL_REVIEW_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_GLOBAL_STATE_BYTES = 64 * 1024;
+const MAX_FINDING_CONTEXT = 12_000;
 
 export function globalReviewPath(root = defaultGoalsRoot()) {
   return join(root, ".supervisor", "global-review.json");
@@ -18,6 +19,7 @@ export function emptyGlobalReviewState() {
     nextReviewAt: undefined,
     snapshotHash: undefined,
     lastFindingHash: undefined,
+    lastFinding: undefined,
   };
 }
 
@@ -31,7 +33,7 @@ export function validateGlobalReviewState(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== 1) {
     throw new Error("invalid global review state");
   }
-  const allowed = new Set(["version", "lastReviewedAt", "nextReviewAt", "snapshotHash", "lastFindingHash"]);
+  const allowed = new Set(["version", "lastReviewedAt", "nextReviewAt", "snapshotHash", "lastFindingHash", "lastFinding"]);
   for (const field of Object.keys(value)) {
     if (!allowed.has(field)) throw new Error(`global review state contains unsupported field ${field}`);
   }
@@ -41,6 +43,13 @@ export function validateGlobalReviewState(value) {
     if (value[field] !== undefined && (typeof value[field] !== "string" || !value[field])) {
       throw new Error(`${field} must be a non-empty string`);
     }
+  }
+  if (value.lastFinding !== undefined && (
+    typeof value.lastFinding !== "string"
+    || !value.lastFinding
+    || value.lastFinding.length > MAX_FINDING_CONTEXT
+  )) {
+    throw new Error(`lastFinding must be a non-empty string no longer than ${MAX_FINDING_CONTEXT} characters`);
   }
   return value;
 }
@@ -96,6 +105,14 @@ export function globalFindingHash(findings) {
   return stableHash(normalized);
 }
 
+export function globalFindingSummary(findings) {
+  const summary = findings.map((finding) => (
+    `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Affects: ${finding.affectedGoalIds.join(", ")}`
+  )).join("\n");
+  if (summary.length <= MAX_FINDING_CONTEXT) return summary;
+  return `${summary.slice(0, MAX_FINDING_CONTEXT - 13)}…[truncated]`;
+}
+
 export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = new Date()) {
   const timestamp = now.getTime();
   return {
@@ -140,6 +157,9 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
   };
 }
 
-export function globalReviewMessage(snapshot, reason, now = new Date()) {
-  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. A goal whose workerState is unstarted has a saved contract but no local worker; report unexpected unstarted work as a finding, but do not put it in reconsider because there is no worker to review. Do not inspect full logs and do not act on workers here. Call supervisor_global_result exactly once. Findings may name the existing goals they affect, but findings are reports and do not schedule work. Add an active goal to reconsider only when it actually needs a fresh ordinary focused review now; otherwise leave reconsider empty. If the system is healthy, return no findings and schedule the next low-frequency review.`;
+export function globalReviewMessage(snapshot, reason, previousFinding?, now = new Date()) {
+  const previous = previousFinding
+    ? `\n\nPreviously shown finding:\n${previousFinding}\n\nDo not report it again unless the current snapshot proves a material change. If it is unchanged, return no finding for it.`
+    : "";
+  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}${previous}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. A goal whose workerState is unstarted has a saved contract but no local worker; report unexpected unstarted work as a finding, but do not put it in reconsider because there is no worker to review. Do not inspect full logs and do not act on workers here. Call supervisor_global_result exactly once. Findings may name the existing goals they affect, but findings are reports and do not schedule work. Add an active goal to reconsider only when it actually needs a fresh ordinary focused review now; otherwise leave reconsider empty. If the system is healthy, return no findings and schedule the next low-frequency review.`;
 }

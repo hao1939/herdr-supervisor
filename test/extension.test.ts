@@ -4224,11 +4224,26 @@ test("a completed global review arms its next in-process deadline", async (t) =>
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_global_result").execute("first", {
     summary: "Healthy.",
-    findings: [],
+    findings: [{
+      problem: "One already reported issue",
+      evidence: ["The current snapshot proves it"],
+      affected_goal_ids: ["g_test"],
+    }],
     reconsider: [],
   });
   await pi.events.get("agent_settled")();
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 2);
+  const reviews = pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review");
+  assert.match(reviews[1].content, /Previously shown finding/);
+  assert.match(reviews[1].content, /One already reported issue/);
+  assert.match(reviews[1].content, /Do not report it again unless the current snapshot proves a material change/);
+  await pi.tools.get("supervisor_global_result").execute("unchanged", {
+    summary: "No material change.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /One already reported issue/);
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 1);
   pi.events.get("session_shutdown")();
 });

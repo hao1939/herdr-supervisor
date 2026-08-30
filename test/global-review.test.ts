@@ -53,12 +53,13 @@ test("global checkpoint is small supervisor-local state and survives restart", a
     nextReviewAt: "2026-08-29T02:00:00.000Z",
     snapshotHash: "snapshot",
     lastFindingHash: "finding",
+    lastFinding: "- One known finding",
   };
   await saveGlobalReviewState(state, root);
   assert.deepEqual(await loadGlobalReviewState(root), state);
 });
 
-test("finding hashes coalesce the same semantic report", () => {
+test("finding hashes ignore finding and goal ordering", () => {
   const first = [{ problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_two", "g_one"] }];
   const second = [{ problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_one", "g_two"] }];
   assert.equal(globalFindingHash(first), globalFindingHash(second));

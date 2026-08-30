@@ -41,6 +41,7 @@ import {
   DEFAULT_GLOBAL_REVIEW_INTERVAL_MS,
   emptyGlobalReviewState,
   globalFindingHash,
+  globalFindingSummary,
   globalReviewMessage,
   loadGlobalReviewState,
   saveGlobalReviewState,
@@ -876,7 +877,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     try {
       pi.sendMessage({
         customType: globalReviewMessageType,
-        content: globalReviewMessage(compactSnapshot, reason),
+        content: globalReviewMessage(compactSnapshot, reason, globalState.lastFinding),
         display: false,
       }, { triggerTurn: true, deliverAs: "followUp" });
       globalState.snapshotHash = snapshotHash;
@@ -1439,6 +1440,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         affectedGoalIds: [...new Set(finding.affected_goal_ids)],
       }));
       const findingHash = globalFindingHash(findings);
+      const findingSummary = findings.length ? globalFindingSummary(findings) : undefined;
       const isNewFinding = findings.length > 0 && findingHash !== globalState.lastFindingHash;
       const nextState = {
         version: 1,
@@ -1446,6 +1448,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         nextReviewAt,
         snapshotHash: globalState.snapshotHash,
         lastFindingHash: findings.length ? findingHash : globalState.lastFindingHash,
+        lastFinding: findingSummary || globalState.lastFinding,
       };
       try {
         await saveGlobalReviewState(nextState);
@@ -1474,7 +1477,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (isNewFinding) {
         pi.sendMessage({
           customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Affects: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
+          content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
           display: true,
         }, { triggerTurn: false, deliverAs: "followUp" });
       }
