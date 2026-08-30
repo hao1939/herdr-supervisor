@@ -1373,6 +1373,13 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   });
   assert.equal(staleRenewal.isError, true);
   assert.match(staleRenewal.content[0].text, /worker has not reread it yet/);
+  const staleFinish = await pi.tools.get("supervisor_finish").execute("finish-without-reread", {
+    pane_id: worker.paneId,
+    summary: "The old PR snapshot looked complete.",
+    evidence: ["Only the pre-change snapshot is available."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(staleFinish.isError, true);
+  assert.match(staleFinish.content[0].text, /worker has not reread it yet/);
   const fetchesBeforeSecondChange = fetches;
   conclusion = "failure";
   await new Promise((resolve) => setTimeout(resolve, 1100));

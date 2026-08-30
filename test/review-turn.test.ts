@@ -8,18 +8,16 @@ test("one fence owns both review preparation and the active turn", () => {
   assert.equal(turn.isPreparing("w1:p2"), true);
   assert.equal(turn.isBusy("w1:p2"), true);
 
-  turn.begin("w1:p2", "the watched build changed", true);
+  turn.begin("w1:p2", "the watched build changed");
   assert.equal(turn.isPreparing(), false);
   assert.equal(turn.isActive("w1:p2"), true);
   assert.equal(turn.reason, "the watched build changed");
-  assert.equal(turn.requiresWorkerReread, true);
   turn.finishPreparing();
   assert.equal(turn.isActive("w1:p2"), true);
 
   turn.end();
   assert.equal(turn.isBusy(), false);
   assert.equal(turn.reason, undefined);
-  assert.equal(turn.requiresWorkerReread, false);
 });
 
 test("an automated review can observe only its exact worker once", () => {

@@ -78,6 +78,7 @@ export type GoalRuntime = {
   pendingCursor?: ObservationCursor;
   pendingObservationHasMessages?: boolean;
   externalWatch?: ExternalWatch;
+  externalChangePending?: boolean;
 };
 
 export type ActiveGoal = GoalBinding & GoalRuntime;
@@ -87,5 +88,4 @@ export type ReviewSignal = {
   reason: string;
   key: string;
   deadline?: boolean;
-  requiresWorkerReread?: boolean;
 };
