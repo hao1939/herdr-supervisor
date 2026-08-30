@@ -2894,18 +2894,24 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "The authenticated request is throttled.",
     waiting_for: "the server-directed retry boundary",
-    review_at: new Date(Date.now() + 1400).toISOString(),
+    review_at: new Date(Date.now() + 2000).toISOString(),
   });
   assert.equal(leave.isError, false);
 
   await pi.events.get("agent_settled")();
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  t.mock.timers.tick(1000);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pi.messages.length, 1, "the generic interval must not replace the decision deadline");
-  await waitFor(() => pi.messages.length === 2);
+  t.mock.timers.tick(1000);
+  for (let attempt = 0; attempt < 100 && pi.messages.length < 2; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(pi.messages.length, 2, "the decision deadline must still wake the review");
   assert.match(pi.messages[1].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
 });
