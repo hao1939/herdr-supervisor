@@ -47,8 +47,18 @@ export class ExternalPollFence {
     return this.#active.has(key);
   }
 
-  async waitForIdle(key: string) {
-    await this.#active.get(key);
+  async hold(key: string) {
+    while (this.#active.has(key)) await this.#active.get(key);
+    let releasePromise!: () => void;
+    const held = new Promise<void>((resolve) => { releasePromise = resolve; });
+    this.#active.set(key, held);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this.#active.get(key) === held) this.#active.delete(key);
+      releasePromise();
+    };
   }
 
   async run(key: string, poll: () => Promise<void>) {

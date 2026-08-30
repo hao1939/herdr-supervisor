@@ -234,10 +234,20 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return JSON.stringify([watch.source, watch.subject]);
   }
 
-  async function bindingAfterExternalPolling(binding) {
+  async function holdExternalPolling(binding) {
     const watch = runtimeFor(binding).externalWatch;
-    if (watch) await externalPoll.waitForIdle(externalWatchKey(watch));
-    return await bindingForPane(binding.paneId) || binding;
+    const release = watch
+      ? await externalPoll.hold(externalWatchKey(watch))
+      : () => {};
+    try {
+      return {
+        binding: await bindingForPane(binding.paneId) || binding,
+        release,
+      };
+    } catch (error) {
+      release();
+      throw error;
+    }
   }
 
   function cacheBinding(binding) {
@@ -1108,10 +1118,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (reviewTurn.isBusy()) {
         return text(`Finish preparing or reviewing ${reviewTurn.paneId} before updating a goal contract.`, true);
       }
+      let releaseExternalPolling = () => {};
       try {
         let binding = await bindingForPane(params.pane_id);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-        binding = await bindingAfterExternalPolling(binding);
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        releaseExternalPolling = held.release;
         const result = await refineSupervisorGoal(binding.goalId, {
           objective: params.goal.trim(),
           context: (params.context || []).map((item) => item.trim()).filter(Boolean),
@@ -1150,6 +1163,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       } catch (error) {
         const reloadWarning = await reconcileCacheAfterWriteFailure();
         return text(`Could not update the supervised goal: ${error.message}.${reloadWarning}`, true);
+      } finally {
+        releaseExternalPolling();
       }
     },
   });
@@ -1395,10 +1410,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (externalWatch && effectiveWaitingOnPane) {
         return text("Choose either waiting_on_pane or external_watch for one wait, not both.", true);
       }
-      if (mode() === "live") {
-        binding = await bindingAfterExternalPolling(binding);
-        snapshot = await client.snapshot();
-      }
+      let releaseExternalPolling = () => {};
+      try {
+        if (mode() === "live") {
+          const held = await holdExternalPolling(binding);
+          binding = held.binding;
+          releaseExternalPolling = held.release;
+          snapshot = await client.snapshot();
+        }
       if (binding.externalChange) {
         return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.", true);
       }
@@ -1492,7 +1511,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const watching = externalWatch
         ? `\nWatching ${externalWatch.source} ${externalWatch.subject.trim()} between model turns.`
         : "";
-      return text(`${mode() === "live" ? "Left" : `${mode()} mode: would leave`} ${params.pane_id} ${state}.\n${progress}${watching}${warning}\n\nEnd this supervisor turn now.`);
+        return text(`${mode() === "live" ? "Left" : `${mode()} mode: would leave`} ${params.pane_id} ${state}.\n${progress}${watching}${warning}\n\nEnd this supervisor turn now.`);
+      } finally {
+        releaseExternalPolling();
+      }
     },
   });
 
@@ -1510,6 +1532,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
+      let releaseExternalPolling = () => {};
       try {
         const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
@@ -1535,7 +1558,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
-        binding = await bindingAfterExternalPolling(binding);
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        releaseExternalPolling = held.release;
         const liveSnapshot = await client.snapshot();
         const liveAgent = findAgent(liveSnapshot, params.pane_id);
         const livePane = findPane(liveSnapshot, params.pane_id);
@@ -1668,6 +1693,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
         }
       } catch (error) { return text(`Could not continue worker: ${error.message}`, true); }
+      finally { releaseExternalPolling(); }
     },
   });
 
@@ -1697,24 +1723,29 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       let warning = "";
       if (mode() === "live") {
-        binding = await bindingAfterExternalPolling(binding);
-        if (binding.externalChange) {
-          return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        try {
+          if (binding.externalChange) {
+            return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
+          }
+          const result = await recordDecision(binding, "ask_human", {
+            progress: `Human input is required: ${params.question.trim()}`,
+            action: params.question.trim(),
+            evidence: params.evidence || binding.evidence,
+            observationCursor: runtimeFor(binding).pendingCursor,
+            wait: {
+              condition: `the human's answer to: ${params.question.trim()}`,
+              reviewAt,
+            },
+          });
+          cacheCheckpoint(binding, result.state);
+          runtimeFor(binding).pendingCursor = undefined;
+          clearExternalWatch(binding);
+          if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
+        } finally {
+          held.release();
         }
-        const result = await recordDecision(binding, "ask_human", {
-          progress: `Human input is required: ${params.question.trim()}`,
-          action: params.question.trim(),
-          evidence: params.evidence || binding.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-          wait: {
-            condition: `the human's answer to: ${params.question.trim()}`,
-            reviewAt,
-          },
-        });
-        cacheCheckpoint(binding, result.state);
-        runtimeFor(binding).pendingCursor = undefined;
-        clearExternalWatch(binding);
-        if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
       }
       const runtime = runtimeFor(binding);
       runtime.awaitingHuman = true;
@@ -1749,26 +1780,31 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      binding = await bindingAfterExternalPolling(binding);
-      if (binding.externalChange) {
-        return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
-      }
       let result;
+      const held = await holdExternalPolling(binding);
+      binding = held.binding;
       try {
-        result = await recordDecision(binding, "accept", {
-          progress: params.summary.trim(),
-          action: "Accepted the verified goal.",
-          evidence: params.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-          terminal: { state: "accepted", summary: params.summary.trim() },
-        });
-      } catch (error) {
-        const reloadWarning = await reconcileCacheAfterWriteFailure();
-        scheduleReview(binding);
-        return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
+        if (binding.externalChange) {
+          return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
+        }
+        try {
+          result = await recordDecision(binding, "accept", {
+            progress: params.summary.trim(),
+            action: "Accepted the verified goal.",
+            evidence: params.evidence,
+            observationCursor: runtimeFor(binding).pendingCursor,
+            terminal: { state: "accepted", summary: params.summary.trim() },
+          });
+        } catch (error) {
+          const reloadWarning = await reconcileCacheAfterWriteFailure();
+          scheduleReview(binding);
+          return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
+        }
+        runtimeFor(binding).pendingCursor = undefined;
+        cacheCheckpoint(binding, result.state);
+      } finally {
+        held.release();
       }
-      runtimeFor(binding).pendingCursor = undefined;
-      cacheCheckpoint(binding, result.state);
       reviewTurn.close(params.pane_id);
       let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
       try {

@@ -115,10 +115,11 @@ post-delivery observation itself fails, the supervisor saves a fail-closed
 boundary that cannot clear automatically; a later bounded review may steer the
 same worker again and replace it with a real boundary.
 
-A decision that stops watching first drains the in-flight read for that exact
-external subject; an unrelated slow provider does not delay it. The final state
-write also compares the exact external revision, so polling cannot race with
-steering, clearing, or acceptance and lose a newer change.
+A decision that can change a watch briefly holds its exact external subject:
+it drains any in-flight read and prevents another one from starting until the
+state change commits. An unrelated slow provider does not delay it. The final
+state write also compares the exact external revision, so polling cannot race
+with steering, clearing, or acceptance and lose a newer change.
 
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside

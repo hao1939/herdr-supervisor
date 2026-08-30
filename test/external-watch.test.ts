@@ -16,14 +16,30 @@ test("decision work waits only for its exact in-flight external poll", async () 
     completed = true;
   });
   await new Promise((resolve) => setImmediate(resolve));
-  await fence.waitForIdle("github-pr:example/project#8");
+  const releaseUnrelated = await fence.hold("github-pr:example/project#8");
+  releaseUnrelated();
   assert.equal(completed, false, "an unrelated decision is not delayed");
-  const waiting = fence.waitForIdle("github-pr:example/project#7");
+  const waiting = fence.hold("github-pr:example/project#7");
   assert.equal(completed, false);
   release();
-  await waiting;
+  const releaseDecision = await waiting;
   assert.equal(completed, true);
+  releaseDecision();
   await running;
+});
+
+test("a decision hold prevents another exact poll until its commit boundary", async () => {
+  const fence = new ExternalPollFence();
+  const release = await fence.hold("github-pr:example/project#7");
+  let polls = 0;
+  const skipped = fence.run("github-pr:example/project#7", async () => { polls += 1; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(polls, 0);
+  release();
+  await skipped;
+  assert.equal(polls, 0, "a timer that raced with the decision does not read stale state");
+  await fence.run("github-pr:example/project#7", async () => { polls += 1; });
+  assert.equal(polls, 1, "a later timer may poll after the decision releases the subject");
 });
 
 test("one provider read serves every goal watching the same subject", async () => {
