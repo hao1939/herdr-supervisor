@@ -277,6 +277,26 @@ test("an external reread in progress is shown as working", () => {
   assert.match(output, /Next: worker is rereading github-pr hao1939\/herdr-supervisor#16/);
 });
 
+test("a settled reread with a stale wait is shown as needs review, not waiting", () => {
+  const current = binding({
+    wait: {
+      condition: "the old PR checks to finish",
+      reviewAt: "2026-08-30T06:01:00.000Z",
+    },
+    externalChange: {
+      source: "github-pr",
+      subject: "hao1939/herdr-supervisor#16",
+      revision: "revision-2",
+      observedAt: "2026-08-30T05:01:00.000Z",
+      workerSequence: 7,
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
+  assert.match(output, /Goal g_test · needs review/);
+  assert.doesNotMatch(output, /Goal g_test · waiting/);
+  assert.match(output, /Next: supervisor should review the worker's reread result/);
+});
+
 test("a working goal shows its exact promised review time", () => {
   const current = binding({
     progress: "The worker is advancing independent work before the retry.",
