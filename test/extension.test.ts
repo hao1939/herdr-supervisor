@@ -1699,7 +1699,7 @@ test("a slow failing provider stays single-flight while the bounded review still
   pi.events.get("session_shutdown")();
 });
 
-test("an in-flight observation cannot wake a goal after its watch is cleared", async (t) => {
+test("steering drains an in-flight external observation before clearing its watch", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -1726,7 +1726,9 @@ test("an in-flight observation cannot wake a goal after its watch is cleared", a
   });
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker can continue independently.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+  let prompt;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompt = message;
     throw new Error("prompt response timed out after possible delivery");
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
@@ -1752,21 +1754,26 @@ test("an in-flight observation cannot wake a goal after its watch is cleared", a
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 2);
   await pi.tools.get("supervisor_observe").execute("observe-again", { pane_id: worker.paneId });
-  const steered = await pi.tools.get("supervisor_steer").execute("steer", {
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
     pane_id: worker.paneId,
     message: "Continue the independent work now.",
   });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(prompt, undefined, "steering must wait for the active provider read");
+  releasePull();
+  const steered = await steering;
   assert.equal(steered.isError, true);
   assert.match(steered.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
+  assert.match(prompt, /watched github-pr hao1939\/herdr-supervisor#16 changed/);
+  assert.ok((await loadSupervisorGoals(root)).active.find((item) => item.goalId === "g_test")?.externalChange);
   await pi.events.get("agent_settled")();
 
-  releasePull();
   await waitFor(() => fetches === 3);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(
     pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
     2,
-    "the stale provider result must not wake the cleared goal",
+    "the drained provider result must not create a duplicate review",
   );
   pi.events.get("session_shutdown")();
 });

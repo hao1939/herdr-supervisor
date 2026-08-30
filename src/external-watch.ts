@@ -42,9 +42,15 @@ const execFileAsync = promisify(execFile);
 
 export class ExternalPollFence {
   #active = false;
+  #idle = Promise.resolve();
+  #releaseIdle: (() => void) | undefined;
 
   get active() {
     return this.#active;
+  }
+
+  async waitForIdle() {
+    await this.#idle;
   }
 
   async run(reviewDue: () => Promise<void>, pollDue: () => Promise<void>) {
@@ -53,11 +59,14 @@ export class ExternalPollFence {
       return;
     }
     this.#active = true;
+    this.#idle = new Promise((resolve) => { this.#releaseIdle = resolve; });
     try {
       await reviewDue();
       await pollDue();
     } finally {
       this.#active = false;
+      this.#releaseIdle?.();
+      this.#releaseIdle = undefined;
     }
   }
 }

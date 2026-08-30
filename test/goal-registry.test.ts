@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  clearExternalChange,
   loadSupervisorGoals,
   recordDecision,
   recordExternalChange,
@@ -223,6 +224,32 @@ test("stale decisions cannot bypass a newly recorded external change", async () 
   const [current] = (await loadSupervisorGoals(directory)).active;
   assert.ok(current.externalChange);
   assert.equal(current.lastDecision, undefined);
+});
+
+test("stale reread evidence cannot clear a newer external change", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Verify the latest external result.",
+  }, directory, { goalId: "g_newer_external" });
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-1",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, directory);
+  const [firstChange] = (await loadSupervisorGoals(directory)).active;
+  await recordExternalChange(firstChange, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-2",
+    observedAt: "2026-08-30T05:02:00.000Z",
+  }, directory);
+
+  await assert.rejects(
+    clearExternalChange(firstChange, { kind: "codex-jsonl", offset: 20 }, directory),
+    /changed again before its reread was recorded/,
+  );
+  assert.equal((await loadSupervisorGoals(directory)).active[0].externalChange.revision, "revision-2");
 });
 
 test("the same native session may refresh its transient terminal after restart", async () => {

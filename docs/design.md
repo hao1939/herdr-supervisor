@@ -109,6 +109,10 @@ without a native transcript instead requires a later settled Herdr transition
 and current terminal evidence. Both paths prove the same worker had a chance to
 reread authority.
 
+A decision that stops watching first drains the one in-flight provider read.
+The final state write also compares the exact external revision, so polling
+cannot race with steering, clearing, or acceptance and lose a newer change.
+
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside
 `steer`. This keeps restart compatibility without restoring a fifth model

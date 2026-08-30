@@ -2,9 +2,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adoBuildSource,
+  ExternalPollFence,
   githubPullRequestSource,
   observeExternalWatches,
 } from "../src/external-watch.ts";
+
+test("decision work can wait for one in-flight external poll", async () => {
+  const fence = new ExternalPollFence();
+  let release;
+  let completed = false;
+  const running = fence.run(async () => {}, async () => {
+    await new Promise((resolve) => { release = resolve; });
+    completed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const waiting = fence.waitForIdle();
+  assert.equal(completed, false);
+  release();
+  await waiting;
+  assert.equal(completed, true);
+  await running;
+});
 
 test("one provider read serves every goal watching the same subject", async () => {
   let reads = 0;

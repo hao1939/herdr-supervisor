@@ -139,6 +139,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   function externalRereadInFlight(binding) {
     return Boolean(
       binding.externalChange
+      && Number.isInteger(binding.externalChange.workerSequence)
       && binding.lastDecision?.decision === "steer"
       && Date.parse(binding.lastDecision.at) >= Date.parse(binding.externalChange.observedAt),
     );
@@ -228,6 +229,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   function stopExternalWatch(binding) {
     clearExternalWatch(binding);
+  }
+
+  async function stopExternalWatchAfterPolling(binding) {
+    await externalPoll.waitForIdle();
+    stopExternalWatch(binding);
+    return await bindingForPane(binding.paneId) || binding;
   }
 
   function cacheBinding(binding) {
@@ -1251,7 +1258,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         });
         let currentBinding: GoalBinding = binding;
         if (externalRereadObserved(binding, observation, agent)) {
-          const state = await clearExternalChange(binding);
+          const state = await clearExternalChange(binding, observation.cursor);
           cacheCheckpoint(binding, state);
           currentBinding = goalCache?.active.get(binding.goalId) || binding;
         }
@@ -1298,7 +1305,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
+      let [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
       if (reviewTurn.requiresWorkerReread) {
         return text("An external watch change triggered this review. Continue the same worker now so it can reread current authority before deciding whether to wait again.", true);
@@ -1372,6 +1379,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           + (externalWatch ? `\nExternal watch target: ${externalWatch.source} ${externalWatch.subject.trim()}` : "")
         : params.progress.trim();
       if (mode() === "live") {
+        if (!externalWatch) {
+          binding = await stopExternalWatchAfterPolling(binding);
+          if (binding.externalChange) {
+            return text("The watched external resource changed before this decision. Continue the same worker to reread it first.", true);
+          }
+        }
         const result = await recordDecision(binding, "leave", {
           progress,
           action: waitingFor
@@ -1433,8 +1446,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
       try {
-        const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
-        if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+        const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
+        if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
+        let binding = initialBinding;
         const reviewAt = params.review_at?.trim();
         let deadline: number | undefined;
         try {
@@ -1456,7 +1470,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
-        stopExternalWatch(binding);
+        binding = await stopExternalWatchAfterPolling(binding);
         let continuedBinding = binding;
         let resumed = false;
         const instruction = workerInstruction(binding, params.message);
@@ -1559,7 +1573,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const binding = await bindingForPane(params.pane_id);
+      let binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
       const now = Date.now();
       const reviewAt = params.review_at?.trim()
@@ -1571,6 +1585,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       let warning = "";
       if (mode() === "live") {
+        binding = await stopExternalWatchAfterPolling(binding);
         const result = await recordDecision(binding, "ask_human", {
           progress: `Human input is required: ${params.question.trim()}`,
           action: params.question.trim(),
@@ -1610,7 +1625,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const binding = await bindingForPane(params.pane_id);
+      let binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
       if (reviewTurn.requiresWorkerReread) {
         return text("An external watch change triggered this review. Continue the same worker now so it can reread current authority before accepting the goal.", true);
@@ -1622,7 +1637,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      stopExternalWatch(binding);
+      binding = await stopExternalWatchAfterPolling(binding);
+      if (binding.externalChange) {
+        return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
+      }
       let result;
       try {
         result = await recordDecision(binding, "accept", {

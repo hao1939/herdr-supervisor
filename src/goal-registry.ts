@@ -43,8 +43,20 @@ export async function recordExternalChange(binding, change, root?, now?) {
   }, root, now);
 }
 
-export async function clearExternalChange(binding, root?, now?) {
+export async function clearExternalChange(binding, observationCursor, root?, now?) {
   return updateGoalState(binding.goalId, (current) => {
+    const pending = current.externalChange;
+    const expected = binding.externalChange;
+    if (
+      !pending
+      || !expected
+      || ["source", "subject", "revision", "observedAt", "workerSequence"].some(
+        (field) => pending[field] !== expected[field],
+      )
+    ) {
+      throw new Error("the watched external resource changed again before its reread was recorded");
+    }
+    current.observationCursor = structuredClone(observationCursor);
     delete current.externalChange;
     return current;
   }, root, now);
