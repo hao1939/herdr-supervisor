@@ -244,6 +244,10 @@ test("a settled future wait shows its condition and review time", () => {
 test("an unresolved external change is the visible next action", () => {
   const current = binding({
     progress: "The old PR snapshot was reviewed.",
+    wait: {
+      condition: "the old PR checks to finish",
+      reviewAt: "2026-08-30T06:01:00.000Z",
+    },
     externalChange: {
       source: "github-pr",
       subject: "hao1939/herdr-supervisor#16",
@@ -252,8 +256,25 @@ test("an unresolved external change is the visible next action", () => {
     },
   });
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
+  assert.match(output, /Goal g_test · needs review/);
   assert.match(output, /Next: worker must reread github-pr hao1939\/herdr-supervisor#16/);
+  assert.doesNotMatch(output, /Goal g_test · waiting/);
   assert.doesNotMatch(output, /review current evidence/);
+});
+
+test("an external reread in progress is shown as working", () => {
+  const current = binding({
+    externalChange: {
+      source: "github-pr",
+      subject: "hao1939/herdr-supervisor#16",
+      revision: "revision-2",
+      observedAt: "2026-08-30T05:01:00.000Z",
+      workerSequence: 7,
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "working" }))));
+  assert.match(output, /Goal g_test · working/);
+  assert.match(output, /Next: worker is rereading github-pr hao1939\/herdr-supervisor#16/);
 });
 
 test("a working goal shows its exact promised review time", () => {

@@ -137,8 +137,11 @@ function compact(value, limit) {
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
+  const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
   const goalState = mismatch
     ? "needs attention"
+    : binding.externalChange && !externalRereadInFlight
+      ? "needs review"
     : awaitingHuman
       ? "waiting for you"
       : binding.wait
@@ -171,7 +174,13 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   }
   else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
   else if (binding.externalChange) {
-    lines.push(`  Next: worker must reread ${binding.externalChange.source} ${binding.externalChange.subject}`);
+    if (!externalRereadInFlight) {
+      lines.push(`  Next: worker must reread ${binding.externalChange.source} ${binding.externalChange.subject}`);
+    } else if (agent.agent_status === "working") {
+      lines.push(`  Next: worker is rereading ${binding.externalChange.source} ${binding.externalChange.subject}`);
+    } else {
+      lines.push("  Next: supervisor should review the worker's reread result");
+    }
   }
   else if (agent.agent_status === "working") {
     lines.push("  Next: review when the worker settles or blocks");
