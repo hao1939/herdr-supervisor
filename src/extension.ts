@@ -1544,7 +1544,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
-      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Use null for self or external waits." })),
+      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose next recorded supervisor decision should wake this wait. Use null for self or external waits." })),
       external_watch: Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
