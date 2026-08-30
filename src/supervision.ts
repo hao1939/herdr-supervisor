@@ -1,4 +1,4 @@
-import { sameAgentSession } from "./identity.ts";
+import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
 
 export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
 export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
@@ -127,7 +127,7 @@ export function recoveryRequest(binding, snapshot) {
   if (!pane) throw new Error("the registered worker pane is no longer present");
   if (pane.terminal_id !== binding.terminalId) throw new Error("the pane now refers to a different terminal");
   const session = binding.agentSession;
-  if (session.agent !== "codex" || session.kind !== "id") {
+  if (!canRecoverAgentSession(session)) {
     throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
   }
   return {
@@ -146,6 +146,7 @@ function compact(value, limit) {
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const paneMissing = mismatch === "worker pane is no longer present";
+  const sessionRecoverable = canRecoverAgentSession(binding.agentSession);
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
   const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
   const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
@@ -185,8 +186,8 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
     lines.push("  Next: answer the supervisor's question above; worker recovery can follow your answer");
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
     if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
-  } else if (paneMissing) lines.push("  Next: supervisor should review whether the exact session can resume in a new pane");
-  else if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
+  } else if (paneMissing && sessionRecoverable) lines.push("  Next: supervisor should review whether the exact session can resume in a new pane");
+  else if (mismatch && !(processStopped && sessionRecoverable)) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (awaitingHuman) {
     lines.push("  Next: answer the supervisor's question above");
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;

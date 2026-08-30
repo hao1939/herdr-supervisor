@@ -15,7 +15,7 @@ import {
 } from "./goal-registry.ts";
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
-import { sameAgentSession } from "./identity.ts";
+import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
 import {
   ExternalPollFence,
   observeExternalWatches,
@@ -485,7 +485,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   async function recoverWorkerRouting(binding, snapshot) {
     const session = binding.agentSession;
-    if (session.agent !== "codex" || session.kind !== "id") {
+    if (!canRecoverAgentSession(session)) {
       throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
     }
     const existingBinding = await adoptExactSession(binding, snapshot);
@@ -1738,9 +1738,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           agent,
           pane,
         );
-        const canRecover = !agent
-          && binding.agentSession.agent === "codex"
-          && binding.agentSession.kind === "id";
+        const canRecover = !agent && canRecoverAgentSession(binding.agentSession);
         if (mismatch && !canRecover) return text(`Refusing to continue: ${mismatch}.`, true);
         if (mode() !== "live") {
           reviewTurn.close(params.pane_id);

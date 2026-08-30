@@ -202,6 +202,40 @@ test("a missing pane is recoverable supervision work, not human work", () => {
   assert.doesNotMatch(output, /Needs you/);
 });
 
+test("a missing pane does not promise recovery for an unsupported session", () => {
+  const current = binding({
+    goalId: "g_legacy",
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/tmp/legacy-session.jsonl",
+    },
+  });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /Worker: codex w1:p2 · pane missing/);
+  assert.match(output, /Needs you: worker pane is no longer present; supervision is paused/);
+  assert.doesNotMatch(output, /exact session can resume/);
+});
+
+test("a stopped process does not promise recovery for an unsupported session", () => {
+  const current = binding({
+    goalId: "g_legacy",
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/tmp/legacy-session.jsonl",
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(null)));
+
+  assert.match(output, /Worker: codex w1:p2 · process stopped/);
+  assert.match(output, /Needs you: worker agent process is no longer detected; supervision is paused/);
+  assert.doesNotMatch(output, /exact session can resume/);
+});
+
 test("a finished worker turn is not presented as a finished goal", () => {
   const current = binding({
     goalId: "g_open",
