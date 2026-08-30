@@ -1874,8 +1874,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const paneId = args.trim();
       if (!paneId) return ctx.ui.notify("Usage: /unsupervise <pane>", "warning");
       try {
-        const binding = await bindingForPane(paneId);
+        let binding = await bindingForPane(paneId);
         if (!binding) return ctx.ui.notify(`${paneId} was not supervised.`, "info");
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
         let result;
         try {
           result = await recordDecision(binding, "stop", {
@@ -1884,11 +1886,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             evidence: binding.evidence,
             terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
           });
+          cacheCheckpoint(binding, result.state);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           return ctx.ui.notify(`Could not save the request to stop supervising ${paneId}: ${error.message}.${reloadWarning}`, "error");
+        } finally {
+          held.release();
         }
-        cacheCheckpoint(binding, result.state);
         await wakeDependentWaiters(
           paneId,
           `supervision of ${paneId} stopped; reconsider whether useful work can proceed`,
