@@ -74,7 +74,8 @@ function stableRevision(value: unknown) {
 }
 
 function responseRetryAfter(response: Response) {
-  const retryAfter = Number(response.headers.get("retry-after"));
+  const retryAfterHeader = response.headers.get("retry-after");
+  const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
   if (Number.isFinite(retryAfter) && retryAfter >= 0) return retryAfter * 1000;
   const reset = Number(response.headers.get("x-ratelimit-reset"));
   if (Number.isFinite(reset) && reset > 0) return Math.max(1000, reset * 1000 - Date.now());

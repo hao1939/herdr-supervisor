@@ -209,6 +209,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   function clearExternalWatch(binding) {
+    const pending = pendingSignals.get(binding.paneId);
+    if (pending?.key.startsWith("external:")) pendingSignals.delete(binding.paneId);
     runtimeFor(binding).externalWatch = undefined;
   }
 
@@ -1295,7 +1297,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             nextPollAt: Date.now(),
           };
         } else {
-          runtime.externalWatch = undefined;
+          clearExternalWatch(binding);
         }
         if (result.auditError) warning += `\nAudit warning: ${result.auditError.message}`;
       }
@@ -1473,7 +1475,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       const runtime = runtimeFor(binding);
       runtime.awaitingHuman = true;
-      runtime.externalWatch = undefined;
+      clearExternalWatch(binding);
       runtime.nextReviewAt = reviewAt;
       reviewTurn.close(params.pane_id);
       try { await armReviewTimer(); }

@@ -77,6 +77,21 @@ test("GitHub rate-limit responses carry their retry boundary", async () => {
   assert.equal(observation.retryAfterMs, 7_000);
 });
 
+test("GitHub rate-limit reset is used when Retry-After is absent", async (t) => {
+  t.mock.method(Date, "now", () => 1_000_000);
+  const source = githubPullRequestSource({
+    token: "test-token",
+    async fetchImpl() {
+      return new Response(null, { status: 429, headers: { "X-RateLimit-Reset": "1009" } });
+    },
+  });
+  const [observation] = await observeExternalWatches([
+    { goalId: "g_rate", source: "github-pr", subject: "example/project#7" },
+  ], { "github-pr": source });
+  assert.equal(observation.ok, false);
+  assert.equal(observation.retryAfterMs, 9_000);
+});
+
 test("GitHub PR revisions are stable when check order changes", async () => {
   let reverse = false;
   const source = githubPullRequestSource({

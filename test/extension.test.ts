@@ -1330,6 +1330,7 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     panes: [focused, unrelated].map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi({ externalWatchMs: "1000" });
@@ -1359,6 +1360,21 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   assert.match(pi.messages[1].content, /only a wake hint/);
   assert.match(pi.messages[1].content, /w1:p2/);
   assert.doesNotMatch(pi.messages[1].content, /w1:p9/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-change", { pane_id: worker.paneId });
+  const fetchesBeforeSecondChange = fetches;
+  conclusion = "failure";
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => fetches > fetchesBeforeSecondChange);
+  assert.equal(pi.messages.length, 2, "a second change is queued behind the active review");
+  const steer = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Recheck the failed PR checks and continue the same goal.",
+  });
+  assert.equal(steer.isError, false);
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(pi.messages.length, 2, "clearing the watch also removes its stale queued wake");
   pi.events.get("session_shutdown")();
 });
 
@@ -1869,6 +1885,7 @@ test("restart restores a settled wait without a no-change review before its dead
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /review deadline elapsed/);
   assert.match(pi.messages[0].content, /External watch target: github-pr hao1939\/herdr-supervisor#16/);
+  assert.doesNotMatch(pi.messages[0].content, /Watching:/);
   const observation = await pi.tools.get("supervisor_observe").execute("observe-due", {
     pane_id: worker.paneId,
   });
