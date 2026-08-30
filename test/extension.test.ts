@@ -80,6 +80,8 @@ test("optional supervisor tool fields accept null without placeholder values", (
   herdrSupervisor(pi);
 
   assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
+  assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
+
   assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
     pane_id: worker.paneId,
     message: "Continue the same goal.",
