@@ -1365,6 +1365,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       try {
         const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+        const runtime = runtimeFor(binding);
+        runtime.externalRereadCandidateRevision = undefined;
         const agent = findAgent(snapshot, params.pane_id);
         const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
         if (mismatch) {
@@ -1379,9 +1381,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         });
         const currentBinding: GoalBinding = binding;
         if (externalRereadObserved(binding, observation, agent)) {
-          runtimeFor(binding).externalRereadCandidateRevision = binding.externalChange?.revision;
+          runtime.externalRereadCandidateRevision = binding.externalChange?.revision;
         }
-        const runtime = runtimeFor(currentBinding);
         runtime.pendingCursor = observation.cursor;
         runtime.pendingObservationHasMessages = observation.messages.some((message) => message.text.trim().length > 0);
         runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);

@@ -2064,6 +2064,21 @@ test("a settled terminal fallback needs output produced after its reread instruc
   assert.equal(staleLeave.isError, true);
   assert.match(staleLeave.content[0].text, /authoritative reread evidence is still pending/);
   assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+
+  workerOutput = oldOutput;
+  await refusalOutput.events.get("agent_settled")();
+  await waitFor(() => refusalOutput.messages.length === 2);
+  const reverted = await refusalOutput.tools.get("supervisor_observe").execute("observe-reverted-output", { pane_id: worker.paneId });
+  assert.doesNotMatch(reverted.content[0].text, /Fresh post-instruction worker result available/);
+  const staleAcknowledgement = await refusalOutput.tools.get("supervisor_leave").execute("leave-stale-candidate", {
+    pane_id: worker.paneId,
+    progress: "Only the old terminal boundary is visible now.",
+    waiting_for: "the authoritative PR reread",
+    external_change_revision: "fallback-revision",
+  });
+  assert.equal(staleAcknowledgement.isError, true);
+  assert.match(staleAcknowledgement.content[0].text, /Observe a fresh post-instruction worker result/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
   refusalOutput.events.get("session_shutdown")();
 
   workerOutput = "I reread PR 16; its current checks pass.";
