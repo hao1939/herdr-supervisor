@@ -326,8 +326,9 @@ Pending signals and the one armed timer stay in memory. A concrete wait's
 condition and absolute review deadline live in `current.json`, as does a human
 wait through its last decision and wait record, so restart does not lose either.
 When a watched external revision changes, that one unresolved change also lives
-in `current.json` until a later native final response advances the saved cursor,
-or a transcript-free worker settles with new Herdr-sequenced terminal evidence.
+in `current.json` until a later native final response advances the delivery-time
+cursor, or a transcript-free worker settles with a changed delivery-time
+terminal fingerprint and a newer Herdr sequence.
 Polling schedules remain disposable and are not rebuilt as durable workflow.
 None of these files contains raw events, terminal output, reconnects, or copied
 Herdr status.

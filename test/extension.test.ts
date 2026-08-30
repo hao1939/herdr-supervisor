@@ -8,6 +8,7 @@ import { installSupervisorGoal, loadSupervisorGoals, recordDecision, recordExter
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
+import { terminalOutputCursor } from "../src/observation.ts";
 
 const worker = {
   paneId: "w1:p2",
@@ -1531,6 +1532,59 @@ test("restart retains an external reread until a later native final response", a
   afterEvidence.events.get("session_shutdown")();
 });
 
+test("steering records a fresh delivery boundary instead of earlier review evidence", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let sequence = 3;
+  let workerOutput = "The old PR state was still pending.";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: sequence }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const beforeSteer = fakePi();
+  herdrSupervisor(beforeSteer);
+  await beforeSteer.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeSteer.messages.length === 1);
+  await beforeSteer.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  workerOutput = "The worker settled while the supervisor was deciding.";
+  const steer = await beforeSteer.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread the current PR state and continue.",
+  });
+  assert.equal(steer.isError, false);
+  assert.deepEqual(
+    (await loadSupervisorGoals(root)).active[0].observationCursor,
+    terminalOutputCursor(workerOutput),
+    "the checkpoint uses evidence captured immediately before delivery",
+  );
+  beforeSteer.events.get("session_shutdown")();
+
+  sequence = 4;
+  const afterSteer = fakePi();
+  herdrSupervisor(afterSteer);
+  await afterSteer.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterSteer.messages.length === 1);
+  await afterSteer.tools.get("supervisor_observe").execute("observe-same-output", { pane_id: worker.paneId });
+  assert.ok(
+    (await loadSupervisorGoals(root)).active[0].externalChange,
+    "output produced before delivery cannot satisfy the reread",
+  );
+  afterSteer.events.get("session_shutdown")();
+});
+
 test("acceptance rejects an external change recorded after its cached read", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -1610,8 +1664,9 @@ test("an unrelated signal does not duplicate the same pending external reread re
   pi.events.get("session_shutdown")();
 });
 
-test("a settled terminal fallback can complete a previously steered reread", async (t) => {
+test("a settled terminal fallback needs output produced after its reread instruction", async (t) => {
   const root = await fixture();
+  const oldOutput = "The old PR 16 terminal result.";
   const [binding] = (await loadSupervisorGoals(root)).active;
   await recordExternalChange(binding, {
     source: "github-pr",
@@ -1624,6 +1679,7 @@ test("a settled terminal fallback can complete a previously steered reread", asy
     action: "Reread current PR 16 checks.",
     externalChangeRevision: "fallback-revision",
     workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
   }, root, () => "2026-08-30T05:02:00.000Z");
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -1631,18 +1687,28 @@ test("a settled terminal fallback can complete a previously steered reread", asy
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
+  let workerOutput = oldOutput;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "I reread PR 16; its current checks pass.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-  const observation = await pi.tools.get("supervisor_observe").execute("observe-fallback", { pane_id: worker.paneId });
+  const beforeOutput = fakePi();
+  herdrSupervisor(beforeOutput);
+  await beforeOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeOutput.messages.length === 1);
+  await beforeOutput.tools.get("supervisor_observe").execute("observe-old-fallback", { pane_id: worker.paneId });
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange, "old terminal output cannot satisfy the reread");
+  beforeOutput.events.get("session_shutdown")();
+
+  workerOutput = "I reread PR 16; its current checks pass.";
+  const afterOutput = fakePi();
+  herdrSupervisor(afterOutput);
+  await afterOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterOutput.messages.length === 1);
+  const observation = await afterOutput.tools.get("supervisor_observe").execute("observe-new-fallback", { pane_id: worker.paneId });
   assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
   assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
-  pi.events.get("session_shutdown")();
+  afterOutput.events.get("session_shutdown")();
 });
 
 test("a working reread stays quiet until its worker settles", async (t) => {

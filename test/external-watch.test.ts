@@ -7,16 +7,18 @@ import {
   observeExternalWatches,
 } from "../src/external-watch.ts";
 
-test("decision work can wait for one in-flight external poll", async () => {
+test("decision work waits only for its exact in-flight external poll", async () => {
   const fence = new ExternalPollFence();
   let release;
   let completed = false;
-  const running = fence.run(async () => {}, async () => {
+  const running = fence.run("github-pr:example/project#7", async () => {
     await new Promise((resolve) => { release = resolve; });
     completed = true;
   });
   await new Promise((resolve) => setImmediate(resolve));
-  const waiting = fence.waitForIdle();
+  await fence.waitForIdle("github-pr:example/project#8");
+  assert.equal(completed, false, "an unrelated decision is not delayed");
+  const waiting = fence.waitForIdle("github-pr:example/project#7");
   assert.equal(completed, false);
   release();
   await waiting;
