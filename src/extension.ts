@@ -1550,9 +1550,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-          deliveryBoundary = await externalDeliveryBoundary(continuedBinding);
           try {
             await client.promptAgent(params.pane_id, instruction);
+            deliveryBoundary = await externalDeliveryBoundary(continuedBinding);
           } catch (error) {
             scheduleReview(continuedBinding);
             const checkpointWarning = await saveUncertainSteer(
@@ -1566,9 +1566,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${error.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
         } else {
-          deliveryBoundary = await externalDeliveryBoundary(binding);
           try {
             await client.promptAgent(params.pane_id, instruction);
+            deliveryBoundary = await externalDeliveryBoundary(binding);
           } catch (error) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
@@ -1639,7 +1639,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       let warning = "";
       if (mode() === "live") {
-        binding = await stopExternalWatchAfterPolling(binding);
+        binding = await bindingAfterExternalPolling(binding);
+        if (binding.externalChange) {
+          return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
+        }
+        stopExternalWatch(binding);
         const result = await recordDecision(binding, "ask_human", {
           progress: `Human input is required: ${params.question.trim()}`,
           action: params.question.trim(),

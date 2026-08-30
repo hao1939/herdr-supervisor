@@ -1479,6 +1479,12 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   }, undefined, undefined, { ui: { setStatus() {} } });
   assert.equal(staleFinish.isError, true);
   assert.match(staleFinish.content[0].text, /(external watch change triggered this review|authoritative reread evidence is still pending)/);
+  const staleQuestion = await pi.tools.get("supervisor_ask_human").execute("ask-without-reread", {
+    pane_id: worker.paneId,
+    question: "Should the worker trust the old PR result?",
+  });
+  assert.equal(staleQuestion.isError, true);
+  assert.match(staleQuestion.content[0].text, /authoritative reread evidence is still pending/);
   const fetchesBeforeSecondChange = fetches;
   conclusion = "failure";
   await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -1630,7 +1636,7 @@ test("restart retains an external reread until a later native final response", a
   afterEvidence.events.get("session_shutdown")();
 });
 
-test("steering records a fresh delivery boundary instead of earlier review evidence", async (t) => {
+test("steering records a delivery boundary after its prompt is accepted", async (t) => {
   const root = await fixture();
   const [binding] = (await loadSupervisorGoals(root)).active;
   await recordExternalChange(binding, {
@@ -1649,7 +1655,9 @@ test("steering records a fresh delivery boundary instead of earlier review evide
   let workerOutput = "The old PR state was still pending.";
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: sequence }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+    workerOutput = "The worker settled before accepting the reread instruction.";
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const beforeSteer = fakePi();
@@ -1666,7 +1674,7 @@ test("steering records a fresh delivery boundary instead of earlier review evide
   assert.deepEqual(
     (await loadSupervisorGoals(root)).active[0].observationCursor,
     terminalOutputCursor(workerOutput),
-    "the checkpoint uses evidence captured immediately before delivery",
+    "the checkpoint uses evidence captured after delivery",
   );
   beforeSteer.events.get("session_shutdown")();
 

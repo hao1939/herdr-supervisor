@@ -198,6 +198,9 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     if (decision === "accept" && current.externalChange) {
       throw new Error("the watched external resource changed before acceptance");
     }
+    if (decision === "ask_human" && current.externalChange) {
+      throw new Error("the watched external resource changed before asking the human");
+    }
     if (
       decision === "steer"
       && current.externalChange?.revision !== input.externalChangeRevision
