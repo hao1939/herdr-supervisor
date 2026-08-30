@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  clearExternalChange,
   loadSupervisorGoals,
   recordDecision,
+  recordExternalChange,
   refineSupervisorGoal,
   refreshWorkerLocation,
   registerSupervisedGoal,
@@ -53,6 +55,12 @@ test("refining a goal replaces its contract without replacing its worker", async
       reviewAt: "2026-08-28T11:00:00.000Z",
     },
   }, directory, () => "2026-08-28T10:01:00.000Z");
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-28T10:01:30.000Z",
+  }, directory, () => "2026-08-28T10:01:30.000Z");
 
   const result = await refineSupervisorGoal("g_test", {
     objective: "Prepare and validate the focused fix.",
@@ -71,6 +79,7 @@ test("refining a goal replaces its contract without replacing its worker", async
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].goalId, "g_test");
   assert.equal(goals.active[0].wait, undefined);
+  assert.equal(goals.active[0].externalChange?.revision, "changed-revision");
   assert.deepEqual(goals.active[0].constraints, ["Use an isolated worktree and one focused PR."]);
   const audit = await readAudit("g_test", directory);
   assert.equal(audit.at(-1).type, "goal_refined");
@@ -194,6 +203,60 @@ test("restart reloads concurrent goals independently and reconsiders fresh Herdr
   };
   assert.equal(shouldWake({ ...restarted.active[0], lastReviewStateChangeSeq: 0 }, alphaAgent, alphaAgent).wake, false);
   assert.equal(shouldWake({ ...restarted.active[1], lastReviewStateChangeSeq: 0 }, betaAgent, betaAgent).wake, true);
+});
+
+test("stale decisions cannot bypass a newly recorded external change", async () => {
+  const directory = await root();
+  const stale = await registerSupervisedGoal(worker, {
+    objective: "Verify the current external result.",
+    acceptance: ["The changed result is reread."],
+  }, directory, { goalId: "g_external_race", at: "2026-08-30T05:00:00.000Z" });
+  await recordExternalChange(stale, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-2",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, directory, () => "2026-08-30T05:01:00.000Z");
+
+  await assert.rejects(recordDecision(stale, "accept", {
+    progress: "The stale snapshot looked complete.",
+    action: "Accept stale evidence.",
+    terminal: { state: "accepted", summary: "Stale acceptance." },
+  }, directory), /changed before acceptance/);
+  await assert.rejects(recordDecision(stale, "steer", {
+    progress: "An unrelated instruction was sent.",
+    action: "Continue unrelated work.",
+  }, directory), /acknowledge the current external change revision/);
+
+  const [current] = (await loadSupervisorGoals(directory)).active;
+  assert.ok(current.externalChange);
+  assert.equal(current.lastDecision, undefined);
+});
+
+test("stale reread evidence cannot clear a newer external change", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Verify the latest external result.",
+  }, directory, { goalId: "g_newer_external" });
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-1",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, directory);
+  const [firstChange] = (await loadSupervisorGoals(directory)).active;
+  await recordExternalChange(firstChange, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-2",
+    observedAt: "2026-08-30T05:02:00.000Z",
+  }, directory);
+
+  await assert.rejects(
+    clearExternalChange(firstChange, { kind: "codex-jsonl", offset: 20 }, directory),
+    /changed again before its reread was recorded/,
+  );
+  assert.equal((await loadSupervisorGoals(directory)).active[0].externalChange.revision, "revision-2");
 });
 
 test("the same native session may refresh its transient terminal after restart", async () => {

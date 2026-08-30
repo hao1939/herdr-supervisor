@@ -2,9 +2,45 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   adoBuildSource,
+  ExternalPollFence,
   githubPullRequestSource,
   observeExternalWatches,
 } from "../src/external-watch.ts";
+
+test("decision work waits only for its exact in-flight external poll", async () => {
+  const fence = new ExternalPollFence();
+  let release;
+  let completed = false;
+  const running = fence.run("github-pr:example/project#7", async () => {
+    await new Promise((resolve) => { release = resolve; });
+    completed = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const releaseUnrelated = await fence.hold("github-pr:example/project#8");
+  releaseUnrelated();
+  assert.equal(completed, false, "an unrelated decision is not delayed");
+  const waiting = fence.hold("github-pr:example/project#7");
+  assert.equal(completed, false);
+  release();
+  const releaseDecision = await waiting;
+  assert.equal(completed, true);
+  releaseDecision();
+  await running;
+});
+
+test("a decision hold prevents another exact poll until its commit boundary", async () => {
+  const fence = new ExternalPollFence();
+  const release = await fence.hold("github-pr:example/project#7");
+  let polls = 0;
+  const skipped = fence.run("github-pr:example/project#7", async () => { polls += 1; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(polls, 0);
+  release();
+  await skipped;
+  assert.equal(polls, 0, "a timer that raced with the decision does not read stale state");
+  await fence.run("github-pr:example/project#7", async () => { polls += 1; });
+  assert.equal(polls, 1, "a later timer may poll after the decision releases the subject");
+});
 
 test("one provider read serves every goal watching the same subject", async () => {
   let reads = 0;

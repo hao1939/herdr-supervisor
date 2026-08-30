@@ -41,23 +41,35 @@ const UNAUTHENTICATED_GITHUB_INTERVAL_MS = 5 * 60 * 1000;
 const execFileAsync = promisify(execFile);
 
 export class ExternalPollFence {
-  #active = false;
+  #active = new Map<string, Promise<void>>();
 
-  get active() {
-    return this.#active;
+  isActive(key: string) {
+    return this.#active.has(key);
   }
 
-  async run(reviewDue: () => Promise<void>, pollDue: () => Promise<void>) {
-    if (this.#active) {
-      await reviewDue();
-      return;
-    }
-    this.#active = true;
+  async hold(key: string) {
+    while (this.#active.has(key)) await this.#active.get(key);
+    let releasePromise!: () => void;
+    const held = new Promise<void>((resolve) => { releasePromise = resolve; });
+    this.#active.set(key, held);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (this.#active.get(key) === held) this.#active.delete(key);
+      releasePromise();
+    };
+  }
+
+  async run(key: string, poll: () => Promise<void>) {
+    const existing = this.#active.get(key);
+    if (existing) return existing;
+    const running = Promise.resolve().then(poll);
+    this.#active.set(key, running);
     try {
-      await reviewDue();
-      await pollDue();
+      await running;
     } finally {
-      this.#active = false;
+      if (this.#active.get(key) === running) this.#active.delete(key);
     }
   }
 }

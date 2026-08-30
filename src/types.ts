@@ -52,6 +52,14 @@ export type ObservationCursor = {
   [field: string]: unknown;
 };
 
+export type PendingExternalChange = {
+  source: string;
+  subject: string;
+  revision: string;
+  observedAt: string;
+  workerSequence?: number;
+};
+
 /** Durable goal data loaded from goal.json and current.json. */
 export type GoalBinding = WorkerIdentity & {
   goalId: string;
@@ -65,6 +73,7 @@ export type GoalBinding = WorkerIdentity & {
   lastDecision?: LastDecision;
   wait?: GoalWait;
   observationCursor?: ObservationCursor;
+  externalChange?: PendingExternalChange;
   updatedAt: string;
 };
 

@@ -1,8 +1,18 @@
+import { createHash } from "node:crypto";
 import { open, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
 const resolvedSessions = new Map();
+const TERMINAL_CURSOR_LINES = 10;
+
+export function terminalOutputCursor(text: string) {
+  const suffix = text.replaceAll("\r\n", "\n").split("\n").slice(-TERMINAL_CURSOR_LINES).join("\n");
+  return {
+    kind: "terminal-output",
+    fingerprint: createHash("sha256").update(suffix).digest("hex"),
+  };
+}
 
 export function defaultCodexSessionsRoot(env = process.env) {
   const codexRoot = env.CODEX_HOME || join(homedir(), ".codex");
@@ -129,7 +139,7 @@ export async function observeWorker(binding, herdrClient, options: any = {}) {
   return {
     source: "terminal-fallback",
     messages: [{ phase: "terminal", text: result.read.text }],
-    cursor: nativeObservation?.cursor || binding.observationCursor,
+    cursor: nativeObservation?.cursor || terminalOutputCursor(result.read.text),
     truncated: result.read.truncated,
   };
 }

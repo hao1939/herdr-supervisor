@@ -5,6 +5,8 @@ import { HerdrClient } from "./herdr-client.ts";
 import {
   loadSupervisorGoals,
   installSupervisorGoal,
+  clearExternalChange,
+  recordExternalChange,
   recordDecision,
   refineSupervisorGoal,
   refreshWorkerLocation,
@@ -134,11 +136,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     errors: GoalLoadError[];
   };
 
+  function externalRereadInFlight(binding) {
+    return Boolean(
+      binding.externalChange
+      && Number.isInteger(binding.externalChange.workerSequence)
+      && binding.lastDecision?.decision === "steer",
+    );
+  }
+
   function runtimeFor(binding: GoalBinding): GoalRuntime {
     let runtime = runtimeGoals.get(binding.goalId);
     if (!runtime) {
       runtime = {
-        nextReviewAt: binding.wait?.reviewAt || binding.reviewAt,
+        nextReviewAt: binding.externalChange && !externalRereadInFlight(binding)
+          ? new Date(0).toISOString()
+          : binding.wait?.reviewAt || binding.reviewAt,
         lastReviewStateChangeSeq: 0,
         awaitingHuman: binding.lastDecision?.decision === "ask_human",
         missingDecisionRetries: 0,
@@ -214,6 +226,40 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     runtimeFor(binding).externalWatch = undefined;
   }
 
+  function stopExternalWatch(binding) {
+    clearExternalWatch(binding);
+  }
+
+  function externalWatchKey(watch) {
+    return JSON.stringify([watch.source, watch.subject]);
+  }
+
+  async function holdExternalPolling(binding) {
+    const watch = runtimeFor(binding).externalWatch;
+    const held = watch ? await externalPoll.hold(externalWatchKey(watch)) : undefined;
+    let released = false;
+    // A held subject is excluded from the polling schedule, so the decision's
+    // own timer arming cannot see it. Rearm once the hold is released.
+    const release = () => {
+      if (!held || released) return;
+      released = true;
+      held();
+      void armReviewTimer().catch((error) => reportBackgroundFailure(
+        "Could not resume external polling after a decision",
+        error,
+      ));
+    };
+    try {
+      return {
+        binding: await bindingForPane(binding.paneId) || binding,
+        release,
+      };
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
   function cacheBinding(binding) {
     goalCache?.active.set(binding.goalId, binding);
   }
@@ -233,7 +279,104 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       lastDecision: state.lastDecision,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
+      externalChange: state.externalChange ? structuredClone(state.externalChange) : undefined,
     });
+  }
+
+  function cursorAdvanced(previous, current) {
+    return previous && current && JSON.stringify(previous) !== JSON.stringify(current);
+  }
+
+  function nativeCursorAdvanced(previous, current) {
+    return previous?.kind === "codex-jsonl"
+      && current?.kind === "codex-jsonl"
+      && previous.path === current.path
+      && current.offset > previous.offset;
+  }
+
+  function externalRereadObserved(binding, observation, agent) {
+    if (!externalRereadInFlight(binding)) return false;
+    const nativeFinal = observation.source === "codex-session"
+      && nativeCursorAdvanced(binding.observationCursor, observation.cursor)
+      && observation.messages.some((message) => message.phase === "final_answer");
+    const terminalResult = observation.source === "terminal-fallback"
+      && binding.observationCursor?.kind === "terminal-output"
+      && observation.cursor?.kind === "terminal-output"
+      && agent.agent_status !== "working"
+      && observation.messages.some((message) => message.text.trim())
+      && cursorAdvanced(binding.observationCursor, observation.cursor)
+      && Number(agent.state_change_seq || 0) > Number(binding.externalChange.workerSequence ?? Number.MAX_SAFE_INTEGER);
+    return nativeFinal || terminalResult;
+  }
+
+  async function capturePostDeliveryBoundary(binding) {
+    if (!binding.externalChange) return undefined;
+    const observation = await observeWorker(binding, client);
+    const snapshot = await client.snapshot();
+    const agent = findAgent(snapshot, binding.paneId);
+    const mismatch = identityMismatch(binding, agent, findPane(snapshot, binding.paneId));
+    if (mismatch) throw new Error(`cannot establish the external reread boundary: ${mismatch}`);
+    return {
+      observationCursor: observation.cursor,
+      workerSequence: Number(agent.state_change_seq || 0),
+    };
+  }
+
+  async function deliverWorkerInstruction(binding, instruction) {
+    let deliveryError;
+    let boundary;
+    let boundaryError;
+    try {
+      await client.promptAgent(binding.paneId, instruction);
+    } catch (error) {
+      deliveryError = error;
+    }
+    reviewTurn.close(binding.paneId);
+    try {
+      boundary = await capturePostDeliveryBoundary(binding);
+    } catch (error) {
+      boundaryError = error;
+    }
+    stopExternalWatch(binding);
+    return { boundary, boundaryError, deliveryError };
+  }
+
+  function unavailableRereadBoundary() {
+    return {
+      observationCursor: { kind: "reread-boundary-unavailable" },
+      workerSequence: Number.MAX_SAFE_INTEGER,
+    };
+  }
+
+  function workerInstruction(binding, message) {
+    const change = binding.externalChange;
+    if (!change) return message.trim();
+    return `The watched ${change.source} ${change.subject} changed. Reread its current authoritative state before deciding what it means, then continue the same goal.\n\n${message.trim()}`;
+  }
+
+  async function saveSteerCheckpoint(binding, instruction, progress, evidence, reviewAt, boundary?) {
+    const effectiveReviewAt = reviewAt
+      || (binding.externalChange ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
+    const result = await recordDecision(binding, "steer", {
+      progress,
+      action: instruction,
+      evidence,
+      observationCursor: boundary?.observationCursor || runtimeFor(binding).pendingCursor,
+      reviewAt: effectiveReviewAt,
+      externalChangeRevision: binding.externalChange?.revision,
+      workerSequence: boundary?.workerSequence ?? runtimeFor(binding).lastReviewStateChangeSeq,
+    });
+    cacheCheckpoint(binding, result.state);
+    runtimeFor(binding).pendingCursor = undefined;
+    return result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
+  }
+
+  async function saveUncertainSteer(binding, instruction, progress, evidence, reviewAt, boundary?) {
+    try {
+      return await saveSteerCheckpoint(binding, instruction, progress, evidence, reviewAt, boundary);
+    } catch (error) {
+      return `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
+    }
   }
 
   async function refreshObservedLocation(binding, agent) {
@@ -348,7 +491,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const goals = await activeBindings();
     const waiting = reviewCandidates(goals.active);
     const reviewDelay = nextReviewDelay(waiting);
-    const watchDeadlines = externalPoll.active ? [] : goals.active
+    const watchDeadlines = goals.active
+      .filter((goal) => goal.externalWatch && !externalPoll.isActive(externalWatchKey(goal.externalWatch)))
       .map((goal) => goal.externalWatch?.nextPollAt)
       .filter((deadline): deadline is number => deadline !== undefined);
     const watchDelay = watchDeadlines.length
@@ -367,7 +511,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
 
   async function runScheduledObservations() {
     try {
-      await externalPoll.run(reviewDueWorkers, pollDueExternalWatches);
+      await reviewDueWorkers();
+      await pollDueExternalWatches();
     } finally {
       await armReviewTimer();
     }
@@ -376,46 +521,74 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   async function pollDueExternalWatches() {
     const goals = await activeBindings();
     const now = Date.now();
-    const due = goals.active.filter((goal) => goal.externalWatch && goal.externalWatch.nextPollAt <= now);
+    const due = goals.active.filter((goal) => goal.externalWatch
+      && goal.externalWatch.nextPollAt <= now
+      && !externalPoll.isActive(externalWatchKey(goal.externalWatch)));
     if (!due.length) return;
-    const observations = await observeExternalWatches(due.map((goal) => ({
-      goalId: goal.goalId,
-      source: goal.externalWatch!.source,
-      subject: goal.externalWatch!.subject,
-      revision: goal.externalWatch!.revision,
-    })));
-    for (const observation of observations) {
-      const binding = goalCache?.active.get(observation.goalId);
-      if (!binding) continue;
-      const runtime = runtimeFor(binding);
-      const watch = runtime.externalWatch;
-      if (
-        !watch
-        || watch.source !== observation.source
-        || watch.subject !== observation.subject
-        || watch.revision !== observation.revision
-      ) continue;
-      watch.nextPollAt = Date.now() + Math.max(
-        externalWatchIntervalMs(),
-        observation.retryAfterMs || 0,
-      );
-      if (!observation.ok) {
-        if (watch.lastError !== observation.error) {
-          watch.lastError = observation.error;
-          reportBackgroundFailure(
-            `Could not observe ${watch.source} ${watch.subject}`,
-            new Error(observation.error || "unknown provider failure"),
-          );
+    const dueSubjects = new Set(due.map((goal) => externalWatchKey(goal.externalWatch)));
+    const groups = new Map<string, typeof due>();
+    for (const goal of goals.active) {
+      if (!goal.externalWatch) continue;
+      const key = externalWatchKey(goal.externalWatch);
+      if (!dueSubjects.has(key)) continue;
+      const group = groups.get(key) || [];
+      group.push(goal);
+      groups.set(key, group);
+    }
+    for (const [key, group] of groups) {
+      if (externalPoll.isActive(key)) continue;
+      await externalPoll.run(key, async () => {
+      const observations = await observeExternalWatches(group.map((goal) => ({
+        goalId: goal.goalId,
+        source: goal.externalWatch!.source,
+        subject: goal.externalWatch!.subject,
+        revision: goal.externalWatch!.revision,
+      })));
+      for (const observation of observations) {
+        const binding = goalCache?.active.get(observation.goalId);
+        if (!binding) continue;
+        const runtime = runtimeFor(binding);
+        const watch = runtime.externalWatch;
+        if (
+          !watch
+          || watch.source !== observation.source
+          || watch.subject !== observation.subject
+          || watch.revision !== observation.revision
+        ) continue;
+        watch.nextPollAt = Date.now() + Math.max(
+          externalWatchIntervalMs(),
+          observation.retryAfterMs || 0,
+        );
+        if (!observation.ok) {
+          if (watch.lastError !== observation.error) {
+            watch.lastError = observation.error;
+            reportBackgroundFailure(
+              `Could not observe ${watch.source} ${watch.subject}`,
+              new Error(observation.error || "unknown provider failure"),
+            );
+          }
+          continue;
         }
-        continue;
+        clearRecoveredWatchError(watch);
+        if (!observation.changed) {
+          watch.revision = observation.observedRevision;
+          continue;
+        }
+        const observedAt = new Date().toISOString();
+        const state = await recordExternalChange(binding, {
+          source: watch.source,
+          subject: watch.subject,
+          revision: observation.observedRevision,
+          observedAt,
+        });
+        watch.revision = observation.observedRevision;
+        cacheCheckpoint(binding, state);
+        handleSignal(binding.paneId, {
+          force: true,
+          reason: `${observation.summary}. This external change is only a wake hint; have the same worker reread authoritative state before deciding what it means.`,
+          key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
+        });
       }
-      clearRecoveredWatchError(watch);
-      watch.revision = observation.observedRevision;
-      if (!observation.changed) continue;
-      handleSignal(binding.paneId, {
-        force: true,
-        reason: `${observation.summary}. This external change is only a wake hint; have the same worker reread authoritative state before deciding what it means.`,
-        key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
       });
     }
   }
@@ -573,8 +746,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     const pane = findPane(snapshot, paneId);
     const binding = await refreshObservedLocation(stored, agent);
     if (runtimeFor(binding).awaitingHuman && !signal?.force) return;
+    const mismatch = identityMismatch(binding, agent, pane);
     const currentDecision = shouldWake(binding, agent, pane);
-    const decision = signal?.force && !identityMismatch(binding, agent, pane)
+    const signaledDecision = signal?.force && !mismatch
       ? {
           wake: true,
           reason: signal.reason,
@@ -582,6 +756,16 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           key: signal.key,
         }
       : currentDecision;
+    const change = binding.externalChange;
+    const rereadWorking = externalRereadInFlight(binding) && agent?.agent_status === "working";
+    const decision = change && !rereadWorking && !mismatch && !signal?.key.startsWith("external:")
+      ? {
+          wake: true,
+          reason: `${change.source} ${change.subject} changed and its authoritative reread is still pending. Have the same worker reread it before deciding what the change means.`,
+          sequence: agent ? Number(agent.state_change_seq || 0) : undefined,
+          key: `external-pending:${change.source}:${change.subject}:${change.revision}:${agent?.state_change_seq || "missing"}`,
+        }
+      : signaledDecision;
     const runtime = runtimeFor(binding);
     if (
       signal?.deadline
@@ -627,13 +811,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         // a potentially meaningful worker transition.
       }
     }
-    if (!decision.wake || runtime.lastNoticeKey === decision.key) return;
+    const missingDecisionRetry = signal?.key.startsWith("missing-decision:");
+    if (!decision.wake || (runtime.lastNoticeKey === decision.key && !missingDecisionRetry)) return;
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
     runtime.pendingObservationHasMessages = undefined;
     const currentMode = mode();
     if (currentMode !== "observe") {
-      reviewTurn.begin(paneId);
+      reviewTurn.begin(paneId, decision.reason);
     }
     try {
       pi.sendMessage(
@@ -948,9 +1133,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (reviewTurn.isBusy()) {
         return text(`Finish preparing or reviewing ${reviewTurn.paneId} before updating a goal contract.`, true);
       }
+      let releaseExternalPolling = () => {};
       try {
-        const binding = await bindingForPane(params.pane_id);
+        let binding = await bindingForPane(params.pane_id);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        releaseExternalPolling = held.release;
         const result = await refineSupervisorGoal(binding.goalId, {
           objective: params.goal.trim(),
           context: (params.context || []).map((item) => item.trim()).filter(Boolean),
@@ -958,16 +1147,17 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
           summary: params.summary.trim(),
         });
-        cacheBinding(result.binding);
-        clearExternalWatch(result.binding);
-        scheduleReview(result.binding);
+        await reloadGoals();
+        const refinedBinding = await bindingForPane(params.pane_id) || result.binding;
+        stopExternalWatch(refinedBinding);
+        scheduleReview(refinedBinding);
         let deliveryWarning = "";
         if (mode() === "live") {
           try {
             const snapshot = await client.snapshot();
             const agent = findAgent(snapshot, binding.paneId);
             const mismatch = identityMismatch(
-              result.binding,
+              refinedBinding,
               agent,
               findPane(snapshot, binding.paneId),
             );
@@ -976,7 +1166,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             } else if (typeof agent.name !== "string" || !agent.name.trim()) {
               deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
-              await client.promptAgent(binding.paneId, refinedGoalPrompt(result.binding, agent.name));
+              await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
             }
           } catch (error) {
             deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
@@ -988,6 +1178,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       } catch (error) {
         const reloadWarning = await reconcileCacheAfterWriteFailure();
         return text(`Could not update the supervised goal: ${error.message}.${reloadWarning}`, true);
+      } finally {
+        releaseExternalPolling();
       }
     },
   });
@@ -1157,15 +1349,32 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           terminalLines: params.lines || 40,
           fallbackWhenEmpty: agent.agent_status === "blocked" || agent.agent_status === "unknown",
         });
-        const runtime = runtimeFor(binding);
+        let currentBinding: GoalBinding = binding;
+        let checkpointWarning = "";
+        if (externalRereadObserved(binding, observation, agent)) {
+          try {
+            const state = await clearExternalChange(binding, observation.cursor);
+            cacheCheckpoint(binding, state);
+          } catch (error) {
+            // A newer external change superseded the discharged one. The fresh
+            // obligation stands, but the worker evidence is still valid.
+            checkpointWarning = `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
+          }
+          currentBinding = goalCache?.active.get(binding.goalId) || binding;
+        }
+        const runtime = runtimeFor(currentBinding);
         runtime.pendingCursor = observation.cursor;
-        runtime.pendingObservationHasMessages = observation.messages.length > 0;
+        runtime.pendingObservationHasMessages = observation.messages.some((message) => message.text.trim().length > 0);
         runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
-        scheduleReview(binding);
+        scheduleReview(currentBinding);
         await armReviewTimer();
         observed = true;
-        const progress = binding.progress ? `\nCurrent progress: ${binding.progress}` : "";
-        return text(`Goal: ${binding.goal}${progress}\nHerdr state: ${agent.agent_status}\n\n${formatObservation(observation)}`);
+        const trigger = reviewTurn.reason ? `Review trigger: ${reviewTurn.reason}\n` : "";
+        const externalTrigger = currentBinding.externalChange
+          ? `Pending external change: ${currentBinding.externalChange.source} ${currentBinding.externalChange.subject} at revision ${currentBinding.externalChange.revision}\n`
+          : "";
+        const progress = currentBinding.progress ? `\nCurrent progress: ${currentBinding.progress}` : "";
+        return text(`${trigger}${externalTrigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}${checkpointWarning}\n\n${formatObservation(observation)}`);
       } catch (error) { return text(`Could not observe worker: ${error.message}`, true); }
       finally { reviewTurn.finishObservation(observed); }
     },
@@ -1179,7 +1388,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Type.Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker." })),
-      waiting_on_pane: Type.Optional(Type.String({ minLength: 1, description: "Exact supervised worker whose change should wake this wait. Use only for a direct peer wait." })),
+      waiting_on_pane: Type.Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Omit for self or external waits." })),
       external_watch: Type.Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
@@ -1199,11 +1408,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
+      let [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-      const agent = findAgent(snapshot, params.pane_id);
-      const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
-      if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
       const waitingFor = params.waiting_for?.trim();
       const waitingOnPane = params.waiting_on_pane?.trim();
       const externalWatch = params.external_watch;
@@ -1215,9 +1421,27 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (externalWatch && !waitingFor) {
         return text("external_watch requires a concrete waiting_for condition.", true);
       }
-      if (externalWatch && waitingOnPane) {
+      if (waitingOnPane === params.pane_id) {
+        effectiveWaitingOnPane = undefined;
+        warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
+      }
+      if (externalWatch && effectiveWaitingOnPane) {
         return text("Choose either waiting_on_pane or external_watch for one wait, not both.", true);
       }
+      let releaseExternalPolling = () => {};
+      try {
+        if (mode() === "live") {
+          const held = await holdExternalPolling(binding);
+          binding = held.binding;
+          releaseExternalPolling = held.release;
+          snapshot = await client.snapshot();
+        }
+      if (binding.externalChange) {
+        return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.", true);
+      }
+      const agent = findAgent(snapshot, params.pane_id);
+      const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
+      if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
       if (agent.agent_status === "working" && waitingFor) {
         return text("A working worker is active, not waiting. Omit waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
       }
@@ -1231,10 +1455,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         && runtimeFor(binding).pendingObservationHasMessages === false
       ) {
         return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
-      }
-      if (waitingOnPane === params.pane_id) {
-        effectiveWaitingOnPane = undefined;
-        warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
       }
       if (effectiveWaitingOnPane) {
         const peerPane = effectiveWaitingOnPane;
@@ -1309,7 +1529,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const watching = externalWatch
         ? `\nWatching ${externalWatch.source} ${externalWatch.subject.trim()} between model turns.`
         : "";
-      return text(`${mode() === "live" ? "Left" : `${mode()} mode: would leave`} ${params.pane_id} ${state}.\n${progress}${watching}${warning}\n\nEnd this supervisor turn now.`);
+        return text(`${mode() === "live" ? "Left" : `${mode()} mode: would leave`} ${params.pane_id} ${state}.\n${progress}${watching}${warning}\n\nEnd this supervisor turn now.`);
+      } finally {
+        releaseExternalPolling();
+      }
     },
   });
 
@@ -1327,9 +1550,11 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
+      let releaseExternalPolling = () => {};
       try {
-        const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
-        if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+        const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
+        if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
+        let binding = initialBinding;
         const reviewAt = params.review_at?.trim();
         let deadline: number | undefined;
         try {
@@ -1351,10 +1576,23 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        releaseExternalPolling = held.release;
+        const liveSnapshot = await client.snapshot();
+        const liveAgent = findAgent(liveSnapshot, params.pane_id);
+        const livePane = findPane(liveSnapshot, params.pane_id);
+        const liveMismatch = identityMismatch(binding, liveAgent, livePane);
+        const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
+        if (liveMismatch && !canResumeNow) {
+          return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
+        }
         let continuedBinding = binding;
         let resumed = false;
-        if (canResume) {
-          const request = recoveryRequest(binding, snapshot);
+        let deliveryBoundary;
+        const instruction = workerInstruction(binding, params.message);
+        if (canResumeNow) {
+          const request = recoveryRequest(binding, liveSnapshot);
           // An interrupted native Codex Goal is paused by design. Resume that
           // lifecycle explicitly before queuing the supervisor's fresh
           // steering; otherwise Codex waits at an interactive "Resume goal?"
@@ -1369,56 +1607,100 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             });
           } catch (error) {
             if (!resumeAccepted) throw error;
-            clearExternalWatch(binding);
             scheduleReview(binding);
             return text(`Herdr accepted the exact-session resume for ${params.pane_id}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
             reviewTurn.close(params.pane_id);
-            clearExternalWatch(binding);
             scheduleReview(binding);
             return text(`The exact-session resume ran, but the resulting worker identity did not match: ${resumedMismatch}. No further message was sent.\n\nEnd this supervisor turn now; do not retry without fresh evidence.`, true);
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-          try {
-            await client.promptAgent(params.pane_id, params.message.trim());
-          } catch (error) {
-            clearExternalWatch(continuedBinding);
+          const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+          deliveryBoundary = delivery.boundary;
+          if (delivery.boundaryError) {
             scheduleReview(continuedBinding);
-            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${error.message}.\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            const deliveryProgress = delivery.deliveryError
+              ? "The exact session resumed, but both delivery of its next instruction and the post-delivery reread boundary are uncertain; another bounded review is required."
+              : "The exact session resumed and received its next instruction, but the post-delivery reread boundary could not be observed; another bounded review is required.";
+            const checkpointWarning = await saveUncertainSteer(
+              continuedBinding,
+              instruction,
+              deliveryProgress,
+              params.evidence || continuedBinding.evidence,
+              reviewAt,
+              unavailableRereadBoundary(),
+            );
+            const deliveryNote = delivery.deliveryError
+              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
+              : "";
+            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not observe a safe boundary after the follow-up delivery attempt: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          }
+          if (delivery.deliveryError) {
+            scheduleReview(continuedBinding);
+            const checkpointWarning = await saveUncertainSteer(
+              continuedBinding,
+              instruction,
+              "The exact session resumed, but delivery of its next instruction is uncertain; fresh worker evidence is required.",
+              params.evidence || continuedBinding.evidence,
+              reviewAt,
+              deliveryBoundary,
+            );
+            return text(`Resumed the exact native Goal in ${params.pane_id}, but could not confirm whether it received the follow-up instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
         } else {
-          try {
-            await client.promptAgent(params.pane_id, params.message.trim());
-          } catch (error) {
+          const delivery = await deliverWorkerInstruction(binding, instruction);
+          deliveryBoundary = delivery.boundary;
+          if (delivery.boundaryError) {
+            scheduleReview(binding);
+            const deliveryProgress = delivery.deliveryError
+              ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
+              : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
+            const checkpointWarning = await saveUncertainSteer(
+              binding,
+              instruction,
+              deliveryProgress,
+              params.evidence || binding.evidence,
+              reviewAt,
+              unavailableRereadBoundary(),
+            );
+            const deliveryNote = delivery.deliveryError
+              ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
+              : "";
+            return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          }
+          if (delivery.deliveryError) {
             // A transport error cannot prove that Herdr did not accept the
             // prompt. Fail closed against duplicate delivery.
-            reviewTurn.close(params.pane_id);
-            clearExternalWatch(binding);
             scheduleReview(binding);
-            return text(`Could not confirm whether ${params.pane_id} received the instruction: ${error.message}.\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+            const checkpointWarning = await saveUncertainSteer(
+              binding,
+              instruction,
+              "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
+              params.evidence || binding.evidence,
+              reviewAt,
+              deliveryBoundary,
+            );
+            return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
           }
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
         reviewTurn.close(params.pane_id);
-        clearExternalWatch(continuedBinding);
         try {
-          const result = await recordDecision(continuedBinding, "steer", {
-            progress: resumed
+          const warning = await saveSteerCheckpoint(
+            continuedBinding,
+            instruction,
+            resumed
               ? "The exact native session was resumed and asked to continue."
               : `The worker was steered to continue: ${params.message.trim()}`,
-            action: params.message.trim(),
-            evidence: params.evidence || continuedBinding.evidence,
-            observationCursor: runtimeFor(continuedBinding).pendingCursor,
+            params.evidence || continuedBinding.evidence,
             reviewAt,
-          });
-          cacheCheckpoint(continuedBinding, result.state);
-          runtimeFor(continuedBinding).pendingCursor = undefined;
+            deliveryBoundary,
+          );
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
-          const warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
           const resultText = resumed
             ? `Resumed the exact ${binding.agentSession.agent} session and native Goal in ${params.pane_id}, then asked it to continue.`
             : `Steered ${params.pane_id}: ${params.message.trim()}`;
@@ -1429,6 +1711,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
         }
       } catch (error) { return text(`Could not continue worker: ${error.message}`, true); }
+      finally { releaseExternalPolling(); }
     },
   });
 
@@ -1446,7 +1729,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const binding = await bindingForPane(params.pane_id);
+      let binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
       const now = Date.now();
       const reviewAt = params.review_at?.trim()
@@ -1458,20 +1741,29 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       }
       let warning = "";
       if (mode() === "live") {
-        const result = await recordDecision(binding, "ask_human", {
-          progress: `Human input is required: ${params.question.trim()}`,
-          action: params.question.trim(),
-          evidence: params.evidence || binding.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-          wait: {
-            condition: `the human's answer to: ${params.question.trim()}`,
-            reviewAt,
-          },
-        });
-        cacheCheckpoint(binding, result.state);
-        runtimeFor(binding).pendingCursor = undefined;
-        clearExternalWatch(binding);
-        if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
+        try {
+          if (binding.externalChange) {
+            return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
+          }
+          const result = await recordDecision(binding, "ask_human", {
+            progress: `Human input is required: ${params.question.trim()}`,
+            action: params.question.trim(),
+            evidence: params.evidence || binding.evidence,
+            observationCursor: runtimeFor(binding).pendingCursor,
+            wait: {
+              condition: `the human's answer to: ${params.question.trim()}`,
+              reviewAt,
+            },
+          });
+          cacheCheckpoint(binding, result.state);
+          runtimeFor(binding).pendingCursor = undefined;
+          clearExternalWatch(binding);
+          if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
+        } finally {
+          held.release();
+        }
       }
       const runtime = runtimeFor(binding);
       runtime.awaitingHuman = true;
@@ -1497,21 +1789,40 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
+      let binding = await bindingForPane(params.pane_id);
+      if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+      if (binding.externalChange) {
+        return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before accepting the goal.", true);
+      }
       if (mode() !== "live") {
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      const binding = await bindingForPane(params.pane_id);
-      if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-      const result = await recordDecision(binding, "accept", {
-        progress: params.summary.trim(),
-        action: "Accepted the verified goal.",
-        evidence: params.evidence,
-        observationCursor: runtimeFor(binding).pendingCursor,
-        terminal: { state: "accepted", summary: params.summary.trim() },
-      });
-      runtimeFor(binding).pendingCursor = undefined;
-      cacheCheckpoint(binding, result.state);
+      let result;
+      const held = await holdExternalPolling(binding);
+      binding = held.binding;
+      try {
+        if (binding.externalChange) {
+          return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
+        }
+        try {
+          result = await recordDecision(binding, "accept", {
+            progress: params.summary.trim(),
+            action: "Accepted the verified goal.",
+            evidence: params.evidence,
+            observationCursor: runtimeFor(binding).pendingCursor,
+            terminal: { state: "accepted", summary: params.summary.trim() },
+          });
+        } catch (error) {
+          const reloadWarning = await reconcileCacheAfterWriteFailure();
+          scheduleReview(binding);
+          return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
+        }
+        runtimeFor(binding).pendingCursor = undefined;
+        cacheCheckpoint(binding, result.state);
+      } finally {
+        held.release();
+      }
       reviewTurn.close(params.pane_id);
       let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
       try {
@@ -1563,8 +1874,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const paneId = args.trim();
       if (!paneId) return ctx.ui.notify("Usage: /unsupervise <pane>", "warning");
       try {
-        const binding = await bindingForPane(paneId);
+        let binding = await bindingForPane(paneId);
         if (!binding) return ctx.ui.notify(`${paneId} was not supervised.`, "info");
+        const held = await holdExternalPolling(binding);
+        binding = held.binding;
         let result;
         try {
           result = await recordDecision(binding, "stop", {
@@ -1573,11 +1886,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             evidence: binding.evidence,
             terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
           });
+          cacheCheckpoint(binding, result.state);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           return ctx.ui.notify(`Could not save the request to stop supervising ${paneId}: ${error.message}.${reloadWarning}`, "error");
+        } finally {
+          held.release();
         }
-        cacheCheckpoint(binding, result.state);
         await wakeDependentWaiters(
           paneId,
           `supervision of ${paneId} stopped; reconsider whether useful work can proceed`,

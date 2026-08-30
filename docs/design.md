@@ -97,8 +97,29 @@ no pane, session, progress, wait, cursor, or history.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding, concise progress, retained evidence, observation cursor, last
-decision, optional wait, and optional terminal result. It does not copy live
-worker status; that always comes from Herdr.
+decision, optional wait, optional unresolved external change, and optional
+terminal result. It does not copy live worker status; that always comes from
+Herdr.
+
+Polling schedules remain disposable memory. If a watched PR or build changes,
+only that unresolved fact is saved in `current.json`. It survives restart and
+cannot be cleared by merely sending a prompt. After the reread delivery attempt,
+the supervisor saves the current transcript cursor or terminal fingerprint.
+This conservative boundary may ignore output produced during delivery, but it
+cannot mistake earlier output for the reread. The change clears only after a
+later native final response advances that cursor. A worker without a native
+transcript instead requires a later settled Herdr transition and a changed
+terminal fingerprint. That fingerprint covers a fixed terminal suffix, so
+changing the number of displayed lines does not manufacture progress. If the
+post-delivery observation itself fails, the supervisor saves a fail-closed
+boundary that cannot clear automatically; a later bounded review may steer the
+same worker again and replace it with a real boundary.
+
+A decision that can change a watch briefly holds its exact external subject:
+it drains any in-flight read and prevents another one from starting until the
+state change commits. An unrelated slow provider does not delay it. The final
+state write also compares the exact external revision, so polling cannot race
+with steering, clearing, or acceptance and lose a newer change.
 
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside
