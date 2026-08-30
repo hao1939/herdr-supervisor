@@ -64,6 +64,35 @@ test("concurrent registration cannot assign one native session twice", async () 
   assert.equal((await loadSupervisorGoals(directory)).active.length, 1);
 });
 
+test("concurrent relocation and registration cannot assign one pane twice", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Keep the existing goal moving.",
+  }, directory, { goalId: "g_existing" });
+  const destination = {
+    paneId: "w1:p9",
+    terminalId: "term_destination",
+    agentSession: worker.agentSession,
+  };
+  const newcomer = {
+    paneId: destination.paneId,
+    terminalId: destination.terminalId,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_new" },
+  };
+
+  const results = await Promise.allSettled([
+    refreshWorkerLocation(binding, destination, directory),
+    registerSupervisedGoal(newcomer, {
+      objective: "Start another goal.",
+    }, directory, { goalId: "g_new" }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /already pursues goal/);
+  const active = (await loadSupervisorGoals(directory)).active;
+  assert.equal(new Set(active.map((goal) => goal.paneId)).size, active.length);
+});
+
 test("refining a goal replaces its contract without replacing its worker", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
