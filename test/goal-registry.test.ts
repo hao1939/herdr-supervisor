@@ -55,6 +55,12 @@ test("refining a goal replaces its contract without replacing its worker", async
       reviewAt: "2026-08-28T11:00:00.000Z",
     },
   }, directory, () => "2026-08-28T10:01:00.000Z");
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-28T10:01:30.000Z",
+  }, directory, () => "2026-08-28T10:01:30.000Z");
 
   const result = await refineSupervisorGoal("g_test", {
     objective: "Prepare and validate the focused fix.",
@@ -73,6 +79,7 @@ test("refining a goal replaces its contract without replacing its worker", async
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].goalId, "g_test");
   assert.equal(goals.active[0].wait, undefined);
+  assert.equal(goals.active[0].externalChange?.revision, "changed-revision");
   assert.deepEqual(goals.active[0].constraints, ["Use an isolated worktree and one focused PR."]);
   const audit = await readAudit("g_test", directory);
   assert.equal(audit.at(-1).type, "goal_refined");

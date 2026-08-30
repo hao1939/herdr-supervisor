@@ -1501,12 +1501,20 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
         binding = await stopExternalWatchAfterPolling(binding);
+        const liveSnapshot = await client.snapshot();
+        const liveAgent = findAgent(liveSnapshot, params.pane_id);
+        const livePane = findPane(liveSnapshot, params.pane_id);
+        const liveMismatch = identityMismatch(binding, liveAgent, livePane);
+        const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
+        if (liveMismatch && !canResumeNow) {
+          return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
+        }
         let continuedBinding = binding;
         let resumed = false;
         let deliveryBoundary;
         const instruction = workerInstruction(binding, params.message);
-        if (canResume) {
-          const request = recoveryRequest(binding, snapshot);
+        if (canResumeNow) {
+          const request = recoveryRequest(binding, liveSnapshot);
           // An interrupted native Codex Goal is paused by design. Resume that
           // lifecycle explicitly before queuing the supervisor's fresh
           // steering; otherwise Codex waits at an interactive "Resume goal?"

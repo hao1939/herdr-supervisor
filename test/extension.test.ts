@@ -1948,6 +1948,48 @@ test("steering drains an in-flight external observation before clearing its watc
   pi.events.get("session_shutdown")();
 });
 
+test("steering rereads worker identity after its provider fence", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let steering = false;
+  let steeringSnapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (steering && ++steeringSnapshots === 2) {
+      return snapshot({
+        agent_status: "idle",
+        agent_session: { ...worker.agentSession, value: "replacement-session" },
+      });
+    }
+    return snapshot({ agent_status: "idle" });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The registered worker was ready.", truncated: false },
+  }));
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  steering = true;
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /rereading worker identity: worker value changed/);
+  assert.equal(prompts, 0, "a replacement worker must not receive the instruction");
+  pi.events.get("session_shutdown")();
+});
+
 test("a recovered provider error can be reported again after a later failure", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

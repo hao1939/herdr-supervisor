@@ -144,17 +144,15 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
   };
   const at = options.at || new Date().toISOString();
   const answeredPreviousQuestion = binding.lastDecision?.decision === "ask_human";
-  if (binding.wait || binding.reviewAt || binding.externalChange || answeredPreviousQuestion) {
+  if (binding.wait || binding.reviewAt || answeredPreviousQuestion) {
     await updateGoalState(goalId, (state) => {
       delete state.wait;
       delete state.reviewAt;
-      delete state.externalChange;
       if (answeredPreviousQuestion) delete state.lastDecision;
       return state;
     }, root, () => at);
     delete binding.wait;
     delete binding.reviewAt;
-    delete binding.externalChange;
     if (answeredPreviousQuestion) {
       delete binding.lastDecision;
     }
