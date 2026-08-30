@@ -3180,6 +3180,56 @@ test("a reported global finding does not force a focused review", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
+test("a global review exposes unstarted goals without pretending they have workers", async (t) => {
+  const root = await fixture();
+  await installSupervisorGoal({
+    objective: "Resume the saved release migration.",
+    acceptance: ["The migration is verified."],
+  }, root, { goalId: "g_unstarted" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /"goalId": "g_unstarted"/);
+  assert.match(pi.messages[0].content, /"workerState": "unstarted"/);
+
+  const invalid = await pi.tools.get("supervisor_global_result").execute("unstarted-reconsider", {
+    summary: "One saved goal has no worker.",
+    findings: [{
+      problem: "A saved goal has not started",
+      evidence: ["Its worker state is unstarted"],
+      affected_goal_ids: ["g_unstarted"],
+    }],
+    reconsider: [{ goal_id: "g_unstarted", reason: "Review the missing worker" }],
+  });
+  assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /no worker/);
+  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+
+  const valid = await pi.tools.get("supervisor_global_result").execute("unstarted-finding", {
+    summary: "One saved goal has no worker and needs a human resume decision.",
+    findings: [{
+      problem: "A saved goal has not started",
+      evidence: ["Its worker state is unstarted"],
+      affected_goal_ids: ["g_unstarted"],
+    }],
+    reconsider: [],
+  });
+  assert.equal(valid.isError, false);
+  assert.match(valid.content[0].text, /No focused review is needed/);
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 1);
+  pi.events.get("session_shutdown")();
+});
+
 test("focused worker review runs before a due global review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

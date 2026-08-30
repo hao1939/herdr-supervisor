@@ -201,8 +201,10 @@ decision at a time.
   the focused pane.
 - The fence allows one successful observation and one decision in a turn.
 - Events arriving during a review remain pending for a later turn.
-- A low-frequency compact global review can notice cross-goal problems, but it
-  reports or schedules ordinary focused reviews; it never acts on workers.
+- A low-frequency compact global review sees every unfinished goal, including
+  saved contracts that have no local worker. It reports cross-goal or unstarted
+  work and may schedule ordinary focused reviews only for goals that have a
+  worker; it never acts on workers itself.
 
 This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.
@@ -213,6 +215,9 @@ graph.
 - A missed event is covered by the nearest review deadline.
 - An interrupted supervisor reloads every unfinished goal from its contract and
   checkpoint and compares it with fresh Herdr state.
+- A saved contract with no checkpoint remains visible as unstarted work in the
+  global safety review. It cannot be silently treated as healthy or routed to a
+  worker review that does not exist.
 - A stopped supported Codex process can resume only its exact native session.
 - A changed or missing identity fails closed and receives no prompt.
 - Once Herdr may have accepted a prompt or resume, the turn closes before
