@@ -1,6 +1,7 @@
-# Proof-of-concept design
+# Proof-of-concept validation record
 
-**Status:** Implemented; native Codex Goal execution is in live validation
+**Status:** Historical design evolution and validation evidence. The current
+design is [design.md](design.md).
 **Date:** 2026-08-29
 
 ## 1. Purpose

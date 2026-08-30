@@ -1,5 +1,6 @@
 export class ReviewTurnFence {
   paneId: string | undefined;
+  phase: "idle" | "preparing" | "active" = "idle";
   observing = false;
   observed = false;
   closed = false;
@@ -10,6 +11,7 @@ export class ReviewTurnFence {
 
   begin(paneId) {
     this.paneId = paneId;
+    this.phase = "active";
     this.observing = false;
     this.observed = false;
     this.closed = false;
@@ -17,9 +19,34 @@ export class ReviewTurnFence {
 
   end() {
     this.paneId = undefined;
+    this.phase = "idle";
     this.observing = false;
     this.observed = false;
     this.closed = false;
+  }
+
+  prepare(paneId) {
+    this.paneId = paneId;
+    this.phase = "preparing";
+    this.observing = false;
+    this.observed = false;
+    this.closed = false;
+  }
+
+  finishPreparing() {
+    if (this.phase === "preparing") this.end();
+  }
+
+  isPreparing(paneId?) {
+    return this.phase === "preparing" && (!paneId || paneId === this.paneId);
+  }
+
+  isActive(paneId?) {
+    return this.phase === "active" && (!paneId || paneId === this.paneId);
+  }
+
+  isBusy(paneId?) {
+    return this.phase !== "idle" && (!paneId || paneId === this.paneId);
   }
 
   guard(paneId?) {

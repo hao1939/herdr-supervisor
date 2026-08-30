@@ -106,7 +106,7 @@ export function buildGlobalSnapshot(bindings, herdr, health, now = new Date()) {
       lastBackgroundError: health.lastBackgroundError || undefined,
     },
     pendingHumanInput: bindings
-      .filter((binding) => binding.awaitingHuman || binding.lastDecision?.decision === "ask_human")
+      .filter((binding) => binding.lastDecision?.decision === "ask_human")
       .map((binding) => binding.goalId),
     goals: bindings.map((binding) => {
       const agent = findAgent(herdr, binding.paneId);

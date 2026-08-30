@@ -587,6 +587,83 @@ test("reconsideration rejects an unknown worker without scheduling work", async 
   pi.events.get("session_shutdown")();
 });
 
+test("human reconsideration is retained while its focused review is preparing", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+
+  let releaseFirstSnapshot;
+  const firstSnapshot = new Promise((resolve) => { releaseFirstSnapshot = resolve; });
+  let snapshotCalls = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshotCalls += 1;
+    if (snapshotCalls === 1) await firstSnapshot;
+    return snapshot({ agent_status: "idle", state_change_seq: snapshotCalls + 2 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("first", {
+    pane_ids: [worker.paneId],
+    reason: "the first fact arrived",
+  });
+  const settling = pi.events.get("agent_settled")();
+  await waitFor(() => snapshotCalls === 1);
+
+  const startDuringPreparation = await pi.tools.get("supervisor_start_goal").execute("start-during-preparation", {
+    goal: "Start unrelated work.",
+    context: [],
+    acceptance: ["The unrelated work is complete."],
+    constraints: [],
+    mode: "new",
+    label: "unrelated",
+    cwd: "/tmp",
+  });
+  assert.equal(startDuringPreparation.isError, true);
+  assert.match(startDuringPreparation.content[0].text, /Finish preparing or reviewing/);
+
+  const updateDuringPreparation = await pi.tools.get("supervisor_update_goal").execute("update-during-preparation", {
+    pane_id: worker.paneId,
+    goal: "Change the goal while its review is preparing.",
+    context: [],
+    acceptance: ["The changed goal is complete."],
+    constraints: [],
+    summary: "This update must wait for the current review.",
+  });
+  assert.equal(updateDuringPreparation.isError, true);
+  assert.match(updateDuringPreparation.content[0].text, /Finish preparing or reviewing/);
+
+  const retained = await pi.tools.get("supervisor_reconsider").execute("during-preparation", {
+    pane_ids: [worker.paneId],
+    reason: "a newer fact arrived during preparation",
+  });
+  assert.equal(retained.isError, false);
+  releaseFirstSnapshot();
+  await settling;
+  await waitFor(() => pi.messages.length === 1);
+
+  await pi.tools.get("supervisor_observe").execute("observe-first", { pane_id: worker.paneId });
+  const decision = await pi.tools.get("supervisor_steer").execute("steer-first", {
+    pane_id: worker.paneId,
+    message: "Continue the next useful step.",
+    evidence: ["The worker is ready to continue."],
+  });
+  assert.equal(decision.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /a newer fact arrived during preparation/);
+  pi.events.get("session_shutdown")();
+});
+
 test("an accepted goal delegates normal reversible execution authority", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
@@ -1868,6 +1945,17 @@ test("an invalid global result has no partial routing", async (t) => {
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
+
+  const ambiguousDeadline = new Date(Date.now() + 60_000).toISOString().replace(/Z$/, "");
+  const invalidDeadline = await pi.tools.get("supervisor_global_result").execute("invalid-deadline", {
+    summary: "The next review time is ambiguous.",
+    findings: [],
+    reconsider: [],
+    next_review_at: ambiguousDeadline,
+  });
+  assert.equal(invalidDeadline.isError, true);
+  assert.match(invalidDeadline.content[0].text, /timezone-bearing ISO 8601/);
+  assert.match(invalidDeadline.content[0].text, /No focused reviews were queued/);
 
   const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
     summary: "One reference is invalid.",

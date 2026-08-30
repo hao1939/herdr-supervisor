@@ -95,7 +95,6 @@ test("refining a goal resolves its previous human question", async () => {
   }, directory, { at: "2026-08-28T10:02:00.000Z" });
 
   const [refined] = (await loadSupervisorGoals(directory)).active;
-  assert.equal(refined.awaitingHuman, false);
   assert.equal(refined.lastDecision, undefined);
 });
 

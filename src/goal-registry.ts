@@ -10,10 +10,11 @@ import {
   updateGoalContract,
   updateGoalState,
 } from "./goal-store.ts";
+import type { GoalBinding } from "./types.ts";
 
 export const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
 
-export function bindingFromRecord(record) {
+export function bindingFromRecord(record): GoalBinding {
   if (!record?.contract || !record?.state) throw new Error("goal has no local execution");
   return {
     goalId: record.goalId,
@@ -28,7 +29,6 @@ export function bindingFromRecord(record) {
     progress: record.state.progress,
     reviewAt: record.state.reviewAt,
     lastDecision: record.state.lastDecision,
-    awaitingHuman: record.state.lastDecision?.decision === "ask_human",
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
     updatedAt: record.state.updatedAt,
@@ -128,7 +128,6 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
     delete binding.reviewAt;
     if (answeredPreviousQuestion) {
       delete binding.lastDecision;
-      binding.awaitingHuman = false;
     }
   }
   let auditError;
