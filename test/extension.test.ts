@@ -1562,7 +1562,7 @@ test("missing-decision retries keep requiring a reread after an external change 
   pi.events.get("session_shutdown")();
 });
 
-test("restart retains an external reread until a later native final response", async (t) => {
+test("restart retains an external reread until a supervisor accepts the later native result", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-external-restart-"));
   const sessionFile = join(root, "worker.jsonl");
   const firstLine = `${JSON.stringify({
@@ -1634,13 +1634,15 @@ test("restart retains an external reread until a later native final response", a
   await waitFor(() => afterEvidence.messages.length === 1);
   const observation = await afterEvidence.tools.get("supervisor_observe").execute("observe-after-evidence", { pane_id: worker.paneId });
   assert.match(observation.content[0].text, /I reread PR 16; all current checks pass/);
-  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "changed-revision");
   const finish = await afterEvidence.tools.get("supervisor_finish").execute("finish-after-evidence", {
     pane_id: worker.paneId,
     summary: "The worker reread PR 16 and verified the current checks.",
     evidence: ["The post-change native Codex message reports all current checks pass."],
+    external_change_revision: "changed-revision",
   }, undefined, undefined, { ui: { setStatus() {} } });
   assert.equal(finish.isError, false);
+  assert.equal((await loadSupervisorGoals(root)).active.length, 0);
   afterEvidence.events.get("session_shutdown")();
 });
 
@@ -1805,7 +1807,7 @@ test("Codex fallback cannot treat a non-assistant record as reread evidence", as
   pi.events.get("session_shutdown")();
 });
 
-test("a post-instruction final response clears the reread despite an earlier worker timestamp", async (t) => {
+test("a supervisor can accept a post-instruction final response despite an earlier worker timestamp", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-clock-skew-"));
   const sessionFile = join(root, "worker.jsonl");
   const oldLine = `${JSON.stringify({
@@ -1864,11 +1866,14 @@ test("a post-instruction final response clears the reread despite an earlier wor
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe-skewed-final", { pane_id: worker.paneId });
-  assert.equal(
-    (await loadSupervisorGoals(root)).active[0].externalChange,
-    undefined,
-    "a transcript timestamp behind the supervisor clock cannot block a real reread",
-  );
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "changed-revision");
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-skewed-final", {
+    pane_id: worker.paneId,
+    summary: "The current PR checks were reread.",
+    evidence: ["The post-instruction final response reports the current checks."],
+    external_change_revision: "changed-revision",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, false, "a transcript timestamp behind the supervisor clock cannot block a real reread");
   pi.events.get("session_shutdown")();
 });
 
@@ -1951,7 +1956,7 @@ test("an unrelated signal does not duplicate the same pending external reread re
   pi.events.get("session_shutdown")();
 });
 
-test("a newer external change cannot fail the observation that discharged the old one", async (t) => {
+test("a newer external change rejects stale explicit reread acceptance", async (t) => {
   const root = await fixture();
   const [binding] = (await loadSupervisorGoals(root)).active;
   const oldOutput = "The old PR 16 terminal result.";
@@ -1991,8 +1996,14 @@ test("a newer external change cannot fail the observation that discharged the ol
   const observation = await pi.tools.get("supervisor_observe").execute("observe-after-second-change", { pane_id: worker.paneId });
   assert.equal(observation.isError, false, "a superseding external change must not lose the worker evidence");
   assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
-  assert.match(observation.content[0].text, /Pending external change: github-pr hao1939\/herdr-supervisor#16 at revision second-revision/);
-  assert.match(observation.content[0].text, /Checkpoint warning/);
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-stale-reread", {
+    pane_id: worker.paneId,
+    summary: "The first revision was reread.",
+    evidence: ["The worker reported the first revision."],
+    external_change_revision: "first-revision",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, true);
+  assert.match(finish.content[0].text, /changed again before its reread was accepted/);
   assert.equal(
     (await loadSupervisorGoals(root)).active[0].externalChange?.revision,
     "second-revision",
@@ -2037,6 +2048,39 @@ test("a settled terminal fallback needs output produced after its reread instruc
   assert.ok((await loadSupervisorGoals(root)).active[0].externalChange, "old terminal output cannot satisfy the reread");
   beforeOutput.events.get("session_shutdown")();
 
+  workerOutput = "No authoritative GitHub reread was performed.";
+  const refusalOutput = fakePi();
+  herdrSupervisor(refusalOutput);
+  await refusalOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => refusalOutput.messages.length === 1);
+  const refusal = await refusalOutput.tools.get("supervisor_observe").execute("observe-refusal", { pane_id: worker.paneId });
+  assert.match(refusal.content[0].text, /Fresh post-instruction worker result available/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  const staleLeave = await refusalOutput.tools.get("supervisor_leave").execute("leave-refusal", {
+    pane_id: worker.paneId,
+    progress: "The worker explicitly did not reread the PR.",
+    waiting_for: "the authoritative PR reread",
+  });
+  assert.equal(staleLeave.isError, true);
+  assert.match(staleLeave.content[0].text, /authoritative reread evidence is still pending/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+
+  workerOutput = oldOutput;
+  await refusalOutput.events.get("agent_settled")();
+  await waitFor(() => refusalOutput.messages.length === 2);
+  const reverted = await refusalOutput.tools.get("supervisor_observe").execute("observe-reverted-output", { pane_id: worker.paneId });
+  assert.doesNotMatch(reverted.content[0].text, /Fresh post-instruction worker result available/);
+  const staleAcknowledgement = await refusalOutput.tools.get("supervisor_leave").execute("leave-stale-candidate", {
+    pane_id: worker.paneId,
+    progress: "Only the old terminal boundary is visible now.",
+    waiting_for: "the authoritative PR reread",
+    external_change_revision: "fallback-revision",
+  });
+  assert.equal(staleAcknowledgement.isError, true);
+  assert.match(staleAcknowledgement.content[0].text, /Observe a fresh post-instruction worker result/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  refusalOutput.events.get("session_shutdown")();
+
   workerOutput = "I reread PR 16; its current checks pass.";
   const afterOutput = fakePi();
   herdrSupervisor(afterOutput);
@@ -2044,6 +2088,15 @@ test("a settled terminal fallback needs output produced after its reread instruc
   await waitFor(() => afterOutput.messages.length === 1);
   const observation = await afterOutput.tools.get("supervisor_observe").execute("observe-new-fallback", { pane_id: worker.paneId });
   assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  const leave = await afterOutput.tools.get("supervisor_leave").execute("leave-new-fallback", {
+    pane_id: worker.paneId,
+    progress: "The current PR checks were reread.",
+    waiting_for: "the next requested change",
+    evidence: ["The new terminal result reports the current PR checks."],
+    external_change_revision: "fallback-revision",
+  });
+  assert.equal(leave.isError, false);
   assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
   afterOutput.events.get("session_shutdown")();
 });
@@ -2866,6 +2919,62 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   });
   assert.equal(prompts, 1);
   assert.match(repeated.content[0].text, /already applied/);
+  pi.events.get("session_shutdown")();
+});
+
+test("an uncertain steer keeps an already accepted external reread resolved", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const oldOutput = "The old PR state was pending.";
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "changed-revision",
+    workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "I reread PR 16; its current checks pass.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+    prompts += 1;
+    throw new Error("prompt response timed out");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-reread", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /Fresh post-instruction worker result available/);
+  const result = await pi.tools.get("supervisor_steer").execute("steer-after-reread", {
+    pane_id: worker.paneId,
+    message: "Continue with the remaining goal work.",
+    external_change_revision: "changed-revision",
+  });
+
+  assert.equal(prompts, 1);
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.externalChange, undefined, "delivery uncertainty must not resurrect an accepted reread");
+  assert.equal(stored.lastDecision.decision, "steer");
+  assert.doesNotMatch(stored.lastDecision.action, /watched github-pr/);
   pi.events.get("session_shutdown")();
 });
 
