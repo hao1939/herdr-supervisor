@@ -971,7 +971,7 @@ test("retry reuses a pending initialized pane instead of creating another worker
   pi.events.get("session_shutdown")();
 });
 
-test("restart reuses the named worker for an installed goal instead of creating a duplicate", async (t) => {
+test("restart reuses a legacy-named worker for an installed goal instead of creating a duplicate", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-restart-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
@@ -1034,6 +1034,8 @@ test("restart reuses the named worker for an installed goal instead of creating 
   herdrSupervisor(firstPi);
   const first = await firstPi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
   firstPi.events.get("session_shutdown")();
+  const [installed] = (await loadSupervisorGoals(root)).unstarted;
+  workerName = `goal-${installed.goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
   restarted = true;
 
   const secondPi = fakePi();

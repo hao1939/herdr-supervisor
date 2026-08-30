@@ -116,6 +116,11 @@ function workerNameForGoal(goalId: string) {
   return `goal-${suffix}`;
 }
 
+function legacyWorkerNameForGoal(goalId: string) {
+  const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
+  return `goal-${suffix.slice(0, 27)}`;
+}
+
 function exactSessionAgent(snapshot, session) {
   const matches = snapshot.agents?.filter((agent) => (
     sameAgentSession(agent.agent_session, session)
@@ -1091,6 +1096,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
     let installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
+    const continuingInstalledGoal = Boolean(installed);
     if (!installed) {
       installed = await installSupervisorGoal({
         objective,
@@ -1102,6 +1108,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
+    const legacyWorkerName = legacyWorkerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
     const retryingPendingStart = Boolean(paneId);
     if (!paneId) {
@@ -1111,9 +1118,26 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const snapshot = await client.snapshot();
       const supervisor = findPane(snapshot, supervisorPane);
       if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
-      const pendingAgent = snapshot.agents?.find(
-        (agent) => agent.name === workerName && agent.workspace_id === supervisor.workspace_id,
-      );
+      const recognizedNames = new Set([workerName]);
+      if (continuingInstalledGoal) recognizedNames.add(legacyWorkerName);
+      const pendingAgents = snapshot.agents?.filter((agent) => (
+        recognizedNames.has(agent.name)
+        && agent.workspace_id === supervisor.workspace_id
+        && !goals.active.some((binding) => binding.paneId === agent.pane_id)
+      )) || [];
+      if (pendingAgents.length > 1) {
+        throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
+      }
+      const pendingAgent = pendingAgents[0];
+      if (
+        pendingAgent?.name === legacyWorkerName
+        && goals.unstarted.some((record) => (
+          record.goalId !== goalId
+          && legacyWorkerNameForGoal(record.goalId) === pendingAgent.name
+        ))
+      ) {
+        throw new Error(`The legacy worker name for installed goal ${goalId} is ambiguous; choose the correct worker before retrying.`);
+      }
       paneId = pendingAgent?.pane_id;
 
       if (!paneId && params.placement.mode === "related") {
