@@ -218,7 +218,7 @@ test("stale decisions cannot bypass a newly recorded external change", async () 
   await assert.rejects(recordDecision(stale, "steer", {
     progress: "An unrelated instruction was sent.",
     action: "Continue unrelated work.",
-  }, directory), /changed while steering/);
+  }, directory), /acknowledge the current external change revision/);
 
   const [current] = (await loadSupervisorGoals(directory)).active;
   assert.ok(current.externalChange);

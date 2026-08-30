@@ -192,7 +192,7 @@ export async function recordDecision(binding, decision, input, root?, now = () =
       decision === "steer"
       && current.externalChange?.revision !== input.externalChangeRevision
     ) {
-      throw new Error("the watched external resource changed while steering was in progress");
+      throw new Error("a steer must acknowledge the current external change revision before it can be recorded");
     }
     if (decision === "steer" && current.externalChange) {
       if (!Number.isInteger(input.workerSequence) || input.workerSequence < 0) {
