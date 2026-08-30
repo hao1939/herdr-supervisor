@@ -231,6 +231,21 @@ test("a persisted human question is the next action shown after restart", () => 
   assert.doesNotMatch(output, /review current evidence/);
 });
 
+test("a missing pane does not hide an outstanding human question", () => {
+  const current = binding({
+    lastDecision: {
+      decision: "ask_human",
+      at: "2026-08-28T10:00:00.000Z",
+      action: "May this worker use shared capacity?",
+    },
+  });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /^Goal g_test · waiting for you$/m);
+  assert.match(output, /Next: answer the supervisor's question above/);
+  assert.match(output, /worker recovery can follow your answer/);
+});
+
 test("the all-worker view stays bounded while one-worker detail stays complete", () => {
   const current = binding({
     goal: `Review the system ${"goal detail ".repeat(80)}`,

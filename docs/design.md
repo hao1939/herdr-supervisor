@@ -264,3 +264,7 @@ New abstractions must remove real duplication or clarify an authority boundary.
 Do not add a generic reducer, workflow engine, retry service, task graph, or
 keyword router unless measured evidence proves the simpler event-driven design
 cannot meet the goal.
+
+An uncertain routing recovery never causes a same-turn retry. The existing
+bounded review rereads runtime truth and safely adopts or retries the recovery;
+no separate recovery workflow or durable retry state is needed.

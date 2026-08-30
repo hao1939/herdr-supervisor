@@ -149,7 +149,9 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
   const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
   const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
-  const goalState = mismatch
+  const goalState = paneMissing && awaitingHuman
+    ? "waiting for you"
+    : mismatch
     ? "needs attention"
     : binding.externalChange
       ? (externalRereadWorking ? "working" : "needs review")
@@ -179,7 +181,11 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   ];
   if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
-  if (paneMissing) lines.push("  Next: supervisor should review whether the exact session can resume in a new pane");
+  if (paneMissing && awaitingHuman) {
+    lines.push("  Next: answer the supervisor's question above; worker recovery can follow your answer");
+    const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
+    if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
+  } else if (paneMissing) lines.push("  Next: supervisor should review whether the exact session can resume in a new pane");
   else if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (awaitingHuman) {
     lines.push("  Next: answer the supervisor's question above");

@@ -1755,7 +1755,16 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         let relocated = false;
         if (!liveAgent) {
           const previousPaneId = binding.paneId;
-          binding = await recoverWorkerRouting(binding, liveSnapshot);
+          try {
+            binding = await recoverWorkerRouting(binding, liveSnapshot);
+          } catch (error) {
+            reviewTurn.close(params.pane_id);
+            scheduleReview(binding);
+            let warning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied, but no worker instruction was sent.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
+          }
           relocated = binding.paneId !== previousPaneId;
           if (relocated) {
             reviewTurn.retarget(params.pane_id, binding.paneId);

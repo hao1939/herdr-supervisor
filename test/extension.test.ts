@@ -3514,7 +3514,7 @@ test("a direct human steer relocates a missing-pane worker and resumes the exact
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  const pi = fakePi();
+  const pi = fakePi({ reviewMs: "1000" });
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   assert.equal(pi.messages.length, 0);
@@ -3526,6 +3526,22 @@ test("a direct human steer relocates a missing-pane worker and resumes the exact
   });
   assert.equal(interrupted.isError, true);
   assert.match(interrupted.content[0].text, /tab\.create connection closed/);
+  assert.match(interrupted.content[0].text, /Routing recovery may have partly applied/);
+  assert.match(interrupted.content[0].text, /Do not retry in this turn/);
+
+  const sameTurnRetry = await pi.tools.get("supervisor_steer").execute("continue-same-turn", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+  assert.equal(sameTurnRetry.isError, true);
+  assert.match(sameTurnRetry.content[0].text, /already applied/);
+  assert.equal(creates, 1);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /worker pane is no longer present/);
+  await pi.tools.get("supervisor_observe").execute("observe-after-recovery-error", {
+    pane_id: worker.paneId,
+  });
 
   const result = await pi.tools.get("supervisor_steer").execute("continue", {
     pane_id: worker.paneId,
