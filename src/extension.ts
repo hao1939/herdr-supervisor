@@ -5,7 +5,6 @@ import { HerdrClient } from "./herdr-client.ts";
 import {
   loadSupervisorGoals,
   installSupervisorGoal,
-  clearExternalChange,
   recordExternalChange,
   recordDecision,
   refineSupervisorGoal,
@@ -67,6 +66,11 @@ const EvidenceItems = Type.Array(
   { minItems: 1, maxItems: 8 },
 );
 const Evidence = Type.Optional(EvidenceItems);
+const ExternalChangeRevision = Type.Optional(Type.String({
+  minLength: 1,
+  maxLength: 2000,
+  description: "Exact pending external revision, only when the fresh worker result just observed proves it performed the authoritative reread. Omit it to keep the obligation pending.",
+}));
 const client = new HerdrClient();
 const supervisorTools = [
   "supervisor_start_goal",
@@ -309,6 +313,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return nativeFinal || terminalResult;
   }
 
+  function externalResolution(binding, suppliedRevision) {
+    const revision = suppliedRevision?.trim();
+    if (!revision) return {};
+    if (!binding.externalChange) {
+      return { error: "No external reread is pending; omit external_change_revision." };
+    }
+    if (revision !== binding.externalChange.revision) {
+      return { error: "external_change_revision does not match the current pending revision." };
+    }
+    if (runtimeFor(binding).externalRereadCandidateRevision !== revision) {
+      return { error: "Observe a fresh post-instruction worker result before accepting the external reread." };
+    }
+    return { revision };
+  }
+
   async function capturePostDeliveryBoundary(binding) {
     if (!binding.externalChange) return undefined;
     const observation = await observeWorker(binding, client);
@@ -348,13 +367,21 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     };
   }
 
-  function workerInstruction(binding, message) {
+  function workerInstruction(binding, message, resolvedExternalChangeRevision?) {
     const change = binding.externalChange;
-    if (!change) return message.trim();
+    if (!change || resolvedExternalChangeRevision === change.revision) return message.trim();
     return `The watched ${change.source} ${change.subject} changed. Reread its current authoritative state before deciding what it means, then continue the same goal.\n\n${message.trim()}`;
   }
 
-  async function saveSteerCheckpoint(binding, instruction, progress, evidence, reviewAt, boundary?) {
+  async function saveSteerCheckpoint(
+    binding,
+    instruction,
+    progress,
+    evidence,
+    reviewAt,
+    boundary?,
+    resolvedExternalChangeRevision?,
+  ) {
     const effectiveReviewAt = reviewAt
       || (binding.externalChange ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
     const result = await recordDecision(binding, "steer", {
@@ -364,6 +391,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       observationCursor: boundary?.observationCursor || runtimeFor(binding).pendingCursor,
       reviewAt: effectiveReviewAt,
       externalChangeRevision: binding.externalChange?.revision,
+      resolvedExternalChangeRevision,
       workerSequence: boundary?.workerSequence ?? runtimeFor(binding).lastReviewStateChangeSeq,
     });
     cacheCheckpoint(binding, result.state);
@@ -1349,18 +1377,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           terminalLines: params.lines || 40,
           fallbackWhenEmpty: agent.agent_status === "blocked" || agent.agent_status === "unknown",
         });
-        let currentBinding: GoalBinding = binding;
-        let checkpointWarning = "";
+        const currentBinding: GoalBinding = binding;
         if (externalRereadObserved(binding, observation, agent)) {
-          try {
-            const state = await clearExternalChange(binding, observation.cursor);
-            cacheCheckpoint(binding, state);
-          } catch (error) {
-            // A newer external change superseded the discharged one. The fresh
-            // obligation stands, but the worker evidence is still valid.
-            checkpointWarning = `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
-          }
-          currentBinding = goalCache?.active.get(binding.goalId) || binding;
+          runtimeFor(binding).externalRereadCandidateRevision = binding.externalChange?.revision;
         }
         const runtime = runtimeFor(currentBinding);
         runtime.pendingCursor = observation.cursor;
@@ -1373,8 +1392,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const externalTrigger = currentBinding.externalChange
           ? `Pending external change: ${currentBinding.externalChange.source} ${currentBinding.externalChange.subject} at revision ${currentBinding.externalChange.revision}\n`
           : "";
+        const rereadCandidate = currentBinding.externalChange
+          && runtime.externalRereadCandidateRevision === currentBinding.externalChange.revision
+          ? `Fresh post-instruction worker result available. Decide whether it proves the authoritative reread; only then pass external_change_revision ${currentBinding.externalChange.revision} in the decision.\n`
+          : "";
         const progress = currentBinding.progress ? `\nCurrent progress: ${currentBinding.progress}` : "";
-        return text(`${trigger}${externalTrigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}${checkpointWarning}\n\n${formatObservation(observation)}`);
+        return text(`${trigger}${externalTrigger}${rereadCandidate}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}\n\n${formatObservation(observation)}`);
       } catch (error) { return text(`Could not observe worker: ${error.message}`, true); }
       finally { reviewTurn.finishObservation(observed); }
     },
@@ -1401,6 +1424,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           revision: Type.Optional(Type.String({ minLength: 1, maxLength: 2000, description: "Last revision already observed, when known. Omit it to establish a quiet baseline." })),
         }),
       ], { description: "Optional deterministic observation for the exact external condition. It does not prove completion." })),
+      external_change_revision: ExternalChangeRevision,
       evidence: Evidence,
       review_at: Type.Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 retry time no more than 24 hours ahead. Omit it to use the normal bounded review interval." })),
     }),
@@ -1436,7 +1460,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           releaseExternalPolling = held.release;
           snapshot = await client.snapshot();
         }
-      if (binding.externalChange) {
+      const resolution = externalResolution(binding, params.external_change_revision);
+      if (resolution.error) return text(resolution.error, true);
+      if (binding.externalChange && !resolution.revision) {
         return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before deciding whether to wait again.", true);
       }
       const agent = findAgent(snapshot, params.pane_id);
@@ -1500,10 +1526,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           reviewAt: waitingFor ? undefined : params.review_at?.trim(),
           evidence: params.evidence || binding.evidence,
           observationCursor: runtimeFor(binding).pendingCursor,
+          resolvedExternalChangeRevision: resolution.revision,
         });
         cacheCheckpoint(binding, result.state);
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = undefined;
+        runtime.externalRereadCandidateRevision = undefined;
         if (externalWatch) {
           const previous = runtime.externalWatch;
           runtime.externalWatch = {
@@ -1544,6 +1572,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       message: Type.String({ minLength: 1 }),
       evidence: Evidence,
+      external_change_revision: ExternalChangeRevision,
       review_at: Type.Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 time, no more than 24 hours ahead, when this instruction must be reconsidered even if the worker still appears busy. Omit it for routine event-driven supervision." })),
     }),
     executionMode: "sequential",
@@ -1587,10 +1616,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         if (liveMismatch && !canResumeNow) {
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
+        const resolution = externalResolution(binding, params.external_change_revision);
+        if (resolution.error) return text(resolution.error, true);
         let continuedBinding = binding;
         let resumed = false;
         let deliveryBoundary;
-        const instruction = workerInstruction(binding, params.message);
+        const instruction = workerInstruction(binding, params.message, resolution.revision);
         if (canResumeNow) {
           const request = recoveryRequest(binding, liveSnapshot);
           // An interrupted native Codex Goal is paused by design. Resume that
@@ -1699,7 +1730,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             params.evidence || continuedBinding.evidence,
             reviewAt,
             deliveryBoundary,
+            resolution.revision,
           );
+          runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
             ? `Resumed the exact ${binding.agentSession.agent} session and native Goal in ${params.pane_id}, then asked it to continue.`
@@ -1723,6 +1756,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       question: Type.String({ minLength: 1 }),
       evidence: Evidence,
+      external_change_revision: ExternalChangeRevision,
       review_at: Type.Optional(Type.String({ minLength: 1, description: "Bounded time to reconsider whether the human answer is still required or useful work can proceed without it." })),
     }),
     executionMode: "sequential",
@@ -1744,7 +1778,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const held = await holdExternalPolling(binding);
         binding = held.binding;
         try {
-          if (binding.externalChange) {
+          const resolution = externalResolution(binding, params.external_change_revision);
+          if (resolution.error) return text(resolution.error, true);
+          if (binding.externalChange && !resolution.revision) {
             return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before asking for a decision.", true);
           }
           const result = await recordDecision(binding, "ask_human", {
@@ -1752,6 +1788,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             action: params.question.trim(),
             evidence: params.evidence || binding.evidence,
             observationCursor: runtimeFor(binding).pendingCursor,
+            resolvedExternalChangeRevision: resolution.revision,
             wait: {
               condition: `the human's answer to: ${params.question.trim()}`,
               reviewAt,
@@ -1759,6 +1796,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           });
           cacheCheckpoint(binding, result.state);
           runtimeFor(binding).pendingCursor = undefined;
+          runtimeFor(binding).externalRereadCandidateRevision = undefined;
           clearExternalWatch(binding);
           if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
         } finally {
@@ -1784,6 +1822,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pane_id: Pane,
       summary: Type.String({ minLength: 1 }),
       evidence: EvidenceItems,
+      external_change_revision: ExternalChangeRevision,
     }),
     executionMode: "sequential",
     async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -1791,7 +1830,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (fenceError) return text(fenceError, true);
       let binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-      if (binding.externalChange) {
+      let resolution = externalResolution(binding, params.external_change_revision);
+      if (resolution.error) return text(resolution.error, true);
+      if (binding.externalChange && !resolution.revision) {
         return text("The watched external resource changed and authoritative reread evidence is still pending. Continue the same worker before accepting the goal.", true);
       }
       if (mode() !== "live") {
@@ -1802,7 +1843,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const held = await holdExternalPolling(binding);
       binding = held.binding;
       try {
-        if (binding.externalChange) {
+        resolution = externalResolution(binding, params.external_change_revision);
+        if (resolution.error) return text(resolution.error, true);
+        if (binding.externalChange && !resolution.revision) {
           return text("The watched external resource changed before acceptance. Continue the same worker to reread it first.", true);
         }
         try {
@@ -1811,6 +1854,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             action: "Accepted the verified goal.",
             evidence: params.evidence,
             observationCursor: runtimeFor(binding).pendingCursor,
+            resolvedExternalChangeRevision: resolution.revision,
             terminal: { state: "accepted", summary: params.summary.trim() },
           });
         } catch (error) {
@@ -1819,6 +1863,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
         }
         runtimeFor(binding).pendingCursor = undefined;
+        runtimeFor(binding).externalRereadCandidateRevision = undefined;
         cacheCheckpoint(binding, result.state);
       } finally {
         held.release();

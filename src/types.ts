@@ -86,6 +86,7 @@ export type GoalRuntime = {
   missingDecisionRetries: number;
   pendingCursor?: ObservationCursor;
   pendingObservationHasMessages?: boolean;
+  externalRereadCandidateRevision?: string;
   externalWatch?: ExternalWatch;
 };
 

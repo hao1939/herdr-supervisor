@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
-  clearExternalChange,
   loadSupervisorGoals,
   recordDecision,
   recordExternalChange,
@@ -233,7 +232,7 @@ test("stale decisions cannot bypass a newly recorded external change", async () 
   assert.equal(current.lastDecision, undefined);
 });
 
-test("stale reread evidence cannot clear a newer external change", async () => {
+test("stale reread acceptance cannot clear a newer external change", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
     objective: "Verify the latest external result.",
@@ -253,8 +252,14 @@ test("stale reread evidence cannot clear a newer external change", async () => {
   }, directory);
 
   await assert.rejects(
-    clearExternalChange(firstChange, { kind: "codex-jsonl", offset: 20 }, directory),
-    /changed again before its reread was recorded/,
+    recordDecision(firstChange, "accept", {
+      progress: "The first changed revision was reread.",
+      action: "Accept the first changed revision.",
+      observationCursor: { kind: "codex-jsonl", offset: 20 },
+      resolvedExternalChangeRevision: "revision-1",
+      terminal: { state: "accepted", summary: "The first revision passed." },
+    }, directory),
+    /changed again before its reread was accepted/,
   );
   assert.equal((await loadSupervisorGoals(directory)).active[0].externalChange.revision, "revision-2");
 });

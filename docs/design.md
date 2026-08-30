@@ -103,16 +103,17 @@ Herdr.
 
 Polling schedules remain disposable memory. If a watched PR or build changes,
 only that unresolved fact is saved in `current.json`. It survives restart and
-cannot be cleared by merely sending a prompt. After the reread delivery attempt,
-the supervisor saves the current transcript cursor or terminal fingerprint.
-This conservative boundary may ignore output produced during delivery, but it
-cannot mistake earlier output for the reread. The change clears only after a
-later native final response advances that cursor. A worker without a native
-transcript instead requires a later settled Herdr transition and a changed
-terminal fingerprint. That fingerprint covers a fixed terminal suffix, so
-changing the number of displayed lines does not manufacture progress. If the
+cannot be cleared by merely sending a prompt or receiving a worker reply. After
+the reread delivery attempt, the supervisor saves the current transcript cursor
+or terminal fingerprint. A later native final response, or a later settled
+Herdr transition with a changed fixed terminal fingerprint, establishes only a
+fresh result candidate. The model decides whether that result actually proves
+the authoritative reread and acknowledges the exact pending revision in its
+ordinary `leave`, `steer`, `ask_human`, or `accept` decision. Code then clears
+the matching revision atomically with that decision. This keeps semantic
+judgment in the model while code rejects stale revisions and old output. If the
 post-delivery observation itself fails, the supervisor saves a fail-closed
-boundary that cannot clear automatically; a later bounded review may steer the
+boundary that cannot produce a candidate; a later bounded review may steer the
 same worker again and replace it with a real boundary.
 
 A decision that can change a watch briefly holds its exact external subject:
