@@ -1951,6 +1951,55 @@ test("an unrelated signal does not duplicate the same pending external reread re
   pi.events.get("session_shutdown")();
 });
 
+test("a newer external change cannot fail the observation that discharged the old one", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const oldOutput = "The old PR 16 terminal result.";
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "first-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "first-revision",
+    workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "I reread PR 16; its current checks pass.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "second-revision",
+    observedAt: "2026-08-30T05:03:00.000Z",
+  }, root, () => "2026-08-30T05:03:00.000Z");
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-after-second-change", { pane_id: worker.paneId });
+  assert.equal(observation.isError, false, "a superseding external change must not lose the worker evidence");
+  assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  assert.match(observation.content[0].text, /Checkpoint warning/);
+  assert.equal(
+    (await loadSupervisorGoals(root)).active[0].externalChange?.revision,
+    "second-revision",
+    "the newer unresolved change survives the stale clear",
+  );
+  pi.events.get("session_shutdown")();
+});
+
 test("a settled terminal fallback needs output produced after its reread instruction", async (t) => {
   const root = await fixture();
   const oldOutput = "The old PR 16 terminal result.";

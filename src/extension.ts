@@ -1320,9 +1320,16 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           fallbackWhenEmpty: agent.agent_status === "blocked" || agent.agent_status === "unknown",
         });
         let currentBinding: GoalBinding = binding;
+        let checkpointWarning = "";
         if (externalRereadObserved(binding, observation, agent)) {
-          const state = await clearExternalChange(binding, observation.cursor);
-          cacheCheckpoint(binding, state);
+          try {
+            const state = await clearExternalChange(binding, observation.cursor);
+            cacheCheckpoint(binding, state);
+          } catch (error) {
+            // A newer external change superseded the discharged one. The fresh
+            // obligation stands, but the worker evidence is still valid.
+            checkpointWarning = `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
+          }
           currentBinding = goalCache?.active.get(binding.goalId) || binding;
         }
         const runtime = runtimeFor(currentBinding);
@@ -1334,7 +1341,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         observed = true;
         const trigger = reviewTurn.reason ? `Review trigger: ${reviewTurn.reason}\n` : "";
         const progress = currentBinding.progress ? `\nCurrent progress: ${currentBinding.progress}` : "";
-        return text(`${trigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}\n\n${formatObservation(observation)}`);
+        return text(`${trigger}Goal: ${currentBinding.goal}${progress}\nHerdr state: ${agent.agent_status}${checkpointWarning}\n\n${formatObservation(observation)}`);
       } catch (error) { return text(`Could not observe worker: ${error.message}`, true); }
       finally { reviewTurn.finishObservation(observed); }
     },
