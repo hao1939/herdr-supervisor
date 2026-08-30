@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { goalPaths } from "./goal-store.ts";
 import type { GoalBinding } from "./types.ts";
 
-type GoalTrace = Pick<GoalBinding, "goalId" | "paneId" | "agentSession">;
+type GoalTrace = Pick<GoalBinding, "goalId" | "goal" | "paneId" | "agentSession">;
 
 const workerExecutionBoundary = [
   "You own only execution spaces that you explicitly create or claim for this goal.",
