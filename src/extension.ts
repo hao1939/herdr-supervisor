@@ -1695,7 +1695,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             scheduleReview(binding);
             return text(`Could not confirm that the native Goal resumed in ${params.pane_id}: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
-          const resumedSnapshot = await client.snapshot();
+          reviewTurn.close(params.pane_id);
+          let resumedSnapshot;
+          try {
+            resumedSnapshot = await client.snapshot();
+          } catch (error) {
+            scheduleReview(binding);
+            return text(`The native Goal resumed in ${params.pane_id}, but its updated worker state could not be observed: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+          }
           const resumedAgent = findAgent(resumedSnapshot, params.pane_id);
           const resumedMismatch = identityMismatch(
             binding,

@@ -24,7 +24,7 @@ export class HerdrClient {
     this.nextId = 0;
   }
 
-  request(method, params = {}): Promise<any> {
+  request(method, params = {}, timeoutMs = this.timeoutMs): Promise<any> {
     const id = `herdr-supervisor:${process.pid}:${++this.nextId}`;
     return new Promise((resolve, reject) => {
       let buffer = "";
@@ -37,7 +37,7 @@ export class HerdrClient {
         socket.destroy();
         error ? reject(error) : resolve(value);
       };
-      const timer = setTimeout(() => finish(new Error(`Herdr ${method} timed out`)), this.timeoutMs);
+      const timer = setTimeout(() => finish(new Error(`Herdr ${method} timed out`)), timeoutMs);
       timer.unref?.();
       socket.on("error", (error) => finish(error));
       socket.on("close", () => finish(new Error(`Herdr ${method} connection closed`)));
@@ -76,11 +76,14 @@ export class HerdrClient {
   }
 
   async promptAgent(paneId, text, wait?) {
+    const timeoutMs = wait?.timeout_ms
+      ? Math.max(this.timeoutMs, wait.timeout_ms + 1000)
+      : this.timeoutMs;
     return this.request("agent.prompt", {
       target: paneId,
       text,
       ...(wait ? { wait } : {}),
-    });
+    }, timeoutMs);
   }
 
   async splitPane({ paneId, direction = "right", cwd, focus = false }) {

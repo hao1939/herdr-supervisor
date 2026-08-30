@@ -77,6 +77,23 @@ test("promptAgent can atomically wait for the submitted prompt to start work", a
   }
 });
 
+test("promptAgent waits beyond the default transport timeout for an atomic wait", async () => {
+  const fake = await fakeHerdr((request, socket) => {
+    setTimeout(() => {
+      socket.write(`${JSON.stringify({ id: request.id, result: { type: "agent_wait_matched" } })}\n`);
+    }, 35);
+  });
+  try {
+    const client = new HerdrClient({ socketPath: fake.socketPath, timeoutMs: 20 });
+    await client.promptAgent("w1:p2", "/goal resume", {
+      until: ["working"],
+      timeout_ms: 30,
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
 test("splitPane creates an unfocused sibling from an exact supervisor pane", async () => {
   let observed;
   const fake = await fakeHerdr((request, socket) => {

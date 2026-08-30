@@ -1202,6 +1202,49 @@ test("an idle worker cannot be left working and may be steered in the same revie
   pi.events.get("session_shutdown")();
 });
 
+test("an accepted native Goal resume fails closed when its snapshot is unavailable", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (resumed) throw new Error("updated worker snapshot unavailable");
+    return snapshot({ agent_status: "idle", state_change_seq: 0 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the restored goal from current evidence.",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /native Goal resumed.*could not be observed/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the restored goal from current evidence.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  pi.events.get("session_shutdown")();
+});
+
 test("leaving a worker revalidates its current state after polling drains", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
