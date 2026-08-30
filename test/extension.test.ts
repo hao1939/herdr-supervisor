@@ -3230,6 +3230,34 @@ test("a global review exposes unstarted goals without pretending they have worke
   pi.events.get("session_shutdown")();
 });
 
+test("a global review reloads goal contracts copied in after session start", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-extension-"));
+  const reviewState = await loadGlobalReviewState(root);
+  reviewState.nextReviewAt = new Date(Date.now() + 100).toISOString();
+  await saveGlobalReviewState(reviewState, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await installSupervisorGoal({
+    objective: "Resume the copied release migration.",
+    acceptance: ["The migration is verified."],
+  }, root, { goalId: "g_copied" });
+
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /"goalId": "g_copied"/);
+  assert.match(pi.messages[0].content, /"workerState": "unstarted"/);
+  pi.events.get("session_shutdown")();
+});
+
 test("focused worker review runs before a due global review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

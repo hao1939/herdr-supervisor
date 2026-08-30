@@ -756,7 +756,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function handleGlobalReview(reason: string) {
-    const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
+    const [, snapshot] = await Promise.all([reloadGoals(), client.snapshot()]);
+    const goals = await activeBindings();
     const compactSnapshot = buildGlobalSnapshot(goals.active, goals.unstarted, snapshot, {
       observerConnected: Boolean(stopSubscription),
       pendingFocusedReviews: pendingSignals.size,
@@ -1310,7 +1311,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       ]);
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals do not exist: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+        return text(`Cannot route the global result because these goals are not currently unfinished: ${unknown.join(", ")}. No focused reviews were queued.`, true);
       }
       const unstartedReconsider = [...new Set(params.reconsider
         .map((item) => item.goal_id)
