@@ -260,6 +260,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
+  assert.match(deliveredPrompts[0].prompt, /run the required tests/);
+  assert.match(deliveredPrompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(deliveredPrompts[0].prompt, /## Supervision/);
   assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[0].bindingExists, true);
