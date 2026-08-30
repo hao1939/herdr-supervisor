@@ -116,9 +116,13 @@ function workerNameForGoal(goalId: string) {
 }
 
 function exactSessionAgent(snapshot, session) {
-  return snapshot.agents?.find((agent) => (
+  const matches = snapshot.agents?.filter((agent) => (
     sameAgentSession(agent.agent_session, session)
-  ));
+  )) || [];
+  if (matches.length > 1) {
+    throw new Error(`multiple Herdr agents expose the same ${session.agent} session`);
+  }
+  return matches[0];
 }
 
 export default function herdrSupervisor(pi: ExtensionAPI) {

@@ -3742,6 +3742,47 @@ test("missing-pane recovery adopts the exact session already restored elsewhere"
   pi.events.get("session_shutdown")();
 });
 
+test("missing-pane recovery rejects duplicate processes for one native session", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const duplicateAgents = ["w1:p9", "w1:p10"].map((paneId, index) => ({
+    pane_id: paneId,
+    terminal_id: `term_duplicate_${index}`,
+    agent_status: "working",
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+  }));
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: duplicateAgents,
+    panes: duplicateAgents.map((agent) => ({
+      pane_id: agent.pane_id,
+      terminal_id: agent.terminal_id,
+    })),
+  }));
+  let creates = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /multiple Herdr agents expose the same codex session/);
+  assert.equal(creates, 0);
+  assert.equal(prompts, 0);
+  pi.events.get("session_shutdown")();
+});
+
 test("missing-pane recovery refuses a pane assigned to another active goal", async (t) => {
   const root = await fixture();
   const otherWorker = {
