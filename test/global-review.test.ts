@@ -60,7 +60,13 @@ test("global checkpoint is small supervisor-local state and survives restart", a
 });
 
 test("finding hashes ignore finding and goal ordering", () => {
-  const first = [{ problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_two", "g_one"] }];
-  const second = [{ problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_one", "g_two"] }];
+  const first = [
+    { problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_two", "g_one"] },
+    { problem: "One worker is lost", evidence: ["pane missing", "session saved"], affectedGoalIds: ["g_three"] },
+  ];
+  const second = [
+    { problem: "One worker is lost", evidence: ["session saved", "pane missing"], affectedGoalIds: ["g_three"] },
+    { problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_one", "g_two"] },
+  ];
   assert.equal(globalFindingHash(first), globalFindingHash(second));
 });

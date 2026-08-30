@@ -228,9 +228,10 @@ decision at a time.
   saved contracts that have no local worker. It reports cross-goal or unstarted
   work and may schedule ordinary focused reviews only for goals that have a
   worker; it never acts on workers itself.
-- Its small local checkpoint supplies the last bounded human-visible finding to
-  the next review, so the model can distinguish a material change from the same
-  issue described in different words.
+- Its small local checkpoint supplies the last bounded active finding to the
+  next review. The model returns the complete set still supported by current
+  evidence; code suppresses an identical set and clears resolved findings so a
+  later recurrence is visible again.
 
 This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.

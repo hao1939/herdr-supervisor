@@ -659,11 +659,11 @@ focused work. It uses the same Pi session and must end with one structured
 `supervisor_global_result`. Its checkpoint stores the last and next review
 times, snapshot and finding hashes, and the last bounded human-visible finding
 under `goals/.supervisor/`; it is not a Task or portable goal state. The next
-review receives that finding so the model can omit a semantically unchanged
-rewording rather than forcing code to guess. Restart runs an overdue review
-immediately. Identical findings are displayed at most once. A failed or
-incomplete global turn receives one bounded retry and never partially routes
-unknown goal IDs.
+review receives that finding and returns the complete set of findings still
+proven by current evidence. Code suppresses an identical set, while an empty
+set clears the remembered finding so a later recurrence is visible. Restart
+runs an overdue review immediately. A failed or incomplete global turn receives
+one bounded retry and never partially routes unknown goal IDs.
 
 A goal waiting for the human keeps a bounded deadline. When it expires, the
 supervisor checks whether the answer is still necessary, whether the blocker can

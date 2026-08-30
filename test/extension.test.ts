@@ -1051,6 +1051,97 @@ test("restart reuses a legacy-named worker for an installed goal instead of crea
   secondPi.events.get("session_shutdown")();
 });
 
+test("restart never adopts a legacy-named session already owned by another goal", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-owned-legacy-"));
+  const ownedSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session_owned" };
+  await registerSupervisedGoal({
+    paneId: "w1:p2",
+    terminalId: "term_owned_old",
+    agentSession: ownedSession,
+  }, {
+    objective: "Keep the existing release goal moving.",
+    acceptance: ["The release goal is verified."],
+  }, root, { goalId: "g_owner" });
+  await installSupervisorGoal({
+    objective: "Start the independent diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+  }, root, { goalId: "g_unstarted" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const ownedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_owned_new",
+    name: "goal-unstarted",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_session: ownedSession,
+  };
+  const newAgent = {
+    pane_id: "w1:p3",
+    terminal_id: "term_new",
+    name: goalWorkerName("g_unstarted"),
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t3",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_new" },
+  };
+  let created = false;
+  let starts = 0;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: created ? [ownedAgent, newAgent] : [ownedAgent],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: ownedAgent.pane_id, terminal_id: ownedAgent.terminal_id, workspace_id: "w1", tab_id: ownedAgent.tab_id },
+      ...(created ? [{ pane_id: newAgent.pane_id, terminal_id: newAgent.terminal_id, workspace_id: "w1", tab_id: newAgent.tab_id }] : []),
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    created = true;
+    return { root_pane: { pane_id: newAgent.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    starts += 1;
+    assert.equal(request.paneId, newAgent.pane_id);
+    return newAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async (paneId) => {
+    assert.equal(paneId, newAgent.pane_id);
+    return newAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => { prompts.push({ paneId, prompt }); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
+    goal: "Start the independent diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+    placement: { mode: "new", label: "diagnostic" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, false);
+  assert.equal(starts, 1);
+  assert.equal(prompts.some(({ paneId }) => paneId === ownedAgent.pane_id), false);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value).sort(), ["session_new", "session_owned"]);
+  assert.equal(goals.unstarted.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
 test("restart adopts a new terminal without forcing a healthy worker review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -4224,28 +4315,49 @@ test("a completed global review arms its next in-process deadline", async (t) =>
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
+  const finding = {
+    problem: "One already reported issue",
+    evidence: ["The current snapshot proves it"],
+    affected_goal_ids: ["g_test"],
+  };
   await pi.tools.get("supervisor_global_result").execute("first", {
     summary: "Healthy.",
-    findings: [{
-      problem: "One already reported issue",
-      evidence: ["The current snapshot proves it"],
-      affected_goal_ids: ["g_test"],
-    }],
+    findings: [finding],
     reconsider: [],
   });
   await pi.events.get("agent_settled")();
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 2);
   const reviews = pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review");
-  assert.match(reviews[1].content, /Previously shown finding/);
+  assert.match(reviews[1].content, /Previously active finding/);
   assert.match(reviews[1].content, /One already reported issue/);
-  assert.match(reviews[1].content, /Do not report it again unless the current snapshot proves a material change/);
+  assert.match(reviews[1].content, /Return it again if the current snapshot still proves it/);
   await pi.tools.get("supervisor_global_result").execute("unchanged", {
     summary: "No material change.",
-    findings: [],
+    findings: [finding],
     reconsider: [],
   });
   assert.match((await loadGlobalReviewState(root)).lastFinding, /One already reported issue/);
   assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 1);
+
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 3);
+  await pi.tools.get("supervisor_global_result").execute("resolved", {
+    summary: "The issue is resolved.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal((await loadGlobalReviewState(root)).lastFinding, undefined);
+
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 4);
+  await pi.tools.get("supervisor_global_result").execute("recurred", {
+    summary: "The issue recurred.",
+    findings: [finding],
+    reconsider: [],
+  });
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 2);
   pi.events.get("session_shutdown")();
 });

@@ -1123,7 +1123,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const pendingAgents = snapshot.agents?.filter((agent) => (
         recognizedNames.has(agent.name)
         && agent.workspace_id === supervisor.workspace_id
-        && !goals.active.some((binding) => binding.paneId === agent.pane_id)
+        && !goals.active.some((binding) => (
+          binding.paneId === agent.pane_id
+          || sameAgentSession(binding.agentSession, agent.agent_session)
+        ))
       )) || [];
       if (pendingAgents.length > 1) {
         throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
@@ -1414,7 +1417,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_global_result",
     label: "Finish global supervision review",
-    description: "Finish the current compact all-goal review. Findings report relationships or system problems and name the goals they concern; they do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
+    description: "Finish the current compact all-goal review. Findings are the complete set of problems still proven now, including unchanged active findings; an empty set means earlier findings resolved. They name the goals they concern but do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
     parameters: Type.Object({
       summary: Type.String({ minLength: 1, maxLength: 4000 }),
       findings: Type.Array(Type.Object({
@@ -1471,8 +1474,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         lastReviewedAt: now.toISOString(),
         nextReviewAt,
         snapshotHash: globalState.snapshotHash,
-        lastFindingHash: findings.length ? findingHash : globalState.lastFindingHash,
-        lastFinding: findingSummary || globalState.lastFinding,
+        lastFindingHash: findings.length ? findingHash : undefined,
+        lastFinding: findingSummary,
       };
       try {
         await saveGlobalReviewState(nextState);
