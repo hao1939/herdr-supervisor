@@ -13,7 +13,7 @@ import {
   reviewDeadline,
   shouldWake,
 } from "../src/supervision.ts";
-import { reviewMessage } from "../src/prompts.ts";
+import { reviewMessage, supervisorSystemPrompt } from "../src/prompts.ts";
 
 test("review deadlines share one bounded validation rule", () => {
   const now = Date.parse("2026-08-28T00:00:00.000Z");
@@ -375,6 +375,12 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /standing improvement loop/);
   assert.match(message, /Do not invent a finite convergence boundary for standing work/);
   assert.match(message, /Compare all timestamps with the UTC review time above/);
+});
+
+test("every supervisor turn receives the null protocol for optional tool fields", () => {
+  const prompt = supervisorSystemPrompt("Base prompt.");
+  assert.match(prompt, /For every optional tool argument that does not apply, use JSON null/);
+  assert.match(prompt, /never invent a placeholder value, identity, revision, watch, wait, or deadline/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {

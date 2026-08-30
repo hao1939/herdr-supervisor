@@ -3,6 +3,7 @@ import { appendFile, mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, recordExternalChange, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
@@ -73,6 +74,32 @@ async function fixture() {
   }, root, { goalId: "g_test" });
   return root;
 }
+
+test("optional supervisor tool fields accept null without placeholder values", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+
+  assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
+  assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
+
+  assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+    evidence: null,
+    external_change_revision: null,
+    review_at: null,
+  }), true);
+  assert.equal(Compile(pi.tools.get("supervisor_leave").parameters).Check({
+    pane_id: worker.paneId,
+    progress: "The worker is making useful progress.",
+    waiting_for: null,
+    waiting_on_pane: null,
+    external_watch: null,
+    evidence: null,
+    external_change_revision: null,
+    review_at: null,
+  }), true);
+});
 
 test("pull request traceability never publishes a path-backed session locator", () => {
   const trace = pullRequestTraceability({
@@ -2470,6 +2497,15 @@ test("a working worker cannot be mislabeled as waiting for its own next checkpoi
   });
   assert.equal(invalidWait.isError, true);
   assert.match(invalidWait.content[0].text, /working worker is active, not waiting/);
+  assert.match(invalidWait.content[0].text, /Use null for waiting_for/);
+
+  const invalidRevision = await pi.tools.get("supervisor_leave").execute("leave-revision", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively producing the next checkpoint.",
+    external_change_revision: "not-applicable",
+  });
+  assert.equal(invalidRevision.isError, true);
+  assert.match(invalidRevision.content[0].text, /use null for external_change_revision/);
 
   const active = await pi.tools.get("supervisor_leave").execute("leave-working", {
     pane_id: worker.paneId,

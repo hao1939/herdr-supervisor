@@ -116,6 +116,11 @@ post-delivery observation itself fails, the supervisor saves a fail-closed
 boundary that cannot produce a candidate; a later bounded review may steer the
 same worker again and replace it with a real boundary.
 
+Tool arguments keep the same boundary explicit. An optional value that does not
+apply is `null`; the model never invents a placeholder identity, revision,
+watch, wait, or deadline merely to fill a field. Code validates real values and
+executes the decision, while `null` carries no semantic claim.
+
 A decision that can change a watch briefly holds its exact external subject:
 it drains any in-flight read and prevents another one from starting until the
 state change commits. An unrelated slow provider does not delay it. The final
