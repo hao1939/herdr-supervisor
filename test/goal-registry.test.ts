@@ -380,6 +380,7 @@ test("the same native session may refresh its transient routing location", async
 
   assert.equal(refreshed.paneId, "w1:p9");
   assert.equal(refreshed.terminalId, "term_after_restart");
+  assert.equal(refreshed.updatedAt, "2026-08-28T10:01:00.000Z");
   const storedGoals = (await loadSupervisorGoals(directory)).active;
   const stored = storedGoals.find((goal) => goal.goalId === binding.goalId);
   const storedDependent = storedGoals.find((goal) => goal.goalId === dependent.goalId);

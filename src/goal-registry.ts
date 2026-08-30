@@ -206,11 +206,16 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
       goalState.worker.terminalId = worker.terminalId;
       return goalState;
     }, root, now, { allowWorkerRelocation: true });
-    return {
-      ...current,
-      paneId: state.worker.paneId,
-      terminalId: state.worker.terminalId,
-    };
+    return bindingFromRecord({
+      goalId: current.goalId,
+      contract: {
+        objective: current.goal,
+        context: current.context,
+        acceptance: current.acceptance,
+        constraints: current.constraints,
+      },
+      state,
+    });
   });
 }
 
