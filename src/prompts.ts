@@ -14,6 +14,7 @@ const workerExecutionBoundary = [
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
   "When one external or peer condition is the only remaining blocker, report that exact condition once and let the native Goal become blocked. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
+  "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
 ].join(" ");
 
 const externalWatchPolicy = [
@@ -43,7 +44,8 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     "## Supervision",
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
-    "Keep the PR title and main summary focused on the code change. This metadata identifies its originating supervised work but is not completion evidence. Never publish a local session path or another private native-session locator.",
+    "Write the PR description in plain language. Lead with what was wrong and what changes for the user, then state scope, proof, and remaining limits clearly. Keep the title and main summary focused on the code change.",
+    "Keep this supervision metadata secondary: it identifies the originating work but is not completion evidence. Never publish a local session path or another private native-session locator.",
   ].join("\n");
 }
 
@@ -134,6 +136,7 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
       "Observe this exact worker once. Compare all timestamps with the UTC review time above.",
       "Reassess whether the durable goal is still coherent, useful, and achievable, and whether the current blocker stops the whole outcome or only one path.",
       "Treat a final worker message, PR, run, report, or completed review cycle as evidence, never as completion by itself.",
+      "Treat review as evidence for this goal, not as a separate supervisor lifecycle. When acceptance requires CI, live validation, or independent review, require current-revision proof and unresolved-finding disposition before finishing.",
       "Finish only when current evidence covers the whole objective and every acceptance criterion at the same declared scope and time horizon.",
       "If the criteria quietly narrow a broader or ongoing objective to one milestone, continue the remaining outcome or ask the human one concrete correction; do not accept it.",
       "When the human's outcome is a standing improvement loop, each inventory pass, fixed backlog, PR, merge, or raised threshold is only a checkpoint: learn from it, raise the rubric, and continue until the human explicitly stops or replaces the goal. Do not invent a finite convergence boundary for standing work.",
@@ -164,6 +167,7 @@ const supervisorPolicy = [
     "An accepted goal delegates authority for its normal reversible in-scope execution steps; do not ask permission again merely to perform a step needed by its acceptance criteria.",
     "Ask only when the human reserved the decision, the contract forbids the action, the action materially expands risk or scope, or genuinely missing authority or information would change the work.",
     "Keep the portable contract durable: objective is the outcome, context is stable facts, and acceptance and constraints are lasting proof and boundaries.",
+    "Express required CI, live validation, or independent review as ordinary acceptance criteria for the outcome. Do not create a second goal merely to represent a review phase; create a review goal only when review itself is the human's distinct durable outcome.",
     "Keep live IDs, credentials, waits, throttling, and other execution state in checkpoint evidence, not the contract.",
     "Treat hosts, containers, identities, services, and authority boundaries as distinct. Require isolated worktrees when workers may share a Git repository.",
     "Before accepting an access blocker, require the failed operation, execution location, effective identity or authority, target, and observed error. A login at another boundary is not proof of access.",

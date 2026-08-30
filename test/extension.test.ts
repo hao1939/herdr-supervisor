@@ -130,6 +130,9 @@ test("pull request traceability never publishes a path-backed session locator", 
   assert.match(trace, /- Pane: "w1:p9"/);
   assert.doesNotMatch(trace, /Codex session:/);
   assert.doesNotMatch(trace, /\/private\/home/);
+  assert.match(trace, /Write the PR description in plain language/);
+  assert.match(trace, /what was wrong and what changes for the user/);
+  assert.match(trace, /supervision metadata secondary/);
 });
 
 test("terminal cursors do not change when an observation includes more older lines", () => {
@@ -793,6 +796,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
+  assert.match(result.systemPrompt, /Express required CI, live validation, or independent review as ordinary acceptance criteria/);
+  assert.match(result.systemPrompt, /Do not create a second goal merely to represent a review phase/);
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);

@@ -215,6 +215,22 @@ state, and bounded new evidence are sufficient after restart.
 Only the focused worker's evidence can prove its goal complete. Peer status can
 help coordination but cannot satisfy another worker's acceptance criteria.
 
+Review uses the same rule as every other proof. If a change requires CI, live
+validation, or an independent review, that requirement belongs in the goal's
+ordinary acceptance criteria and its result is evidence tied to the exact
+candidate revision. The worker owns making the change ready and resolving
+findings; an external watch may wake the supervisor when a PR or build changes.
+The supervisor then judges the refreshed evidence through its normal focused
+review. There is no second review lifecycle, reviewer state machine, attempt
+budget, or goal schema. A separate review goal exists only when review itself
+is the human's distinct durable outcome, such as an ongoing project-wide review
+program—not merely because one implementation reached a review step.
+
+Pull-request descriptions use plain language and put the meaningful change
+first: what was wrong, what changes for the user, the scope, current proof, and
+remaining limitations. Supervision identity remains a small secondary block;
+metadata never competes with the explanation or substitutes for evidence.
+
 ## Progress and waits
 
 A worker remains responsible for its native Goal. The supervisor does not
