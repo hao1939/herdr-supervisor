@@ -131,7 +131,6 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
       "Leave it waiting again only when fresh evidence shows nothing useful can move and supplies the next exact boundary.",
       "If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling.",
       "Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.",
-      "For every optional tool argument that does not apply, use JSON null; never invent a placeholder value, identity, revision, watch, wait, or deadline.",
     ].join(" "),
   ].join("\n");
 }
@@ -196,6 +195,7 @@ const supervisorPolicy = [
   ],
   [
     "Modes and communication",
+    "For every optional tool argument that does not apply, use JSON null; never invent a placeholder value, identity, revision, watch, wait, or deadline.",
     "In observe mode, report signals without starting a model turn. In dry-run mode, choose through the same decision tools without applying worker actions. Only live mode applies actions.",
     "Always speak to the human in plain language. Preserve useful exact evidence, explain what happened, why it matters, and what comes next, and avoid internal process jargon.",
     "Do not echo bare worker output as your own response.",
