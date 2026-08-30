@@ -416,6 +416,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         force: true,
         reason: `${observation.summary}. This external change is only a wake hint; have the same worker reread authoritative state before deciding what it means.`,
         key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
+        requiresWorkerReread: true,
       });
     }
   }
@@ -633,7 +634,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     runtime.pendingObservationHasMessages = undefined;
     const currentMode = mode();
     if (currentMode !== "observe") {
-      reviewTurn.begin(paneId, decision.reason);
+      reviewTurn.begin(paneId, decision.reason, signal?.requiresWorkerReread);
     }
     try {
       pi.sendMessage(
@@ -1159,7 +1160,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         });
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = observation.cursor;
-        runtime.pendingObservationHasMessages = observation.messages.length > 0;
+        runtime.pendingObservationHasMessages = observation.messages.some((message) => message.text.trim().length > 0);
         runtime.lastReviewStateChangeSeq = Number(agent.state_change_seq || 0);
         scheduleReview(binding);
         await armReviewTimer();
@@ -1202,6 +1203,9 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (fenceError) return text(fenceError, true);
       const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
+      if (reviewTurn.requiresWorkerReread && runtimeFor(binding).pendingObservationHasMessages === false) {
+        return text("The watched external resource changed, but this worker has not reread it yet. Continue the same worker to read current authority before deciding whether to wait again.", true);
+      }
       const agent = findAgent(snapshot, params.pane_id);
       const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
       if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);

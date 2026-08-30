@@ -87,4 +87,5 @@ export type ReviewSignal = {
   reason: string;
   key: string;
   deadline?: boolean;
+  requiresWorkerReread?: boolean;
 };

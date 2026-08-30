@@ -1325,11 +1325,12 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     agent_session: unrelatedWorker.agentSession,
     interactive_ready: true,
   };
+  let workerText = "The worker is waiting for PR checks.";
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [focused, unrelated],
     panes: [focused, unrelated].map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerText, truncated: false } }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -1361,8 +1362,17 @@ test("an external revision change wakes the exact goal while unchanged polls sta
   assert.match(pi.messages[1].content, /w1:p2/);
   assert.doesNotMatch(pi.messages[1].content, /w1:p9/);
 
+  workerText = "";
   const changedObservation = await pi.tools.get("supervisor_observe").execute("observe-change", { pane_id: worker.paneId });
   assert.match(changedObservation.content[0].text, /Review trigger: GitHub PR hao1939\/herdr-supervisor#16 is open; 1\/1 checks completed/);
+  const staleRenewal = await pi.tools.get("supervisor_leave").execute("renew-without-reread", {
+    pane_id: worker.paneId,
+    progress: "The old PR snapshot still looks healthy.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(staleRenewal.isError, true);
+  assert.match(staleRenewal.content[0].text, /worker has not reread it yet/);
   const fetchesBeforeSecondChange = fetches;
   conclusion = "failure";
   await new Promise((resolve) => setTimeout(resolve, 1100));
