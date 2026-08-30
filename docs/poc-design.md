@@ -299,6 +299,9 @@ identity is the native agent session; the Herdr pane is its routing slot and
 the terminal ID is a transient location checkpoint. When Herdr restores the
 same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
+If that pane disappeared, one `steer` decision may create a new routing pane,
+resume the exact saved native session there, and update the local location
+checkpoint. A pane is not the durable worker identity.
 Supervised Codex processes keep native Goals enabled. `goal.json` remains the
 single portable authority; the native Goal is the worker's persisted execution
 loop and points back to that file. Codex therefore owns ordinary
@@ -660,7 +663,7 @@ events do not repeat the question before that review.
 | Supervisor or Herdr reconnect | Resume the same Pi session when available, load unfinished goals directly, fetch one snapshot, and re-arm watches |
 | Worker occupant changed       | Stop and ask the human; never prompt the replacement automatically                                 |
 | Exact worker process stopped  | Resume only a supported native session in the same terminal, then send one continuation             |
-| Worker pane disappeared       | Fail closed; do not create a pane or replacement worker automatically                               |
+| Worker pane disappeared       | On `steer`, create a new routing pane and resume only the exact saved native session                  |
 | Malformed or missing decision | Apply no action or checkpoint, record a visible diagnostic, and schedule one bounded retry         |
 | Prompt/send failure           | Re-read current identity and state before one bounded retry                                        |
 | Herdr reports blocked         | Read new native evidence and determine whether existing context can unblock it before asking the human |
@@ -1015,7 +1018,8 @@ The PoC is successful when all of these are demonstrated:
     triggered by fresh Herdr state.
 13. Continuing a stopped supported process resumes its exact native session and
     paused Goal in the same terminal without an interactive prompt; a missing
-    pane or changed identity fails closed.
+    pane may be relocated only for the exact saved session; changed
+    native identity fails closed.
 14. Every automatic review ends in one explicit decision; prose alone cannot
     advance a checkpoint or hide an incomplete review.
 15. Restart recovery loads every unfinished goal directly and reconsiders it from current

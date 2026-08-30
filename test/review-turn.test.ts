@@ -70,3 +70,13 @@ test("a human-initiated steering decision also closes its turn", () => {
   turn.close("w1:p2");
   assert.match(turn.guard("w1:p2"), /already applied/);
 });
+
+test("a review follows the same worker to a recovered routing pane", () => {
+  const fence = new ReviewTurnFence();
+  fence.begin("w1:p2", "the worker pane disappeared");
+  fence.retarget("w1:p2", "w1:p9");
+
+  assert.equal(fence.paneId, "w1:p9");
+  assert.match(fence.guard("w1:p2"), /scoped to w1:p9/);
+  assert.equal(fence.guard("w1:p9"), undefined);
+});

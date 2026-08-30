@@ -784,6 +784,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
+  assert.match(result.systemPrompt, /steer it even if its pane disappeared/);
+  assert.match(result.systemPrompt, /create a new routing pane only to resume the exact saved native session/);
   pi.events.get("session_shutdown")();
 });
 
@@ -3388,6 +3390,159 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   });
   assert.equal(resumes, 1);
   assert.match(repeated.content[0].text, /already applied/);
+  pi.events.get("session_shutdown")();
+});
+
+test("continuing a missing-pane worker relocates the exact saved session", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const recoveryPane = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+  };
+  let created = false;
+  let resumed = false;
+  let createRequest;
+  let resumeRequest;
+  const recoveredAgent = () => ({
+    pane_id: recoveryPane.pane_id,
+    terminal_id: recoveryPane.terminal_id,
+    workspace_id: recoveryPane.workspace_id,
+    tab_id: recoveryPane.tab_id,
+    agent_status: "working",
+    state_change_seq: 1,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+    name: "goal-test",
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: resumed ? [recoveredAgent()] : [],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      ...(created ? [recoveryPane] : []),
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
+    createRequest = request;
+    created = true;
+    return { root_pane: recoveryPane };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    resumeRequest = request;
+    resumed = true;
+    return recoveredAgent();
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
+    prompts.push({ paneId, message });
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const observation = await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  assert.equal(observation.isError, true);
+  assert.match(observation.content[0].text, /worker pane is no longer present/);
+
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+
+  assert.deepEqual(createRequest, {
+    workspaceId: "w1",
+    cwd: "/app",
+    label: "goal-test",
+    focus: false,
+  });
+  assert.deepEqual(resumeRequest.args, [
+    "resume",
+    worker.agentSession.value,
+    "/goal resume",
+  ]);
+  assert.equal(resumeRequest.name, "goal-test");
+  assert.equal(resumeRequest.paneId, recoveryPane.pane_id);
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [recoveryPane.pane_id]);
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /Relocated and resumed the exact codex session and native Goal in w1:p9/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, recoveryPane.pane_id);
+  assert.equal(stored.terminalId, recoveryPane.terminal_id);
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
+  assert.equal(stored.lastDecision.decision, "steer");
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-pane recovery adopts the exact session already restored elsewhere", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const movedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_status: "working",
+    state_change_seq: 3,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+    name: "goal-test",
+  };
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [movedAgent],
+    panes: [{
+      pane_id: movedAgent.pane_id,
+      terminal_id: movedAgent.terminal_id,
+      workspace_id: movedAgent.workspace_id,
+      tab_id: movedAgent.tab_id,
+    }],
+  }));
+  let creates = 0;
+  let resumes = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { resumes += 1; });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
+    prompts.push({ paneId, message });
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+
+  assert.equal(creates, 0);
+  assert.equal(resumes, 0);
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [movedAgent.pane_id]);
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /Relocated the exact codex session to w1:p9, then steered it/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, movedAgent.pane_id);
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
   pi.events.get("session_shutdown")();
 });
 

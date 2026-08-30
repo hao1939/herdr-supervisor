@@ -425,12 +425,52 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function refreshObservedLocation(binding, agent) {
-    if (!agent || identityMismatch(binding, agent, agent) || agent.terminal_id === binding.terminalId) {
+    if (
+      !agent
+      || identityMismatch(binding, agent, agent)
+      || (agent.pane_id === binding.paneId && agent.terminal_id === binding.terminalId)
+    ) {
       return binding;
     }
     const refreshed = await refreshWorkerLocation(binding, captureIdentity(agent));
     cacheBinding(refreshed);
     return { ...refreshed, ...runtimeFor(refreshed) };
+  }
+
+  async function relocateMissingWorker(binding, snapshot) {
+    const session = binding.agentSession;
+    if (session.agent !== "codex" || session.kind !== "id") {
+      throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
+    }
+    const existingAgent = snapshot.agents?.find((agent) => (
+      agent.agent_session
+      && ["source", "agent", "kind", "value"].every(
+        (field) => agent.agent_session[field] === session[field],
+      )
+    ));
+    if (existingAgent) return refreshObservedLocation(binding, existingAgent);
+    const supervisorPaneId = process.env.HERDR_PANE_ID;
+    const supervisorPane = supervisorPaneId ? findPane(snapshot, supervisorPaneId) : undefined;
+    if (!supervisorPane?.workspace_id) {
+      throw new Error("the supervisor's Herdr workspace is not available for worker recovery");
+    }
+    const created = await client.createTab({
+      workspaceId: supervisorPane.workspace_id,
+      cwd: process.env.HERDR_SUPERVISOR_DIRECTORY || "/app",
+      label: workerNameForGoal(binding.goalId),
+      focus: false,
+    });
+    const paneId = created?.root_pane?.pane_id;
+    if (!paneId) throw new Error("Herdr created recovery space but did not return its pane identity");
+    const freshSnapshot = await client.snapshot();
+    const pane = findPane(freshSnapshot, paneId);
+    if (!pane?.terminal_id) throw new Error(`Herdr did not expose the new recovery pane ${paneId}`);
+    const relocated = await refreshWorkerLocation(binding, {
+      paneId,
+      terminalId: pane.terminal_id,
+      agentSession: session,
+    });
+    return relocated;
   }
 
   async function reconcileCacheAfterWriteFailure() {
@@ -1629,18 +1669,40 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           pane,
         );
         const canResume = !agent && pane?.terminal_id === binding.terminalId;
-        if (mismatch && !canResume) return text(`Refusing to continue: ${mismatch}.`, true);
+        const canRelocate = !agent
+          && !pane
+          && binding.agentSession.agent === "codex"
+          && binding.agentSession.kind === "id";
+        if (mismatch && !canResume && !canRelocate) return text(`Refusing to continue: ${mismatch}.`, true);
         if (mode() !== "live") {
           reviewTurn.close(params.pane_id);
-          const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
+          const action = canRelocate
+            ? `create a new routing pane and resume the exact ${binding.agentSession.agent} session for`
+            : canResume
+              ? `resume the exact ${binding.agentSession.agent} session in`
+              : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
         const held = await holdExternalPolling(binding);
         binding = held.binding;
         releaseExternalPolling = held.release;
-        const liveSnapshot = await client.snapshot();
-        const liveAgent = findAgent(liveSnapshot, params.pane_id);
-        const livePane = findPane(liveSnapshot, params.pane_id);
+        let liveSnapshot = await client.snapshot();
+        let liveAgent = findAgent(liveSnapshot, params.pane_id);
+        let livePane = findPane(liveSnapshot, params.pane_id);
+        let relocated = false;
+        if (!liveAgent && !livePane) {
+          binding = await relocateMissingWorker(binding, liveSnapshot);
+          reviewTurn.retarget(params.pane_id, binding.paneId);
+          try {
+            await connectObserver();
+          } catch (error) {
+            reportBackgroundFailure("Could not watch the relocated worker", error);
+          }
+          liveSnapshot = await client.snapshot();
+          liveAgent = findAgent(liveSnapshot, binding.paneId);
+          livePane = findPane(liveSnapshot, binding.paneId);
+          relocated = true;
+        }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
         const canResumeNativeGoal = Boolean(
@@ -1659,6 +1721,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         const instruction = workerInstruction(binding, params.message, resolution.revision);
         if (canResumeNow) {
           const request = recoveryRequest(binding, liveSnapshot);
+          if (relocated) request.name = workerNameForGoal(binding.goalId);
           // An interrupted native Codex Goal is paused by design. Resume that
           // lifecycle explicitly before queuing the supervisor's fresh
           // steering; otherwise Codex waits at an interactive "Resume goal?"
@@ -1674,7 +1737,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           } catch (error) {
             if (!resumeAccepted) throw error;
             scheduleReview(binding);
-            return text(`Herdr accepted the exact-session resume for ${params.pane_id}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`Herdr accepted the exact-session resume for ${binding.paneId}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
@@ -1775,8 +1838,14 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
-            ? `${canResumeNow ? `Resumed the exact ${binding.agentSession.agent} session and native Goal` : "Resumed the exact native Goal"} in ${params.pane_id}, then asked it to continue.`
-            : `Steered ${params.pane_id}: ${params.message.trim()}`;
+            ? `${relocated
+              ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
+              : canResumeNow
+                ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
+                : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
+            : relocated
+              ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
+              : `Steered ${params.pane_id}: ${params.message.trim()}`;
           return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();

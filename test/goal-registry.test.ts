@@ -264,18 +264,21 @@ test("stale reread acceptance cannot clear a newer external change", async () =>
   assert.equal((await loadSupervisorGoals(directory)).active[0].externalChange.revision, "revision-2");
 });
 
-test("the same native session may refresh its transient terminal after restart", async () => {
+test("the same native session may refresh its transient routing location", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
     objective: "Keep working after restart.",
   }, directory, { goalId: "g_restart", at: "2026-08-28T10:00:00.000Z" });
   const refreshed = await refreshWorkerLocation(binding, {
     ...worker,
+    paneId: "w1:p9",
     terminalId: "term_after_restart",
   }, directory, () => "2026-08-28T10:01:00.000Z");
 
+  assert.equal(refreshed.paneId, "w1:p9");
   assert.equal(refreshed.terminalId, "term_after_restart");
   const [stored] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(stored.paneId, "w1:p9");
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
 });

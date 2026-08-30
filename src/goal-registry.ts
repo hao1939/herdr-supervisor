@@ -159,18 +159,22 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
 }
 
 export async function refreshWorkerLocation(binding, worker, root?, now?) {
-  if (worker.paneId !== binding.paneId) throw new Error("the worker pane changed");
   if (["source", "agent", "kind", "value"].some(
     (field) => worker.agentSession?.[field] !== binding.agentSession?.[field],
   )) {
     throw new Error("the native agent session changed");
   }
-  if (worker.terminalId === binding.terminalId) return binding;
+  if (worker.paneId === binding.paneId && worker.terminalId === binding.terminalId) return binding;
   const state = await updateGoalState(binding.goalId, (current) => {
+    current.worker.paneId = worker.paneId;
     current.worker.terminalId = worker.terminalId;
     return current;
-  }, root, now);
-  return { ...binding, terminalId: state.worker.terminalId };
+  }, root, now, { allowWorkerRelocation: true });
+  return {
+    ...binding,
+    paneId: state.worker.paneId,
+    terminalId: state.worker.terminalId,
+  };
 }
 
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {

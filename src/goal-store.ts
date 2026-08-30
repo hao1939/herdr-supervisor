@@ -349,7 +349,13 @@ export async function listGoalRecords(root = defaultGoalsRoot()) {
   }));
 }
 
-export async function updateGoalState(goalId, change, root = defaultGoalsRoot(), now = () => new Date().toISOString()) {
+export async function updateGoalState(
+  goalId,
+  change,
+  root = defaultGoalsRoot(),
+  now = () => new Date().toISOString(),
+  { allowWorkerRelocation = false } = {},
+) {
   const key = `${root}\0${goalId}\0state`;
   return serializeWrite(key, async () => {
     const current = await loadGoalState(goalId, root);
@@ -359,7 +365,7 @@ export async function updateGoalState(goalId, change, root = defaultGoalsRoot(),
       throw new Error("a goal state update cannot change its identity");
     }
     if (
-      next.worker.paneId !== current.worker.paneId
+      (!allowWorkerRelocation && next.worker.paneId !== current.worker.paneId)
       || ["source", "agent", "kind", "value"].some(
         (field) => next.worker.agentSession?.[field] !== current.worker.agentSession?.[field],
       )

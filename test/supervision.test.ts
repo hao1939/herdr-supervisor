@@ -185,6 +185,15 @@ test("stopped process is shown as recoverable supervision work, not changed iden
   );
 });
 
+test("a missing pane is recoverable supervision work, not human work", () => {
+  const current = binding({ goalId: "g_open" });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /Worker: codex w1:p2 · pane missing/);
+  assert.match(output, /Next: supervisor should review whether the exact session can resume in a new pane/);
+  assert.doesNotMatch(output, /Needs you/);
+});
+
 test("a finished worker turn is not presented as a finished goal", () => {
   const current = binding({
     goalId: "g_open",
