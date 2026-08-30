@@ -699,15 +699,18 @@ test("human reconsideration is retained while its focused review is preparing", 
   let releaseFirstSnapshot;
   const firstSnapshot = new Promise((resolve) => { releaseFirstSnapshot = resolve; });
   let snapshotCalls = 0;
+  let resumed = false;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => {
     snapshotCalls += 1;
     if (snapshotCalls === 1) await firstSnapshot;
-    return snapshot({ agent_status: "idle", state_change_seq: snapshotCalls + 2 });
+    return snapshot({ agent_status: resumed ? "working" : "idle", state_change_seq: snapshotCalls + 2 });
   });
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") resumed = true;
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1148,10 +1151,17 @@ test("an idle worker cannot be left working and may be steered in the same revie
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
-  let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 0 }));
+  const prompts = [];
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: resumed ? 1 : 0,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, text, wait) => {
+    prompts.push({ paneId, text, wait });
+    if (text === "/goal resume") resumed = true;
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1182,13 +1192,289 @@ test("an idle worker cannot be left working and may be steered in the same revie
     evidence: ["The restored worker is idle and the focused proof is still missing."],
   });
   assert.equal(steer.isError, false);
-  assert.equal(prompts, 1);
+  assert.deepEqual(prompts, [{
+    paneId: worker.paneId,
+    text: "/goal resume",
+    wait: { until: ["working"], timeout_ms: 5000 },
+  }, {
+    paneId: worker.paneId,
+    text: "Continue the restored goal from current evidence.",
+    wait: undefined,
+  }]);
   const [continued] = (await loadSupervisorGoals(root)).active;
   assert.deepEqual(continued.evidence, [
     "The restored worker is idle and the focused proof is still missing.",
   ]);
   const continuedAudit = await readAudit("g_test", root);
   assert.deepEqual(continuedAudit.at(-1).evidence, continued.evidence);
+  pi.events.get("session_shutdown")();
+});
+
+test("an accepted native Goal resume fails closed when its snapshot is unavailable", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (resumed) throw new Error("updated worker snapshot unavailable");
+    return snapshot({ agent_status: "idle", state_change_seq: 0 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the restored goal from current evidence.",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /native Goal resumed.*could not be observed/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the restored goal from current evidence.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("an uncertain native Goal resume cannot send or retry a tactical instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    throw new Error("prompt response timed out after possible delivery");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a replacement session after native Goal resume receives no tactical instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    agent_session: resumed
+      ? { ...worker.agentSession, value: "replacement_session" }
+      : worker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /resulting worker identity did not match/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(duplicate.isError, true);
+  assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a native Goal that settles again does not receive a tactical instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /settled again before the follow-up instruction/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a native Goal resume that cannot be confirmed fails closed without retrying", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    throw new Error("agent.prompt wait timed out");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
+  assert.match(result.content[0].text, /Do not resume it again/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+  pi.events.get("session_shutdown")();
+});
+
+test("a native Goal resume that changes worker identity fails closed without a follow-up instruction", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+    agent_session: resumed
+      ? { source: "herdr:codex", agent: "codex", kind: "id", value: "session_other" }
+      : worker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is ready to continue.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /resulting worker identity did not match/);
+  assert.deepEqual(prompts, ["/goal resume"]);
+
+  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
   pi.events.get("session_shutdown")();
 });
 
@@ -1460,12 +1746,15 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     interactive_ready: true,
   };
   let workerText = "The worker is waiting for PR checks.";
+  let resumed = false;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: [focused, unrelated],
+    agents: [{ ...focused, agent_status: resumed ? "working" : "idle" }, unrelated],
     panes: [focused, unrelated].map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerText, truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") resumed = true;
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi({ externalWatchMs: "1000" });
@@ -1689,11 +1978,19 @@ test("steering records a delivery boundary after its prompt is accepted", async 
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let sequence = 3;
+  let agentStatus = "idle";
   let workerOutput = "The old PR state was still pending.";
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: sequence }));
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: agentStatus,
+    state_change_seq: sequence,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
-    workerOutput = "The worker settled while the reread instruction was delivered.";
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") agentStatus = "working";
+    else {
+      agentStatus = "done";
+      workerOutput = "The worker settled while the reread instruction was delivered.";
+    }
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -1743,14 +2040,21 @@ test("steering fails closed when its post-delivery boundary cannot be observed",
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let reads = 0;
-  let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => {
     reads += 1;
     if (reads > 1) throw new Error("terminal observation unavailable");
     return { read: { text: "The old PR state was pending.", truncated: false } };
   });
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    if (message === "/goal resume") resumed = true;
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1765,7 +2069,8 @@ test("steering fails closed when its post-delivery boundary cannot be observed",
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /safe boundary could not be observed afterward/);
-  assert.equal(prompts, 1);
+  assert.equal(prompts[0], "/goal resume");
+  assert.match(prompts[1], /Reread the current PR state and continue\./);
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.observationCursor.kind, "reread-boundary-unavailable");
   assert.equal(stored.externalChange.workerSequence, Number.MAX_SAFE_INTEGER);
@@ -1955,9 +2260,15 @@ test("an unrelated signal does not duplicate the same pending external reread re
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  let agentStatus = "idle";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: agentStatus,
+    state_change_seq: 3,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Only the old PR result is visible.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    agentStatus = message === "/goal resume" ? "working" : "done";
+  });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2324,10 +2635,18 @@ test("steering drains an in-flight external observation before clearing its watc
     if (String(url).includes("/status?")) return Response.json({ statuses: [] });
     return Response.json({ check_runs: [{ id: 1, name: "test", status: "completed", conclusion: "success" }] });
   });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker can continue independently.", truncated: false } }));
   let prompt;
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") {
+      resumed = true;
+      return;
+    }
     prompt = message;
     throw new Error("prompt response timed out after possible delivery");
   });
@@ -2982,11 +3301,19 @@ test("an uncertain steer keeps an already accepted external reread resolved", as
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+  }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "I reread PR 16; its current checks pass.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") {
+      resumed = true;
+      return;
+    }
     prompts += 1;
     throw new Error("prompt response timed out");
   });

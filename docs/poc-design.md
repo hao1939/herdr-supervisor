@@ -306,9 +306,10 @@ work-check-continue behavior, while the Supervisor owns cross-worker judgment,
 stale recovery, human escalation, and independent acceptance. An automatic
 Herdr restore reopens the exact session and explicitly resumes its paused
 native Goal; unattended workers never stop at Codex's interactive
-`Resume paused goal?` choice. When the process has exited, one Supervisor
-`steer` decision first resumes that Goal, then queues the evidence-backed
-instruction on the same exact session. Transport is not a model decision.
+`Resume paused goal?` choice. One Supervisor `steer` decision first resumes a
+settled Codex Goal, then sends the evidence-backed instruction into its active
+turn on the same exact session. If the process has exited, the same action
+recovers that exact session first. Transport is not a model decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
 container recovery without an interactive directory-confirmation gate.
