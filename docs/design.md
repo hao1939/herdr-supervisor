@@ -104,8 +104,10 @@ Herdr.
 Polling schedules remain disposable memory. If a watched PR or build changes,
 only that unresolved fact is saved in `current.json`. It survives restart and
 cannot be cleared by merely sending a prompt. The supervisor clears it after a
-later native final response advances the saved observation cursor, proving the
-same worker had a chance to reread authority.
+later native final response advances the saved observation cursor. A worker
+without a native transcript instead requires a later settled Herdr transition
+and current terminal evidence. Both paths prove the same worker had a chance to
+reread authority.
 
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside

@@ -136,11 +136,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     errors: GoalLoadError[];
   };
 
+  function externalRereadInFlight(binding) {
+    return Boolean(
+      binding.externalChange
+      && binding.lastDecision?.decision === "steer"
+      && Date.parse(binding.lastDecision.at) >= Date.parse(binding.externalChange.observedAt),
+    );
+  }
+
   function runtimeFor(binding: GoalBinding): GoalRuntime {
     let runtime = runtimeGoals.get(binding.goalId);
     if (!runtime) {
       runtime = {
-        nextReviewAt: binding.externalChange
+        nextReviewAt: binding.externalChange && !externalRereadInFlight(binding)
           ? new Date(0).toISOString()
           : binding.wait?.reviewAt || binding.reviewAt,
         lastReviewStateChangeSeq: 0,
@@ -249,11 +257,15 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     return previous && current && JSON.stringify(previous) !== JSON.stringify(current);
   }
 
-  function externalRereadObserved(binding, observation) {
-    if (!binding.externalChange || binding.lastDecision?.decision !== "steer") return false;
-    if (Date.parse(binding.lastDecision.at) < Date.parse(binding.externalChange.observedAt)) return false;
-    return observation.messages.some((message) => message.phase === "final_answer")
+  function externalRereadObserved(binding, observation, agent) {
+    if (!externalRereadInFlight(binding)) return false;
+    const nativeFinal = observation.messages.some((message) => message.phase === "final_answer")
       && cursorAdvanced(binding.observationCursor, observation.cursor);
+    const terminalResult = observation.source === "terminal-fallback"
+      && agent.agent_status !== "working"
+      && observation.messages.some((message) => message.text.trim())
+      && Number(agent.state_change_seq || 0) > Number(binding.externalChange.workerSequence ?? Number.MAX_SAFE_INTEGER);
+    return nativeFinal || terminalResult;
   }
 
   function workerInstruction(binding, message) {
@@ -263,13 +275,16 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function saveSteerCheckpoint(binding, instruction, progress, evidence, reviewAt) {
+    const effectiveReviewAt = reviewAt
+      || (binding.externalChange ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
     const result = await recordDecision(binding, "steer", {
       progress,
       action: instruction,
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
-      reviewAt,
+      reviewAt: effectiveReviewAt,
       externalChangeRevision: binding.externalChange?.revision,
+      workerSequence: runtimeFor(binding).lastReviewStateChangeSeq,
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
@@ -643,7 +658,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         }
       : currentDecision;
     const change = binding.externalChange;
-    const decision = change && !mismatch && !signal?.key.startsWith("external:")
+    const rereadWorking = externalRereadInFlight(binding) && agent?.agent_status === "working";
+    const decision = change && !rereadWorking && !mismatch && !signal?.key.startsWith("external:")
       ? {
           wake: true,
           reason: `${change.source} ${change.subject} changed and its authoritative reread is still pending. Have the same worker reread it before deciding what the change means.`,
@@ -1227,7 +1243,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           fallbackWhenEmpty: agent.agent_status === "blocked" || agent.agent_status === "unknown",
         });
         let currentBinding: GoalBinding = binding;
-        if (externalRereadObserved(binding, observation)) {
+        if (externalRereadObserved(binding, observation, agent)) {
           const state = await clearExternalChange(binding);
           cacheCheckpoint(binding, state);
           currentBinding = goalCache?.active.get(binding.goalId) || binding;

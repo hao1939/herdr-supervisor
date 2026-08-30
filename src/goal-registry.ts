@@ -194,6 +194,12 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     ) {
       throw new Error("the watched external resource changed while steering was in progress");
     }
+    if (decision === "steer" && current.externalChange) {
+      if (!Number.isInteger(input.workerSequence) || input.workerSequence < 0) {
+        throw new Error("external-change steering requires the observed worker sequence");
+      }
+      current.externalChange.workerSequence = input.workerSequence;
+    }
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

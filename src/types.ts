@@ -57,6 +57,7 @@ export type PendingExternalChange = {
   subject: string;
   revision: string;
   observedAt: string;
+  workerSequence?: number;
 };
 
 /** Durable goal data loaded from goal.json and current.json. */

@@ -1426,6 +1426,7 @@ test("restart retains an external reread until a later native final response", a
     action: "Reread current PR 16 checks.",
     observationCursor: cursor,
     externalChangeRevision: "changed-revision",
+    workerSequence: 3,
   }, root, () => "2026-08-30T05:02:00.000Z");
 
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -1511,6 +1512,91 @@ test("acceptance rejects an external change recorded after its cached read", asy
   assert.equal(finish.isError, true);
   assert.match(finish.content[0].text, /changed before acceptance/);
   assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  pi.events.get("session_shutdown")();
+});
+
+test("a settled terminal fallback can complete a previously steered reread", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "fallback-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The fallback worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "fallback-revision",
+    workerSequence: 2,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "I reread PR 16; its current checks pass.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-fallback", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
+  pi.events.get("session_shutdown")();
+});
+
+test("a working reread stays quiet until its worker settles", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const reviewAt = new Date(Date.now() + 60_000).toISOString();
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "working-revision",
+    observedAt: new Date(Date.now() - 2000).toISOString(),
+  }, root);
+  await recordDecision(binding, "steer", {
+    progress: "The worker is rereading PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "working-revision",
+    workerSequence: 2,
+    reviewAt,
+  }, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let status = "working";
+  let sequence = 3;
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: status, state_change_seq: sequence }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Current PR reread finished.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 0, "restart must not duplicate a reread already in flight");
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 0, "a working event must not duplicate the reread instruction");
+
+  status = "idle";
+  sequence = 4;
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
   pi.events.get("session_shutdown")();
 });
 
