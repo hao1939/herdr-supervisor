@@ -1567,6 +1567,49 @@ test("acceptance rejects an external change recorded after its cached read", asy
   pi.events.get("session_shutdown")();
 });
 
+test("an unrelated signal does not duplicate the same pending external reread review", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "pending-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Only the old PR result is visible.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
+  await pi.tools.get("supervisor_observe").execute("observe-pending", { pane_id: worker.paneId });
+  const steer = await pi.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread PR 16 now.",
+  });
+  assert.equal(steer.isError, false);
+  await pi.events.get("agent_settled")();
+
+  await pi.tools.get("supervisor_reconsider").execute("human-reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "the human asked for another look",
+  });
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 1, "an unrelated signal must not duplicate the same pending external reread review");
+  pi.events.get("session_shutdown")();
+});
+
 test("a settled terminal fallback can complete a previously steered reread", async (t) => {
   const root = await fixture();
   const [binding] = (await loadSupervisorGoals(root)).active;

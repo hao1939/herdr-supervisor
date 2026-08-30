@@ -671,7 +671,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           wake: true,
           reason: `${change.source} ${change.subject} changed and its authoritative reread is still pending. Have the same worker reread it before deciding what the change means.`,
           sequence: agent ? Number(agent.state_change_seq || 0) : undefined,
-          key: `external-pending:${change.source}:${change.subject}:${change.revision}:${agent?.state_change_seq || "missing"}${signal?.key ? `:${signal.key}` : ""}`,
+          key: `external-pending:${change.source}:${change.subject}:${change.revision}:${agent?.state_change_seq || "missing"}`,
         }
       : signaledDecision;
     const runtime = runtimeFor(binding);
@@ -719,7 +719,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         // a potentially meaningful worker transition.
       }
     }
-    if (!decision.wake || runtime.lastNoticeKey === decision.key) return;
+    const missingDecisionRetry = signal?.key.startsWith("missing-decision:");
+    if (!decision.wake || (runtime.lastNoticeKey === decision.key && !missingDecisionRetry)) return;
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
     runtime.pendingObservationHasMessages = undefined;
