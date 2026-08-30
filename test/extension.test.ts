@@ -1242,6 +1242,7 @@ test("an accepted native Goal resume fails closed when its snapshot is unavailab
   });
   assert.equal(duplicate.isError, true);
   assert.match(duplicate.content[0].text, /already applied/);
+  assert.deepEqual(prompts, ["/goal resume"]);
   pi.events.get("session_shutdown")();
 });
 
