@@ -182,6 +182,9 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
       throw new Error("the native agent session changed");
     }
     if (worker.paneId === current.paneId && worker.terminalId === current.terminalId) return current;
+    if (binding.paneId !== current.paneId || binding.terminalId !== current.terminalId) {
+      throw new Error("the worker routing changed; reread Herdr before relocating it");
+    }
     assertWorkerAvailable(goals.active, worker, current.goalId);
     if (worker.paneId !== current.paneId) {
       const legacyDependents = goals.active.filter((candidate) => (

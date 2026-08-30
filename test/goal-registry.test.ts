@@ -93,6 +93,32 @@ test("concurrent relocation and registration cannot assign one pane twice", asyn
   assert.equal(new Set(active.map((goal) => goal.paneId)).size, active.length);
 });
 
+test("a queued stale relocation cannot overwrite a newer worker route", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Keep the newest observed worker route.",
+  }, directory, { goalId: "g_route" });
+  const results = await Promise.allSettled([
+    refreshWorkerLocation(binding, {
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_newest",
+    }, directory),
+    refreshWorkerLocation(binding, {
+      ...worker,
+      paneId: "w1:p10",
+      terminalId: "term_stale",
+    }, directory),
+  ]);
+
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  assert.match((results[1] as PromiseRejectedResult).reason.message, /routing changed; reread Herdr/);
+  const [stored] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(stored.paneId, "w1:p9");
+  assert.equal(stored.terminalId, "term_newest");
+});
+
 test("refining a goal replaces its contract without replacing its worker", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
