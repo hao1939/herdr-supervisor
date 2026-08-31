@@ -809,8 +809,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     void drainSignals().catch((error) => reportBackgroundFailure("Could not process a worker event", error));
   }
 
-  function queueSignal(paneId: string, signal: ReviewSignal) {
-    if (!pendingSignals.has(paneId) || signal.force) pendingSignals.set(paneId, signal);
+  function queueSignal(paneId: string, signal?: ReviewSignal) {
+    if (!pendingSignals.has(paneId) || signal?.force) pendingSignals.set(paneId, signal);
   }
 
   async function wakeDependentWaiters(peer, reason: string) {
@@ -865,6 +865,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     try {
       while (
         !shuttingDown
+        && !agentTurnActive
         && !pendingHumanFollowUps.size
         && !reviewTurn.isActive()
         && !activeGlobalReview
@@ -891,7 +892,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           error,
         ));
       }
-      if (!shuttingDown && !reviewTurn.isActive() && !activeGlobalReview && !pendingSignals.size && pendingGlobalReview) {
+      if (
+        !shuttingDown
+        && !agentTurnActive
+        && !reviewTurn.isActive()
+        && !activeGlobalReview
+        && !pendingSignals.size
+        && pendingGlobalReview
+      ) {
         const reason = pendingGlobalReview;
         pendingGlobalReview = undefined;
         await handleGlobalReview(reason);
@@ -906,6 +914,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   async function handleGlobalReview(reason: string) {
     const [storedGoals, snapshot] = await Promise.all([loadSupervisorGoals(), client.snapshot()]);
+    if (pendingHumanFollowUps.size || agentTurnActive) {
+      pendingGlobalReview ||= reason;
+      return;
+    }
     const bindings = storedGoals.active.map((binding): ActiveGoal => ({
       ...binding,
       ...runtimeFor(binding),
@@ -1012,6 +1024,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
     const missingDecisionRetry = signal?.key.startsWith("missing-decision:");
     if (!decision.wake || (runtime.lastNoticeKey === decision.key && !missingDecisionRetry)) return;
+    if (pendingHumanFollowUps.size || agentTurnActive) {
+      queueSignal(paneId, signal);
+      return;
+    }
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
     runtime.pendingObservationHasMessages = undefined;
@@ -2282,7 +2298,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("input", (event) => {
-    const automaticReview = reviewTurn.isActive() || activeGlobalReview;
+    const automaticReview = reviewTurn.isBusy() || activeGlobalReview || reviewPumpRunning;
     if (
       event.source === "extension"
       || !automaticReview
@@ -2295,15 +2311,20 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       : event.text;
     const deliveryId = randomUUID();
     pendingHumanFollowUps.add(deliveryId);
-    pi.sendMessage({
-      customType: humanFollowUpMessageType,
-      content,
-      display: true,
-      details: { deliveryId },
-    }, {
-      triggerTurn: true,
-      deliverAs: "followUp",
-    });
+    try {
+      pi.sendMessage({
+        customType: humanFollowUpMessageType,
+        content,
+        display: true,
+        details: { deliveryId },
+      }, {
+        triggerTurn: true,
+        deliverAs: "followUp",
+      });
+    } catch (error) {
+      pendingHumanFollowUps.delete(deliveryId);
+      throw error;
+    }
     return { action: "handled" };
   });
 
@@ -2359,7 +2380,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
     agentTurnActive = true;
-    if (!activeGlobalReview && !reviewTurn.isActive() && !reviewTurn.isClosed()) return;
+    if (!activeGlobalReview && !reviewTurn.isBusy() && !reviewTurn.isClosed()) return;
     const settledGlobal = await settleGlobalReview();
     if (!settledGlobal) await settleFocusedReview();
     await armReviewTimer();
