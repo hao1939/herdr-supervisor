@@ -218,14 +218,15 @@ export class EventWatchService {
             };
           }
         }
+        const effectiveInterval = Math.min(previous?.intervalMs ?? intervalMs, intervalMs);
         state.resources[id] = {
           source,
           subject,
           revision: observation.revision,
           payload: observation.payload,
-          intervalMs: Math.min(previous?.intervalMs ?? intervalMs, intervalMs),
+          intervalMs: effectiveInterval,
           lastObservedAt: this.now(),
-          nextPollAt: this.now() + intervalMs,
+          nextPollAt: this.now() + effectiveInterval,
         };
         state.watches[identity] = { resourceId: id, destination };
         return { watchId: identity, source, subject, baseline: observation.revision };

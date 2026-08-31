@@ -36,15 +36,27 @@ events, supervisor reviews, Codex's native Goal, or good goal design.
    baseline and the worker's exact native session identity.
 4. The worker continues independent work. It does not run a polling command or
    wait for the watcher.
-5. Unchanged polls do nothing and use no model turn.
-6. The next changed revision is saved, then delivered directly to the same
+5. If that external condition eventually becomes the only remaining path, the
+   worker lets its native Goal reach its ordinary blocked state instead of
+   repeating status or polling.
+6. Unchanged polls do nothing and use no model turn.
+7. The next changed revision is saved, then delivered directly to the same
    native worker session through Herdr.
-7. The worker rereads GitHub or ADO, decides what the change means, and either
+8. Delivery resumes the native Goal before adding the wake hint when the worker
+   is settled. The worker rereads GitHub or ADO, decides what the change means, and either
    continues or registers another one-shot watch.
 
 The notification is only a hint. Its payload can help explain why the worker
 woke, but it never proves that a check passed, a review was resolved, or the
 goal finished.
+
+Codex Goals are the continuation owner. Official documentation describes them
+as persistent thread objectives that may stop on success, pause, budget, or a
+real blocker and can later resume:
+<https://developers.openai.com/cookbook/examples/codex/using_goals_in_codex>.
+The watcher does not reproduce that lifecycle. Registering a one-shot watch
+authorizes one automatic resume for that exact external change. A human who
+intentionally pauses the work should cancel the watch too.
 
 ### The worker is busy when the change arrives
 
@@ -108,6 +120,11 @@ Before delivery, the Herdr adapter reads the current session snapshot and finds
 the unique agent with that native identity. It sends the hint to that current
 pane. A missing or ambiguous identity fails closed and goes to diagnostics; it
 never guesses from focus, tab order, agent kind, or an old pane.
+
+If that exact worker is settled, the adapter first submits `/goal resume`, then
+submits the wake hint. If it is already working, it submits only the hint. This
+uses Codex's existing Goal lifecycle instead of adding watcher-owned worker
+states.
 
 The daemon persists the newest pending revision before delivery. A successful
 Herdr prompt submission counts as delivery and consumes the one-shot watch. If

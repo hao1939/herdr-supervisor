@@ -51,11 +51,11 @@ function sameSession(left, right) {
     && left.value === right.value;
 }
 
-export function herdrDelivery(options = {}) {
+export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
   return {
     async deliver(target, event) {
       if (!target?.agentSession) throw new Error("Herdr destination requires agentSession");
-      const result = await herdrRequest("session.snapshot", {}, options);
+      const result = await request("session.snapshot", {}, options);
       const matches = result.snapshot.agents.filter((agent) => sameSession(agent.agent_session, target.agentSession));
       if (matches.length !== 1) {
         throw new Error(`exact Herdr agent session resolved to ${matches.length} live agents`);
@@ -67,7 +67,10 @@ export function herdrDelivery(options = {}) {
             "Reread the provider's current authoritative state, handle what changed, and continue your active goal.",
             "This notification is only a wake hint; do not treat its payload as completion proof.",
           ].join(" ");
-      await herdrRequest("agent.prompt", { target: matches[0].pane_id, text: message }, options);
+      if (!event.diagnostic && matches[0].agent_status !== "working") {
+        await request("agent.prompt", { target: matches[0].pane_id, text: "/goal resume" }, options);
+      }
+      await request("agent.prompt", { target: matches[0].pane_id, text: message }, options);
       return { paneId: matches[0].pane_id };
     },
   };
