@@ -1,7 +1,7 @@
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { sameAgentSession } from "../../src/agent-session.ts";
+import { identityMismatch } from "../../src/supervision.ts";
 
 export function defaultHerdrSocket(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
@@ -27,8 +27,9 @@ export function herdrRequest(method, params = {}, {
     socket.on("error", (error) => finish(error));
     socket.on("close", () => finish(new Error(`Herdr ${method} connection closed`)));
     socket.on("connect", () => socket.write(`${JSON.stringify({ id, method, params })}\n`));
+    socket.setEncoding("utf8");
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
+      buffer += chunk;
       for (;;) {
         const newline = buffer.indexOf("\n");
         if (newline < 0) return;
@@ -50,7 +51,8 @@ export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
       if (!target?.agentSession) throw new Error("Herdr destination requires agentSession");
       const findExact = async () => {
         const result = await request("session.snapshot", {}, options);
-        const matches = result.snapshot.agents.filter((agent) => sameAgentSession(agent.agent_session, target.agentSession));
+        const binding = { agentSession: target.agentSession };
+        const matches = result.snapshot.agents.filter((agent) => !identityMismatch(binding, agent));
         if (matches.length !== 1) {
           throw new Error(`exact Herdr agent session resolved to ${matches.length} live agents`);
         }

@@ -6,6 +6,8 @@ const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const MINIMUM_INTERVAL_MS = 60 * 1_000;
 const MAX_RESOURCES = 10;
 const MAX_CREDENTIAL_BYTES = 16 * 1024;
+const REQUEST_WINDOW_MS = 60 * 60 * 1_000;
+const REQUESTS_PER_HOUR = 600;
 const execFileAsync = promisify(execFile);
 
 function credential(value, name) {
@@ -37,6 +39,22 @@ async function json(response) {
   return response.json();
 }
 
+function requestBudget(fetchImpl, limit, now) {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("ADO request limit must be a positive integer");
+  const timestamps = [];
+  return async (input, init) => {
+    const cutoff = now() - REQUEST_WINDOW_MS;
+    while (timestamps[0] <= cutoff) timestamps.shift();
+    if (timestamps.length >= limit) {
+      const error = new Error(`ADO source reached its ${limit}-request hourly budget`);
+      error.retryAfterMs = Math.max(1_000, timestamps[0] + REQUEST_WINDOW_MS - now());
+      throw error;
+    }
+    timestamps.push(now());
+    return fetchImpl(input, init);
+  };
+}
+
 export async function ambientAdoAuthorization({
   pat = process.env.AZURE_DEVOPS_EXT_PAT,
   azureCli = process.env.AZURE_CLI || "az",
@@ -64,7 +82,10 @@ export function adoBuildSource({
   fetchImpl = fetch,
   authorization,
   getAuthorization = ambientAdoAuthorization,
+  requestLimit = REQUESTS_PER_HOUR,
+  now = () => Date.now(),
 } = {}) {
+  const budgetedFetch = requestBudget(fetchImpl, requestLimit, now);
   return {
     minimumIntervalMs: MINIMUM_INTERVAL_MS,
     maxResources: MAX_RESOURCES,
@@ -73,7 +94,7 @@ export function adoBuildSource({
       const auth = authorization || await getAuthorization();
       const url = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`
         + `/_apis/build/builds/${buildId}?api-version=7.1`;
-      const build = await json(await fetchImpl(url, {
+      const build = await json(await budgetedFetch(url, {
         headers: { Accept: "application/json", Authorization: auth },
         signal: AbortSignal.timeout(30_000),
       }));

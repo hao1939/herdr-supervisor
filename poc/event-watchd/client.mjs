@@ -1,9 +1,17 @@
 import net from "node:net";
 
 const MAX_FRAME = 64 * 1024;
+const DEFAULT_TIMEOUT_MS = 5_000;
+const SOURCE_TIMEOUT_MS = 4 * 60 * 1_000;
+const POLL_TIMEOUT_MS = 20 * 60 * 1_000;
 
-export function eventWatchRequest(message, { socketPath, timeoutMs = 5_000 } = {}) {
+export function eventWatchRequest(message, { socketPath, timeoutMs } = {}) {
   if (!socketPath) throw new Error("event watcher socket path is required");
+  const requestTimeoutMs = timeoutMs ?? (
+    message.action === "poll" ? POLL_TIMEOUT_MS
+      : ["read", "watch"].includes(message.action) ? SOURCE_TIMEOUT_MS
+        : DEFAULT_TIMEOUT_MS
+  );
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(socketPath);
     const id = `${process.pid}:${Date.now()}:${Math.random()}`;
@@ -16,13 +24,14 @@ export function eventWatchRequest(message, { socketPath, timeoutMs = 5_000 } = {
       socket.destroy();
       error ? reject(error) : resolve(value);
     };
-    const timer = setTimeout(() => finish(new Error("event watcher request timed out")), timeoutMs);
+    const timer = setTimeout(() => finish(new Error("event watcher request timed out")), requestTimeoutMs);
     socket.on("error", (error) => finish(error));
     socket.on("end", () => finish(new Error("event watcher connection ended without a response")));
     socket.on("close", () => finish(new Error("event watcher connection closed without a response")));
     socket.on("connect", () => socket.write(`${JSON.stringify({ id, ...message })}\n`));
+    socket.setEncoding("utf8");
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
+      buffer += chunk;
       if (Buffer.byteLength(buffer) > MAX_FRAME) {
         finish(new Error("event watcher response is too large"));
         return;

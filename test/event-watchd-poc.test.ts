@@ -358,6 +358,41 @@ test("a slower second watch cannot postpone an existing fast resource", async ()
   await service.unwatch(fast.watchId);
   const remaining: any = Object.values((await service.status()).resources)[0];
   assert.equal(remaining.intervalMs, 60_000, "removing the fast watch restores the remaining interval");
+  assert.equal(remaining.nextPollAt, resource.nextPollAt, "removing a watch preserves the existing provider deadline");
+});
+
+test("removing a watch cannot erase a provider retry boundary", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-unwatch-backoff-"));
+  let now = 10_000;
+  let fails = false;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: {
+      source: {
+        read: async () => {
+          if (fails) {
+            const error: Error & { retryAfterMs?: number } = new Error("provider busy");
+            error.retryAfterMs = 9_000;
+            throw error;
+          }
+          return { revision: "same", payload: null };
+        },
+      },
+    },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  const fast = await service.watch({ source: "source", subject: "same", destination: destination("fast"), intervalMs: 1_000 });
+  await service.watch({ source: "source", subject: "same", destination: destination("slow"), intervalMs: 60_000 });
+  fails = true;
+  await service.pollNow();
+  const retryAt = (Object.values((await service.status()).resources)[0] as any).nextPollAt;
+
+  now += 100;
+  await service.unwatch(fast.watchId);
+  const remaining: any = Object.values((await service.status()).resources)[0];
+  assert.equal(remaining.intervalMs, 60_000);
+  assert.equal(remaining.nextPollAt, retryAt);
 });
 
 test("a second daemon cannot steal a live socket", async () => {
@@ -400,6 +435,40 @@ test("a failed daemon startup releases its socket and process lock", async () =>
   });
   await replacement.start();
   await replacement.stop();
+});
+
+test("a failed daemon startup closes clients accepted during service initialization", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-startup-client-"));
+  const socketPath = join(directory, "watch.sock");
+  let initializationStarted!: () => void;
+  const started = new Promise<void>((resolve) => { initializationStarted = resolve; });
+  let failInitialization!: () => void;
+  const fail = new Promise<void>((resolve) => { failInitialization = resolve; });
+  const server = new EventWatchServer({
+    socketPath,
+    service: {
+      start: async () => {
+        initializationStarted();
+        await fail;
+        throw new Error("state is unreadable");
+      },
+      stop: () => {},
+    },
+  });
+  const startup = server.start();
+  await started;
+  const idle = net.createConnection(socketPath);
+  await new Promise<void>((resolve, reject) => {
+    idle.once("connect", resolve);
+    idle.once("error", reject);
+  });
+  failInitialization();
+
+  await Promise.race([
+    assert.rejects(startup, /state is unreadable/),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("failed startup cleanup timed out")), 1_000)),
+  ]);
+  assert.equal(idle.destroyed, true);
 });
 
 test("daemon shutdown closes an idle client before releasing ownership", async () => {
@@ -689,6 +758,29 @@ test("ADO source enforces a provider-safe polling interval", async () => {
   assert.equal(result.intervalMs, 60_000);
 });
 
+test("ADO bounds actual provider requests across manual reads", async () => {
+  let requests = 0;
+  const source = adoBuildSource({
+    authorization: "Bearer test-token",
+    requestLimit: 1,
+    now: () => 10_000,
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({
+        id: 42, status: "inProgress", result: null, sourceVersion: "abc123", finishTime: null,
+      }), { status: 200 });
+    },
+  });
+
+  await source.read("msazure/CloudNativeCompute/42");
+  await assert.rejects(source.read("msazure/CloudNativeCompute/42"), (error: any) => {
+    assert.match(error.message, /1-request hourly budget/);
+    assert.equal(error.retryAfterMs, 60 * 60 * 1_000);
+    return true;
+  });
+  assert.equal(requests, 1);
+});
+
 test("unauthenticated GitHub watches use a rate-limit-safe interval", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-rate-"));
   const source = githubPullRequestSource({
@@ -714,6 +806,75 @@ test("unauthenticated GitHub watches use a rate-limit-safe interval", async () =
     destination: destination("other-worker"),
     intervalMs: 5 * 60 * 1_000,
   }), /1-resource capacity/);
+});
+
+test("restart reapplies current source intervals and capacities", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-restart-policy-"));
+  const statePath = join(directory, "state.json");
+  const delivery = { test: { deliver: async () => {} } };
+  const original = new EventWatchService({
+    statePath,
+    sources: { source: { minimumIntervalMs: 1_000, maxResources: 2, read: async (subject: string) => ({ revision: subject, payload: null }) } },
+    deliveries: delivery,
+  });
+  await original.watch({ source: "source", subject: "one", destination: destination("one"), intervalMs: 1_000 });
+  await original.watch({ source: "source", subject: "two", destination: destination("two"), intervalMs: 1_000 });
+
+  const reduced = new EventWatchService({
+    statePath,
+    sources: { source: { minimumIntervalMs: 5_000, maxResources: 1, read: async (subject: string) => ({ revision: subject, payload: null }) } },
+    deliveries: delivery,
+  });
+  await assert.rejects(reduced.start(), /2 resources but current capacity is 1/);
+
+  const compatible = new EventWatchService({
+    statePath,
+    sources: { source: { minimumIntervalMs: 5_000, maxResources: 2, read: async (subject: string) => ({ revision: subject, payload: null }) } },
+    deliveries: delivery,
+  });
+  await compatible.start();
+  compatible.stop();
+  const state = await compatible.status();
+  assert.deepEqual(Object.values(state.watches).map((watch: any) => watch.intervalMs), [5_000, 5_000]);
+  assert.deepEqual(Object.values(state.resources).map((resource: any) => resource.intervalMs), [5_000, 5_000]);
+});
+
+test("a queued scheduler pass rechecks the resource deadline after its lock", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-tick-lock-"));
+  let now = 10_000;
+  let reads = 0;
+  let releaseRead!: () => void;
+  let reading!: () => void;
+  const entered = new Promise<void>((resolve) => { reading = resolve; });
+  const release = new Promise<void>((resolve) => { releaseRead = resolve; });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: {
+      source: {
+        read: async () => {
+          reads += 1;
+          if (reads === 2) {
+            reading();
+            await release;
+          }
+          return { revision: "same", payload: null };
+        },
+      },
+    },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  await service.watch({ source: "source", subject: "same", destination: destination("worker"), intervalMs: 1_000 });
+  now += 1_000;
+  (service as any).running = true;
+  const first = service.tick();
+  await entered;
+  const second = service.tick();
+  releaseRead();
+  await Promise.all([first, second]);
+  service.stop();
+
+  assert.equal(reads, 2, "the queued pass skips the resource after the first pass moves its deadline");
 });
 
 test("a closed daemon connection cannot leave a CLI request pending", async () => {
@@ -789,4 +950,30 @@ test("delivery failure stays pending and emits one coalesced supervisor diagnost
   assert.equal(diagnostics[0].diagnostic, true);
   assert.match(diagnostics[0].payload.error, /exact session is not live/);
   assert.equal(Object.keys((await service.status()).watches).length, 1);
+});
+
+test("changing the diagnostic destination makes an ongoing failure visible again", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-diagnostic-change-"));
+  let revision = "one";
+  const diagnostics: string[] = [];
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision, payload: null }) } },
+    deliveries: {
+      test: {
+        deliver: async (target: any) => {
+          if (target.name === "worker") throw new Error("worker unavailable");
+          diagnostics.push(target.name);
+        },
+      },
+    },
+  });
+  await service.setDiagnostics(destination("supervisor-one"));
+  await service.watch({ source: "source", subject: "subject", destination: destination("worker"), intervalMs: 1_000 });
+  revision = "two";
+  await service.pollNow();
+  await service.setDiagnostics(destination("supervisor-two"));
+  await service.pollNow();
+
+  assert.deepEqual(diagnostics, ["supervisor-one", "supervisor-two"]);
 });

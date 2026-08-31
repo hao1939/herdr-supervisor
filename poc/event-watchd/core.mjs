@@ -168,6 +168,7 @@ export class EventWatchService {
     this.reportedDiagnostics = new Set();
     this.scheduleGeneration = 0;
     this.running = false;
+    this.schedulerError = undefined;
   }
 
   async mutate(change) {
@@ -214,7 +215,12 @@ export class EventWatchService {
 
   async setDiagnostics(destination) {
     const validated = validateDestination(destination);
-    await this.mutate((state) => { state.diagnostics = validated; });
+    const changed = await this.mutate((state) => {
+      const differs = JSON.stringify(state.diagnostics) !== JSON.stringify(validated);
+      state.diagnostics = validated;
+      return differs;
+    });
+    if (changed) this.reportedDiagnostics.clear();
     return validated;
   }
 
@@ -249,8 +255,20 @@ export class EventWatchService {
       delete state.resources[id];
       return;
     }
+    const previousIntervalMs = resource.intervalMs;
     resource.intervalMs = Math.min(...watches.map((watch) => watch.intervalMs));
-    resource.nextPollAt = Math.min(resource.nextPollAt, this.now() + resource.intervalMs);
+    if (resource.intervalMs < previousIntervalMs) {
+      resource.nextPollAt = Math.min(resource.nextPollAt, this.now() + resource.intervalMs);
+    }
+  }
+
+  resourceIsDue(state, id, now = this.now()) {
+    const resource = state.resources[id];
+    return Boolean(resource && (
+      resource.nextPollAt <= now
+      || Object.values(state.watches).some((watch) =>
+        watch.resourceId === id && watch.pending?.retryAt <= now)
+    ));
   }
 
   async watch(input) {
@@ -514,6 +532,7 @@ export class EventWatchService {
       totalWatches: entries.length,
       totalResources: Object.keys(this.state.resources).length,
       diagnosticsConfigured: Boolean(this.state.diagnostics),
+      schedulerError: summaryText(this.schedulerError) || null,
       watches,
       nextCursor: consumed < entries.length && page.length ? page.at(-1)[0] : null,
     };
@@ -531,7 +550,13 @@ export class EventWatchService {
       ];
       if (!times.length) return;
       const delay = Math.max(0, Math.min(...times) - this.now());
-      this.timer = setTimeout(() => void this.tick(), delay);
+      this.timer = setTimeout(() => {
+        void this.tick().catch(async (error) => {
+          this.running = false;
+          this.schedulerError = String(error instanceof Error ? error.message : error).slice(0, MAX_TEXT);
+          await this.report("scheduler", this.schedulerError);
+        });
+      }, delay);
     });
   }
 
@@ -548,6 +573,9 @@ export class EventWatchService {
         .map(([id]) => id);
       await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
         this.locked(id, async () => {
+          await this.stateReady;
+          await this.mutations;
+          if (!this.resourceIsDue(this.state, id)) return;
           const observed = await this.observe(id);
           if (!observed) await this.deliverResource(id);
         })
@@ -559,13 +587,37 @@ export class EventWatchService {
 
   async start() {
     await this.stateReady;
-    this.running = true;
     await this.mutate((state) => {
-      for (const resource of Object.values(state.resources)) resource.nextPollAt = this.now();
+      const counts = new Map();
+      for (const resource of Object.values(state.resources)) {
+        const source = this.sources[resource.source];
+        if (!source) throw new Error(`persisted watch uses unsupported source ${resource.source}`);
+        counts.set(resource.source, (counts.get(resource.source) ?? 0) + 1);
+      }
+      for (const [name, count] of counts) {
+        const capacity = this.sources[name].maxResources;
+        if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1)) {
+          throw new Error(`source ${name} has an invalid resource capacity`);
+        }
+        if (capacity !== undefined && count > capacity) {
+          throw new Error(`persisted source ${name} has ${count} resources but current capacity is ${capacity}`);
+        }
+      }
+      for (const watch of Object.values(state.watches)) {
+        const resource = state.resources[watch.resourceId];
+        const minimum = this.sources[resource.source].minimumIntervalMs;
+        if (minimum !== undefined) watch.intervalMs = Math.max(watch.intervalMs, interval(minimum));
+      }
+      for (const id of Object.keys(state.resources)) {
+        this.rescheduleResource(state, id);
+        state.resources[id].nextPollAt = this.now();
+      }
       for (const watch of Object.values(state.watches)) {
         if (watch.pending) watch.pending.retryAt = this.now();
       }
     });
+    this.schedulerError = undefined;
+    this.running = true;
     this.schedule();
   }
 

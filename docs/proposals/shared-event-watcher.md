@@ -265,8 +265,9 @@ The ADO adapter observes one exact build identity in the form
 `organization/project/build-id`. It derives revisions only from the build ID,
 status, result, source commit, and finish time. It obtains a fresh ambient Azure
 CLI token for every read, or uses `AZURE_DEVOPS_EXT_PAT`, and never persists the
-credential. Reads are at least one minute apart and bounded to ten distinct
-builds per daemon.
+credential. Scheduled reads are at least one minute apart and bounded to ten
+distinct builds per daemon. One shared 600-request hourly budget also covers
+registration and manual reads, so those paths cannot bypass the provider bound.
 
 Defer webhooks, action wrappers that auto-register created PRs/builds, MCP,
 and automatic production rollout until the first path is useful in a real goal.

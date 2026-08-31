@@ -45,6 +45,7 @@ export class EventWatchServer {
     this.service = service;
     this.socketPath = socketPath;
     this.sockets = new Set();
+    this.ownsSocket = false;
   }
 
   async start() {
@@ -62,19 +63,38 @@ export class EventWatchServer {
       }
       this.server = net.createServer((socket) => this.accept(socket));
       await new Promise((resolve, reject) => {
-        this.server.once("error", reject);
-        this.server.listen(this.socketPath, resolve);
+        const cleanup = () => {
+          this.server.off("error", failed);
+          this.server.off("listening", listening);
+        };
+        const failed = (error) => {
+          cleanup();
+          reject(error);
+        };
+        const listening = () => {
+          cleanup();
+          this.ownsSocket = true;
+          resolve();
+        };
+        this.server.once("error", failed);
+        this.server.once("listening", listening);
+        this.server.listen(this.socketPath);
       });
       await chmod(this.socketPath, 0o600);
       await this.service.start();
     } catch (error) {
       if (this.server?.listening) {
-        await new Promise((resolve) => this.server.close(resolve));
+        const closed = new Promise((resolve) => this.server.close(resolve));
+        for (const socket of this.sockets) socket.destroy();
+        await closed;
       }
       this.server = undefined;
-      await unlink(this.socketPath).catch((unlinkError) => {
-        if (unlinkError?.code !== "ENOENT") throw unlinkError;
-      });
+      if (this.ownsSocket) {
+        await unlink(this.socketPath).catch((unlinkError) => {
+          if (unlinkError?.code !== "ENOENT") throw unlinkError;
+        });
+        this.ownsSocket = false;
+      }
       await this.releaseLock();
       throw error;
     }
@@ -85,9 +105,10 @@ export class EventWatchServer {
     socket.once("close", () => this.sockets.delete(socket));
     let buffer = "";
     let requests = Promise.resolve();
+    socket.setEncoding("utf8");
     socket.on("error", () => {});
     socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
+      buffer += chunk;
       for (;;) {
         const newline = buffer.indexOf("\n");
         if (newline < 0) break;
@@ -127,9 +148,12 @@ export class EventWatchServer {
       await closed;
     }
     this.server = undefined;
-    await unlink(this.socketPath).catch((error) => {
-      if (error?.code !== "ENOENT") throw error;
-    });
+    if (this.ownsSocket) {
+      await unlink(this.socketPath).catch((error) => {
+        if (error?.code !== "ENOENT") throw error;
+      });
+      this.ownsSocket = false;
+    }
     await this.releaseLock();
   }
 
