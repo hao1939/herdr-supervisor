@@ -784,6 +784,12 @@ stores or displays copied live status as goal truth.
   review, then moved to the configured next deadline.
 - **Verified:** a short-interval test exposed and fixed overlapping review
   wakeups; signals now coalesce while a worker review is in flight.
+- **Verified live:** nine supervised goals produced 985 review decisions in
+  about 24 hours; 432 adjacent reviews landed in the old 9–12 minute fallback
+  band, including 54 repeated human-wait reviews. Herdr events, exact peer
+  decisions, and external watches already provide early wakes, so the default
+  fallback is now one hour. This removes timer-shaped model polling without a
+  new scheduler, wait type, or retry rule.
 
 ### Stage 2c: shared-session context switching
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import { sameAgentSession } from "../src/identity.ts";
 import {
   captureIdentity,
+  DEFAULT_REVIEW_INTERVAL_MS,
   dependentBindings,
   dueBindings,
   findPane,
@@ -15,6 +16,10 @@ import {
   shouldWake,
 } from "../src/supervision.ts";
 import { reviewMessage, supervisorSystemPrompt } from "../src/prompts.ts";
+
+test("the default deadline is a low-frequency event safety net", () => {
+  assert.equal(DEFAULT_REVIEW_INTERVAL_MS, 60 * 60 * 1000);
+});
 
 test("review deadlines share one bounded validation rule", () => {
   const now = Date.parse("2026-08-28T00:00:00.000Z");
