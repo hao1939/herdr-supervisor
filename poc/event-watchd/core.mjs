@@ -94,7 +94,8 @@ function validateState(value) {
     if (!object(resource)
       || id !== resourceId(text(resource.source, "resource source"), text(resource.subject, "resource subject"))
       || text(resource.revision, "resource revision") !== resource.revision
-      || !Number.isFinite(resource.nextPollAt)) {
+      || !Number.isFinite(resource.nextPollAt)
+      || (resource.backoffUntil !== undefined && !Number.isFinite(resource.backoffUntil))) {
       throw new Error("unsupported or malformed event watcher resource");
     }
     interval(resource.intervalMs);
@@ -210,7 +211,18 @@ export class EventWatchService {
   async readCurrent(input) {
     const source = text(input.source, "source");
     const subject = text(input.subject, "subject");
-    return { source, subject, ...await this.read(source, subject) };
+    const id = resourceId(source, subject);
+    return this.locked(id, async () => {
+      await this.stateReady;
+      await this.mutations;
+      const backoffUntil = this.state.resources[id]?.backoffUntil;
+      if (backoffUntil > this.now()) {
+        const error = new Error(`source ${source} is backed off for this subject`);
+        error.retryAfterMs = backoffUntil - this.now();
+        throw error;
+      }
+      return { source, subject, ...await this.read(source, subject) };
+    });
   }
 
   async setDiagnostics(destination) {
@@ -264,7 +276,7 @@ export class EventWatchService {
 
   resourceIsDue(state, id, now = this.now()) {
     const resource = state.resources[id];
-    return Boolean(resource && (
+    return Boolean(resource && !(resource.backoffUntil > now) && (
       resource.nextPollAt <= now
       || Object.values(state.watches).some((watch) =>
         watch.resourceId === id && watch.pending?.retryAt <= now)
@@ -294,6 +306,12 @@ export class EventWatchService {
           intervalMs: existing.intervalMs,
           existing: true,
         };
+      }
+      const backoffUntil = this.state.resources[id]?.backoffUntil;
+      if (backoffUntil > this.now()) {
+        const error = new Error(`source ${source} is backed off for this subject`);
+        error.retryAfterMs = backoffUntil - this.now();
+        throw error;
       }
       const sourceCapacity = this.sources[source]?.maxResources;
       if (sourceCapacity !== undefined) {
@@ -503,6 +521,8 @@ export class EventWatchService {
       this.locked(id, async () => {
         // Time can advance while this task waits for the per-resource lock, so
         // recheck backoff here rather than trusting the filter snapshot above.
+        await this.stateReady;
+        await this.mutations;
         if (this.state.resources[id]?.backoffUntil > this.now()) return;
         const observed = await this.observe(id);
         if (!observed) await this.deliverResource(id);
@@ -630,10 +650,13 @@ export class EventWatchService {
       }
       for (const id of Object.keys(state.resources)) {
         this.rescheduleResource(state, id);
-        state.resources[id].nextPollAt = this.now();
+        state.resources[id].nextPollAt = Math.max(this.now(), state.resources[id].backoffUntil ?? 0);
       }
       for (const watch of Object.values(state.watches)) {
-        if (watch.pending) watch.pending.retryAt = this.now();
+        if (watch.pending) {
+          const resource = state.resources[watch.resourceId];
+          watch.pending.retryAt = Math.max(this.now(), resource.backoffUntil ?? 0);
+        }
       }
     });
     this.schedulerError = undefined;

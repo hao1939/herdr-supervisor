@@ -22,6 +22,17 @@ const server = new EventWatchServer({ service, socketPath });
 await server.start();
 console.log(`event-watchd listening on ${socketPath}`);
 
+let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => void server.stop().finally(() => process.exit(0)));
+  process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    void server.stop().then(
+      () => process.exit(0),
+      (error) => {
+        console.error(`event-watchd shutdown failed: ${error instanceof Error ? error.message : error}`);
+        process.exit(1);
+      },
+    );
+  });
 }

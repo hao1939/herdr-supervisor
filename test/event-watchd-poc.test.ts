@@ -167,6 +167,17 @@ test("source retry guidance postpones both observation and pending delivery", as
   assert.match(resource.lastError, /rate limited/);
   const watch: any = Object.values((await service.status()).watches)[0];
   assert.equal(watch.pending.retryAt, now + 9_000);
+
+  const restarted = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: { source },
+    deliveries: { test: { deliver: async () => { throw new Error("offline"); } } },
+  });
+  await restarted.start();
+  restarted.stop();
+  const restoredResource: any = Object.values((await restarted.status()).resources)[0];
+  assert.equal(restoredResource.nextPollAt, now + 9_000, "restart preserves the provider retry boundary");
 });
 
 test("a failed source read cannot deliver an older pending revision", async () => {
@@ -245,6 +256,18 @@ test("manual poll honors provider retry guidance instead of re-reading during ba
   now += 1_000;
   await service.pollNow();
   assert.equal(reads, 2, "a second manual poll must not re-read a resource still inside its retry window");
+  await assert.rejects(service.readCurrent({ source: "source", subject: "subject" }), (error: any) => {
+    assert.match(error.message, /backed off/);
+    assert.equal(error.retryAfterMs, 8_000);
+    return true;
+  });
+  await assert.rejects(service.watch({
+    source: "source",
+    subject: "subject",
+    destination: destination("second-worker"),
+    intervalMs: 1_000,
+  }), /backed off/);
+  assert.equal(reads, 2, "manual reads and new registrations also preserve provider backoff");
 
   now += 9_000;
   await service.pollNow();
@@ -989,6 +1012,32 @@ test("Herdr delivery resumes a settled native Goal before sending the wake hint"
   assert.match(prompts[1], /event-watch read github-pr owner\/repo#1/);
   assert.deepEqual(calls[1].params.wait, { until: ["working"], timeout_ms: 10_000 });
   assert.equal(calls.at(-1).params.target, "w1:p3", "the hint follows the exact session after resume");
+});
+
+test("Herdr delivery sends no prompt for a missing or ambiguous native session", async () => {
+  const agentSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session" };
+  for (const matches of [0, 2]) {
+    const calls: any[] = [];
+    const request = async (method: string, params: any) => {
+      calls.push({ method, params });
+      return {
+        snapshot: {
+          agents: Array.from({ length: matches }, (_, index) => ({
+            pane_id: `w1:p${index + 1}`,
+            agent_status: "working",
+            agent_session: agentSession,
+          })),
+        },
+      };
+    };
+    await assert.rejects(herdrDelivery({ request }).deliver({ agentSession }, {
+      source: "github-pr",
+      subject: "owner/repo#1",
+      revision: "two",
+      payload: null,
+    }), new RegExp(`resolved to ${matches} live agents`));
+    assert.equal(calls.filter((call) => call.method === "agent.prompt").length, 0);
+  }
 });
 
 test("delivery failure stays pending and emits one coalesced supervisor diagnostic", async () => {
