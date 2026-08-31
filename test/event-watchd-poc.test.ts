@@ -1086,6 +1086,33 @@ test("a queued scheduler pass rechecks the resource deadline after its lock", as
   assert.equal(reads, 2, "the queued pass skips the resource after the first pass moves its deadline");
 });
 
+test("service shutdown drains a scheduler tick before it acquires a resource lock", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-tick-drain-"));
+  let now = 10_000;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: { source: { read: async () => ({ revision: "same", payload: null }) } },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  await service.watch({ source: "source", subject: "same", destination: destination("worker"), intervalMs: 1_000 });
+  now += 1_000;
+  let releaseMutation!: () => void;
+  const mutation = new Promise<void>((resolve) => { releaseMutation = resolve; });
+  (service as any).mutations = mutation;
+  (service as any).running = true;
+  service.runTick();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  let stopped = false;
+  const stopping = service.stop().then(() => { stopped = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(stopped, false);
+  releaseMutation();
+  await stopping;
+  assert.equal((service as any).activeTicks.size, 0);
+});
+
 test("a closed daemon connection cannot leave a CLI request pending", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-client-"));
   const socketPath = join(directory, "watch.sock");

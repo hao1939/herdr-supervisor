@@ -168,6 +168,7 @@ export class EventWatchService {
     this.resourceLocks = new Map();
     this.sourceBackoffs = new Map();
     this.reportedDiagnostics = new Set();
+    this.activeTicks = new Set();
     this.scheduleGeneration = 0;
     this.running = false;
     this.schedulerError = undefined;
@@ -621,14 +622,21 @@ export class EventWatchService {
       ];
       if (!times.length) return;
       const delay = Math.max(0, Math.min(...times) - this.now());
-      this.timer = setTimeout(() => {
-        void this.tick().catch(async (error) => {
-          this.running = false;
-          this.schedulerError = String(error instanceof Error ? error.message : error).slice(0, MAX_TEXT);
-          await this.report("scheduler", this.schedulerError);
-        });
-      }, delay);
+      this.timer = setTimeout(() => this.runTick(), delay);
     });
+  }
+
+  runTick() {
+    const active = this.tick().catch(async (error) => {
+      this.running = false;
+      this.schedulerError = String(error instanceof Error ? error.message : error).slice(0, MAX_TEXT);
+      await this.report("scheduler", this.schedulerError);
+    });
+    this.activeTicks.add(active);
+    void active.then(
+      () => this.activeTicks.delete(active),
+      () => this.activeTicks.delete(active),
+    );
   }
 
   async tick() {
@@ -698,6 +706,6 @@ export class EventWatchService {
   async stop() {
     this.running = false;
     clearTimeout(this.timer);
-    await Promise.allSettled([this.mutations, ...this.resourceLocks.values()]);
+    await Promise.allSettled([this.mutations, ...this.resourceLocks.values(), ...this.activeTicks]);
   }
 }
