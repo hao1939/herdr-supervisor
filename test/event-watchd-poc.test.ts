@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { eventWatchRequest } from "../poc/event-watchd/client.mjs";
 import { EventWatchService } from "../poc/event-watchd/core.mjs";
+import { githubPullRequestSource } from "../poc/event-watchd/github-pr.mjs";
 import { herdrDelivery } from "../poc/event-watchd/herdr.mjs";
+import { EventWatchServer } from "../poc/event-watchd/server.mjs";
 
 function destination(name: string) {
   return { adapter: "test", target: { name } };
@@ -66,6 +70,8 @@ test("an undelivered revision survives restart and a duplicate wake is bounded",
   let revision = "one";
   let fail = true;
   const deliveries: any[] = [];
+  let deliveredAfterRestart!: () => void;
+  const restartDelivery = new Promise<void>((resolve) => { deliveredAfterRestart = resolve; });
   const options = {
     statePath,
     sources: { source: { read: async () => ({ revision, payload: { revision } }) } },
@@ -74,6 +80,7 @@ test("an undelivered revision survives restart and a duplicate wake is bounded",
         deliver: async (_target: any, event: any) => {
           deliveries.push(event);
           if (fail) throw new Error("delivery unavailable");
+          deliveredAfterRestart();
         },
       },
     },
@@ -86,10 +93,61 @@ test("an undelivered revision survives restart and a duplicate wake is bounded",
 
   fail = false;
   const restarted = new EventWatchService(options);
-  await restarted.pollNow();
+  await restarted.start();
+  await Promise.race([
+    restartDelivery,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("restart delivery timed out")), 1_000)),
+  ]);
+  restarted.stop();
   assert.equal(Object.keys((await restarted.status()).watches).length, 0);
   assert.equal(deliveries.length, 2, "the latest pending hint is retried once after restart");
   assert.doesNotMatch(await readFile(statePath, "utf8"), /delivery unavailable/);
+});
+
+test("retrying the same registration preserves its unseen pending change", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-idempotent-"));
+  let revision = "one";
+  let reads = 0;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision, payload: { reads: ++reads } }) } },
+    deliveries: { test: { deliver: async () => { throw new Error("offline"); } } },
+  });
+  const input = { source: "source", subject: "same", destination: destination("worker"), intervalMs: 1_000 };
+  const original = await service.watch(input);
+  revision = "two";
+  await service.pollNow();
+  const retried = await service.watch(input);
+
+  assert.equal(retried.watchId, original.watchId);
+  assert.equal(retried.existing, true);
+  assert.equal(reads, 2, "the idempotent retry does not replace the pending baseline");
+  const watch: any = Object.values((await service.status()).watches)[0];
+  assert.equal(watch.pending.revision, "two");
+});
+
+test("state written before per-watch intervals remains readable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-compat-"));
+  const statePath = join(directory, "state.json");
+  const options = {
+    statePath,
+    sources: { source: { read: async () => ({ revision: "one", payload: null }) } },
+    deliveries: { test: { deliver: async () => {} } },
+  };
+  const original = new EventWatchService(options);
+  await original.watch({
+    source: "source",
+    subject: "subject",
+    destination: destination("worker"),
+    intervalMs: 60_000,
+  });
+  const oldState = JSON.parse(await readFile(statePath, "utf8"));
+  delete (Object.values(oldState.watches)[0] as any).intervalMs;
+  await writeFile(statePath, `${JSON.stringify(oldState)}\n`);
+
+  const restarted = new EventWatchService(options);
+  const watch: any = Object.values((await restarted.status()).watches)[0];
+  assert.equal(watch.intervalMs, 60_000);
 });
 
 test("a later registration cannot hide a change from an existing watch", async () => {
@@ -122,22 +180,188 @@ test("a slower second watch cannot postpone an existing fast resource", async ()
     sources: { source: { read: async () => ({ revision: "same", payload: null }) } },
     deliveries: { test: { deliver: async () => {} } },
   });
-  await service.watch({ source: "source", subject: "same", destination: destination("fast"), intervalMs: 1_000 });
+  const fast = await service.watch({ source: "source", subject: "same", destination: destination("fast"), intervalMs: 1_000 });
   now += 100;
   await service.watch({ source: "source", subject: "same", destination: destination("slow"), intervalMs: 60_000 });
 
   const resource: any = Object.values((await service.status()).resources)[0];
   assert.equal(resource.intervalMs, 1_000);
   assert.equal(resource.nextPollAt, now + 1_000);
+
+  await service.unwatch(fast.watchId);
+  const remaining: any = Object.values((await service.status()).resources)[0];
+  assert.equal(remaining.intervalMs, 60_000, "removing the fast watch restores the remaining interval");
+});
+
+test("a second daemon cannot steal a live socket", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-server-"));
+  const socketPath = join(directory, "watch.sock");
+  const makeService = (name: string) => new EventWatchService({
+    statePath: join(directory, `${name}.json`),
+    sources: {},
+    deliveries: {},
+  });
+  const first = new EventWatchServer({ service: makeService("first"), socketPath });
+  const second = new EventWatchServer({ service: makeService("second"), socketPath });
+  await first.start();
+  await assert.rejects(second.start(), /already running|already live/);
+  await first.stop();
+});
+
+test("a failed daemon startup releases its socket and process lock", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-startup-"));
+  const socketPath = join(directory, "watch.sock");
+  const failed = new EventWatchServer({
+    socketPath,
+    service: {
+      start: async () => { throw new Error("state is unreadable"); },
+      stop: () => {},
+    },
+  });
+  await assert.rejects(failed.start(), /state is unreadable/);
+
+  const replacement = new EventWatchServer({
+    socketPath,
+    service: new EventWatchService({
+      statePath: join(directory, "replacement.json"),
+      sources: {},
+      deliveries: {},
+    }),
+  });
+  await replacement.start();
+  await replacement.stop();
+});
+
+function githubResponse(body: any, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function githubFixture({ checks, statuses }: { checks: any[]; statuses: any[] }) {
+  return async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith("/pulls/42")) {
+      return githubResponse({
+        head: { sha: "abc123" },
+        state: "open",
+        draft: false,
+        mergeable: true,
+        mergeable_state: "clean",
+      });
+    }
+    const page = Number(url.searchParams.get("page"));
+    if (url.pathname.endsWith("/check-runs")) {
+      return githubResponse({ check_runs: page === 1 ? checks : [] });
+    }
+    if (url.pathname.endsWith("/status")) {
+      return githubResponse({ statuses: page === 1 ? statuses : [] });
+    }
+    return githubResponse({ message: "unexpected request" }, 404);
+  };
+}
+
+test("GitHub observations include checks and statuses in canonical order", async () => {
+  const checks = [
+    { id: 20, name: "integration", status: "completed", conclusion: "success" },
+    { id: 10, name: "unit", status: "in_progress", conclusion: null },
+  ];
+  const statuses = [
+    { id: 40, context: "policy", state: "success" },
+    { id: 30, context: "release", state: "pending" },
+  ];
+  const first = await githubPullRequestSource({ fetchImpl: githubFixture({ checks, statuses }), token: "test" }).read("owner/repo#42");
+  const second = await githubPullRequestSource({
+    fetchImpl: githubFixture({ checks: [...checks].reverse(), statuses: [...statuses].reverse() }),
+    token: "test",
+  }).read("owner/repo#42");
+
+  assert.equal(first.revision, second.revision, "provider response order does not create a false change");
+  assert.deepEqual(first.payload.checks.map((check: any) => check.id), [10, 20]);
+  assert.deepEqual(first.payload.statuses.map((status: any) => status.id), [30, 40]);
+  assert.equal(first.payload.mergeableState, "clean");
+});
+
+test("GitHub observations page through checks with a hard upper bound", async () => {
+  const calls: string[] = [];
+  const fetchImpl = async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    calls.push(url.toString());
+    if (url.pathname.endsWith("/pulls/42")) {
+      return githubResponse({
+        head: { sha: "abc123" }, state: "open", draft: false, mergeable: null, mergeable_state: "unknown",
+      });
+    }
+    if (url.pathname.endsWith("/status")) return githubResponse({ statuses: [] });
+    if (url.pathname.endsWith("/check-runs")) {
+      const page = Number(url.searchParams.get("page"));
+      const count = page === 1 ? 100 : 1;
+      return githubResponse({
+        check_runs: Array.from({ length: count }, (_, index) => ({
+          id: (page - 1) * 100 + index + 1,
+          name: `check-${(page - 1) * 100 + index + 1}`,
+          status: "completed",
+          conclusion: "success",
+        })),
+      });
+    }
+    return githubResponse({ message: "unexpected request" }, 404);
+  };
+
+  const result = await githubPullRequestSource({ fetchImpl, token: "test" }).read("owner/repo#42");
+  assert.equal(result.payload.totalChecks, 101);
+  assert.equal(result.payload.checks.length, 25);
+  assert.equal(result.payload.truncated, true);
+  assert.equal(calls.filter((url) => url.includes("/check-runs")).length, 2);
+});
+
+test("unauthenticated GitHub watches use a rate-limit-safe interval", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-rate-"));
+  const source = githubPullRequestSource({
+    fetchImpl: githubFixture({ checks: [], statuses: [] }),
+    token: "",
+  });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { "github-pr": source },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  const result = await service.watch({
+    source: "github-pr",
+    subject: "owner/repo#42",
+    destination: destination("worker"),
+    intervalMs: 1_000,
+  });
+
+  assert.equal(result.intervalMs, 5 * 60 * 1_000);
+});
+
+test("a closed daemon connection cannot leave a CLI request pending", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-client-"));
+  const socketPath = join(directory, "watch.sock");
+  const server = net.createServer((socket) => socket.end("partial response"));
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  await assert.rejects(
+    eventWatchRequest({ action: "list" }, { socketPath, timeoutMs: 1_000 }),
+    /(ended|closed) without a response/,
+  );
+  server.close();
 });
 
 test("Herdr delivery resumes a settled native Goal before sending the wake hint", async () => {
   const calls: any[] = [];
   const agentSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session" };
+  let snapshots = 0;
   const request = async (method: string, params: any) => {
     calls.push({ method, params });
     if (method === "session.snapshot") {
-      return { snapshot: { agents: [{ pane_id: "w1:p2", agent_status: "done", agent_session: agentSession }] } };
+      snapshots += 1;
+      return {
+        snapshot: {
+          agents: [{ pane_id: snapshots === 1 ? "w1:p2" : "w1:p3", agent_status: snapshots === 1 ? "done" : "working", agent_session: agentSession }],
+        },
+      };
     }
     return {};
   };
@@ -152,6 +376,7 @@ test("Herdr delivery resumes a settled native Goal before sending the wake hint"
   assert.equal(prompts[0], "/goal resume");
   assert.match(prompts[1], /event-watch read github-pr owner\/repo#1/);
   assert.deepEqual(calls[1].params.wait, { until: ["working"], timeout_ms: 10_000 });
+  assert.equal(calls.at(-1).params.target, "w1:p3", "the hint follows the exact session after resume");
 });
 
 test("delivery failure stays pending and emits one coalesced supervisor diagnostic", async () => {

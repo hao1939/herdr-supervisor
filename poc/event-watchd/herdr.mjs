@@ -1,6 +1,7 @@
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { sameAgentSession } from "../../src/agent-session.ts";
 
 export function defaultHerdrSocket(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
@@ -43,23 +44,19 @@ export function herdrRequest(method, params = {}, {
   });
 }
 
-function sameSession(left, right) {
-  return left && right
-    && left.source === right.source
-    && left.agent === right.agent
-    && left.kind === right.kind
-    && left.value === right.value;
-}
-
 export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
   return {
     async deliver(target, event) {
       if (!target?.agentSession) throw new Error("Herdr destination requires agentSession");
-      const result = await request("session.snapshot", {}, options);
-      const matches = result.snapshot.agents.filter((agent) => sameSession(agent.agent_session, target.agentSession));
-      if (matches.length !== 1) {
-        throw new Error(`exact Herdr agent session resolved to ${matches.length} live agents`);
-      }
+      const findExact = async () => {
+        const result = await request("session.snapshot", {}, options);
+        const matches = result.snapshot.agents.filter((agent) => sameAgentSession(agent.agent_session, target.agentSession));
+        if (matches.length !== 1) {
+          throw new Error(`exact Herdr agent session resolved to ${matches.length} live agents`);
+        }
+        return matches[0];
+      };
+      let agent = await findExact();
       const message = event.diagnostic
         ? `External event watcher needs diagnosis. ${event.payload.error}`
         : [
@@ -67,15 +64,19 @@ export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
             `Reread current authority directly or run event-watch read ${event.source} ${event.subject}, handle what changed, and continue your active goal.`,
             "This notification is only a wake hint; do not treat its payload as completion proof.",
           ].join(" ");
-      if (!event.diagnostic && matches[0].agent_status !== "working") {
+      if (!event.diagnostic && agent.agent_status !== "working") {
         await request("agent.prompt", {
-          target: matches[0].pane_id,
+          target: agent.pane_id,
           text: "/goal resume",
           wait: { until: ["working"], timeout_ms: 10_000 },
         }, { ...options, timeoutMs: 12_000 });
+        agent = await findExact();
+        if (agent.agent_status !== "working") {
+          throw new Error("exact Herdr agent session settled again before watcher delivery");
+        }
       }
-      await request("agent.prompt", { target: matches[0].pane_id, text: message }, options);
-      return { paneId: matches[0].pane_id };
+      await request("agent.prompt", { target: agent.pane_id, text: message }, options);
+      return { paneId: agent.pane_id };
     },
   };
 }

@@ -1,11 +1,12 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const VERSION = 1;
 const MAX_TEXT = 2_000;
 const MAX_TARGET_BYTES = 16 * 1024;
 const MAX_WATCHES = 1_024;
+const MAX_CONCURRENT_READS = 4;
 const MIN_INTERVAL_MS = 1_000;
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -47,6 +48,18 @@ function emptyState() {
   return { version: VERSION, resources: {}, watches: {} };
 }
 
+async function concurrent(items, limit, operation) {
+  let next = 0;
+  async function run() {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      await operation(items[index]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+}
+
 function object(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -75,6 +88,8 @@ function validateState(value) {
     if (!object(watch) || !value.resources[watch.resourceId]) {
       throw new Error("unsupported or malformed event watcher watch");
     }
+    watch.intervalMs ??= value.resources[watch.resourceId].intervalMs;
+    interval(watch.intervalMs);
     const destination = validateDestination(watch.destination);
     const resource = value.resources[watch.resourceId];
     if (id !== watchId(resource.source, resource.subject, destination)) {
@@ -103,9 +118,26 @@ async function load(path) {
 
 async function save(path, state) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-  await rename(temporary, path);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  let file;
+  try {
+    file = await open(temporary, "wx", 0o600);
+    await file.writeFile(`${JSON.stringify(state, null, 2)}\n`);
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await rename(temporary, path);
+    const directory = await open(dirname(path), "r");
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    await file?.close().catch(() => {});
+    await unlink(temporary).catch(() => {});
+    throw error;
+  }
 }
 
 export class EventWatchService {
@@ -171,14 +203,14 @@ export class EventWatchService {
   }
 
   async report(key, message) {
-    if (this.reportedDiagnostics.has(key)) return;
-    this.reportedDiagnostics.add(key);
     await this.stateReady;
     await this.mutations;
     const destination = this.state.diagnostics;
     if (!destination) return;
     const adapter = this.deliveries[destination.adapter];
     if (!adapter) return;
+    if (this.reportedDiagnostics.has(key)) return;
+    this.reportedDiagnostics.add(key);
     try {
       await adapter.deliver(destination.target, {
         source: "event-watchd",
@@ -188,17 +220,46 @@ export class EventWatchService {
         diagnostic: true,
       });
     } catch {
+      this.reportedDiagnostics.delete(key);
       // Health/list still exposes the original error. Diagnostics must not form a retry loop.
     }
+  }
+
+  rescheduleResource(state, id) {
+    const resource = state.resources[id];
+    if (!resource) return;
+    const watches = Object.values(state.watches).filter((watch) => watch.resourceId === id);
+    if (!watches.length) {
+      delete state.resources[id];
+      return;
+    }
+    resource.intervalMs = Math.min(...watches.map((watch) => watch.intervalMs));
+    resource.nextPollAt = Math.min(resource.nextPollAt, this.now() + resource.intervalMs);
   }
 
   async watch(input) {
     const source = text(input.source, "source");
     const subject = text(input.subject, "subject");
     const destination = validateDestination(input.destination);
-    const intervalMs = interval(input.intervalMs ?? 60_000);
+    const requestedIntervalMs = interval(input.intervalMs ?? 60_000);
+    const sourceMinimum = this.sources[source]?.minimumIntervalMs;
+    const intervalMs = Math.max(requestedIntervalMs, sourceMinimum === undefined ? MIN_INTERVAL_MS : interval(sourceMinimum));
     const id = resourceId(source, subject);
+    const identity = watchId(source, subject, destination);
     return this.locked(id, async () => {
+      await this.stateReady;
+      await this.mutations;
+      if (this.state.watches[identity]) {
+        const existing = this.state.watches[identity];
+        return {
+          watchId: identity,
+          source,
+          subject,
+          baseline: this.state.resources[id].revision,
+          intervalMs: existing.intervalMs,
+          existing: true,
+        };
+      }
       let observation;
       try {
         observation = await this.read(source, subject);
@@ -208,14 +269,13 @@ export class EventWatchService {
         throw error;
       }
       const result = await this.mutate((state) => {
-        const identity = watchId(source, subject, destination);
         if (!state.watches[identity] && Object.keys(state.watches).length >= MAX_WATCHES) {
           throw new Error("event watcher watch limit reached");
         }
         const previous = state.resources[id];
         if (previous && previous.revision !== observation.revision) {
-          for (const [existingId, existing] of Object.entries(state.watches)) {
-            if (existing.resourceId !== id || existingId === identity) continue;
+          for (const existing of Object.values(state.watches)) {
+            if (existing.resourceId !== id) continue;
             existing.pending = {
               revision: observation.revision,
               payload: observation.payload,
@@ -224,18 +284,18 @@ export class EventWatchService {
             };
           }
         }
-        const effectiveInterval = Math.min(previous?.intervalMs ?? intervalMs, intervalMs);
         state.resources[id] = {
           source,
           subject,
           revision: observation.revision,
           payload: observation.payload,
-          intervalMs: effectiveInterval,
+          intervalMs,
           lastObservedAt: this.now(),
-          nextPollAt: this.now() + effectiveInterval,
+          nextPollAt: this.now() + intervalMs,
         };
-        state.watches[identity] = { resourceId: id, destination };
-        return { watchId: identity, source, subject, baseline: observation.revision };
+        state.watches[identity] = { resourceId: id, destination, intervalMs };
+        this.rescheduleResource(state, id);
+        return { watchId: identity, source, subject, baseline: observation.revision, intervalMs };
       });
       this.reportedDiagnostics.delete(`source:${source}:${subject}`);
       await this.deliverResource(id);
@@ -251,9 +311,7 @@ export class EventWatchService {
       if (!watch) return false;
       const resource = watch.resourceId;
       delete state.watches[id];
-      if (!Object.values(state.watches).some((candidate) => candidate.resourceId === resource)) {
-        delete state.resources[resource];
-      }
+      this.rescheduleResource(state, resource);
       return true;
     });
     this.schedule();
@@ -345,9 +403,7 @@ export class EventWatchService {
       if (!current?.pending || current.pending.revision !== watch.pending.revision) return;
       const resourceKey = current.resourceId;
       delete state.watches[id];
-      if (!Object.values(state.watches).some((candidate) => candidate.resourceId === resourceKey)) {
-        delete state.resources[resourceKey];
-      }
+      this.rescheduleResource(state, resourceKey);
     });
     this.reportedDiagnostics.delete(`delivery:${id}`);
   }
@@ -360,12 +416,12 @@ export class EventWatchService {
       }
     });
     const ids = Object.keys(this.state.resources);
-    await Promise.all(ids.map((id) =>
+    await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
       this.locked(id, async () => {
         await this.deliverResource(id);
         await this.observe(id);
       })
-    ));
+    );
     this.schedule();
   }
 
@@ -402,14 +458,14 @@ export class EventWatchService {
           || Object.values(this.state.watches).some((watch) => watch.resourceId === resourceId(resource.source, resource.subject)
             && watch.pending?.retryAt <= now))
         .map(([id]) => id);
-      await Promise.all(ids.map((id) =>
+      await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
         this.locked(id, async () => {
           await this.deliverResource(id);
           await this.stateReady;
           await this.mutations;
           if (this.state.resources[id]?.nextPollAt <= this.now()) await this.observe(id);
         })
-      ));
+      );
     } finally {
       this.schedule();
     }
@@ -420,6 +476,9 @@ export class EventWatchService {
     this.running = true;
     await this.mutate((state) => {
       for (const resource of Object.values(state.resources)) resource.nextPollAt = this.now();
+      for (const watch of Object.values(state.watches)) {
+        if (watch.pending) watch.pending.retryAt = this.now();
+      }
     });
     this.schedule();
   }

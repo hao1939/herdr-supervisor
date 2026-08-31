@@ -1,28 +1,14 @@
 #!/usr/bin/env node
-import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { eventWatchRequest } from "./client.mjs";
 import { currentHerdrDestination } from "./herdr.mjs";
 
 const socketPath = process.env.EVENT_WATCH_SOCKET
   || join(process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "event-watchd"), "event-watch.sock");
 
 function request(message) {
-  return new Promise((resolve, reject) => {
-    const socket = net.createConnection(socketPath);
-    const id = `${process.pid}:${Date.now()}`;
-    let buffer = "";
-    socket.on("error", reject);
-    socket.on("connect", () => socket.write(`${JSON.stringify({ id, ...message })}\n`));
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      const newline = buffer.indexOf("\n");
-      if (newline < 0) return;
-      const response = JSON.parse(buffer.slice(0, newline));
-      socket.destroy();
-      response.ok ? resolve(response.result) : reject(new Error(response.error));
-    });
-  });
+  return eventWatchRequest(message, { socketPath });
 }
 
 const [command, ...args] = process.argv.slice(2);

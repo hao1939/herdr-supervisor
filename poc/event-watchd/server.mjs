@@ -1,11 +1,59 @@
 import net from "node:net";
-import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 const MAX_FRAME = 64 * 1024;
 
 function reply(socket, value) {
   if (socket.writable) socket.write(`${JSON.stringify(value)}\n`);
+}
+
+function processExists(pid) {
+  if (!Number.isInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+async function acquireLock(path) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let file;
+    try {
+      file = await open(path, "wx", 0o600);
+      await file.writeFile(`${process.pid}\n`);
+      await file.sync();
+      return file;
+    } catch (error) {
+      if (file) {
+        await file.close().catch(() => {});
+        await unlink(path).catch(() => {});
+      }
+      if (error?.code !== "EEXIST") throw error;
+      const owner = Number.parseInt(await readFile(path, "utf8").catch(() => ""), 10);
+      if (processExists(owner)) throw new Error(`event-watchd is already running as process ${owner}`);
+      await unlink(path).catch((unlinkError) => {
+        if (unlinkError?.code !== "ENOENT") throw unlinkError;
+      });
+    }
+  }
+  throw new Error("could not acquire the event-watchd process lock");
+}
+
+function socketIsLive(path) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection(path);
+    const finish = (live) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(live);
+    };
+    const timer = setTimeout(() => finish(false), 500);
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
 }
 
 export class EventWatchServer {
@@ -16,20 +64,35 @@ export class EventWatchServer {
 
   async start() {
     await mkdir(dirname(this.socketPath), { recursive: true });
+    this.lockPath = `${this.socketPath}.lock`;
+    this.lock = await acquireLock(this.lockPath);
     try {
-      const current = await lstat(this.socketPath);
-      if (!current.isSocket()) throw new Error(`refusing to replace non-socket ${this.socketPath}`);
-      await unlink(this.socketPath);
+      try {
+        const current = await lstat(this.socketPath);
+        if (!current.isSocket()) throw new Error(`refusing to replace non-socket ${this.socketPath}`);
+        if (await socketIsLive(this.socketPath)) throw new Error("event-watchd socket is already live");
+        await unlink(this.socketPath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      this.server = net.createServer((socket) => this.accept(socket));
+      await new Promise((resolve, reject) => {
+        this.server.once("error", reject);
+        this.server.listen(this.socketPath, resolve);
+      });
+      await chmod(this.socketPath, 0o600);
+      await this.service.start();
     } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+      if (this.server?.listening) {
+        await new Promise((resolve) => this.server.close(resolve));
+      }
+      this.server = undefined;
+      await unlink(this.socketPath).catch((unlinkError) => {
+        if (unlinkError?.code !== "ENOENT") throw unlinkError;
+      });
+      await this.releaseLock();
+      throw error;
     }
-    this.server = net.createServer((socket) => this.accept(socket));
-    await new Promise((resolve, reject) => {
-      this.server.once("error", reject);
-      this.server.listen(this.socketPath, resolve);
-    });
-    await chmod(this.socketPath, 0o600);
-    await this.service.start();
   }
 
   accept(socket) {
@@ -71,9 +134,21 @@ export class EventWatchServer {
 
   async stop() {
     this.service.stop();
-    if (this.server) await new Promise((resolve) => this.server.close(resolve));
+    if (this.server?.listening) await new Promise((resolve) => this.server.close(resolve));
+    this.server = undefined;
     await unlink(this.socketPath).catch((error) => {
       if (error?.code !== "ENOENT") throw error;
     });
+    await this.releaseLock();
+  }
+
+  async releaseLock() {
+    await this.lock?.close().catch(() => {});
+    this.lock = undefined;
+    if (this.lockPath) {
+      await unlink(this.lockPath).catch((error) => {
+        if (error?.code !== "ENOENT") throw error;
+      });
+    }
   }
 }

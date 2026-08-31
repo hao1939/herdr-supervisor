@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 
+const UNAUTHENTICATED_INTERVAL_MS = 5 * 60 * 1_000;
+const PAYLOAD_ITEMS = 25;
+const LABEL_LENGTH = 200;
+
 function parse(subject) {
   const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(subject);
   if (!match) throw new Error("GitHub PR subject must look like owner/repository#number");
@@ -14,6 +18,22 @@ async function json(response, label) {
   return response.json();
 }
 
+async function pages(fetchImpl, url, headers, field, label) {
+  const items = [];
+  for (let page = 1; page <= 20; page += 1) {
+    const separator = url.includes("?") ? "&" : "?";
+    const result = await json(await fetchImpl(`${url}${separator}per_page=100&page=${page}`, {
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    }), label);
+    const batch = result[field];
+    if (!Array.isArray(batch)) throw new Error(`${label} returned an invalid ${field} list`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+  throw new Error(`${label} exceeded the bounded 2,000-item limit`);
+}
+
 export function githubPullRequestSource({ fetchImpl = fetch, token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN } = {}) {
   const headers = {
     Accept: "application/vnd.github+json",
@@ -22,6 +42,7 @@ export function githubPullRequestSource({ fetchImpl = fetch, token = process.env
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
   return {
+    minimumIntervalMs: token ? 1_000 : UNAUTHENTICATED_INTERVAL_MS,
     async read(subject) {
       const { owner, repository, number } = parse(subject);
       const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
@@ -29,15 +50,22 @@ export function githubPullRequestSource({ fetchImpl = fetch, token = process.env
         headers,
         signal: AbortSignal.timeout(30_000),
       }), "GitHub pull request");
-      const checks = await json(await fetchImpl(`${base}/commits/${pull.head.sha}/check-runs?per_page=100`, {
-        headers,
-        signal: AbortSignal.timeout(30_000),
-      }), "GitHub checks");
-      const stableChecks = checks.check_runs.map((check) => ({
-        name: check.name,
+      const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
+      const [checks, statuses] = await Promise.all([
+        pages(fetchImpl, `${commit}/check-runs?filter=latest`, headers, "check_runs", "GitHub checks"),
+        pages(fetchImpl, `${commit}/status`, headers, "statuses", "GitHub statuses"),
+      ]);
+      const stableChecks = checks.map((check) => ({
+        id: check.id,
+        name: String(check.name).slice(0, LABEL_LENGTH),
         status: check.status,
         conclusion: check.conclusion,
-      })).sort((left, right) => left.name.localeCompare(right.name));
+      })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      const stableStatuses = statuses.map((status) => ({
+        id: status.id,
+        context: String(status.context).slice(0, LABEL_LENGTH),
+        state: status.state,
+      })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
       const stable = {
         head: pull.head.sha,
         state: pull.state,
@@ -45,6 +73,7 @@ export function githubPullRequestSource({ fetchImpl = fetch, token = process.env
         mergeable: pull.mergeable,
         mergeableState: pull.mergeable_state,
         checks: stableChecks,
+        statuses: stableStatuses,
       };
       return {
         revision: createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
@@ -52,7 +81,13 @@ export function githubPullRequestSource({ fetchImpl = fetch, token = process.env
           head: pull.head.sha,
           state: pull.state,
           draft: pull.draft,
-          checks: stableChecks,
+          mergeable: pull.mergeable,
+          mergeableState: pull.mergeable_state,
+          checks: stableChecks.slice(0, PAYLOAD_ITEMS),
+          statuses: stableStatuses.slice(0, PAYLOAD_ITEMS),
+          totalChecks: stableChecks.length,
+          totalStatuses: stableStatuses.length,
+          truncated: stableChecks.length > PAYLOAD_ITEMS || stableStatuses.length > PAYLOAD_ITEMS,
         },
       };
     },

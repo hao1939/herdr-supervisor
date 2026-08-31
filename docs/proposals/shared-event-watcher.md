@@ -3,6 +3,10 @@
 **Status:** Live PoC design
 **Reviewed:** 2026-08-31
 
+This is a candidate replacement for the supervisor's current in-process
+external polling. It is not the current production design and this PoC does
+not run both paths together.
+
 ## Decision
 
 Use one small `event-watchd` process to observe external resources for every
@@ -25,6 +29,25 @@ source or delivery failure -> supervisor diagnostic destination
 
 This is an optimization for external waits. It does not replace Herdr worker
 events, supervisor reviews, Codex's native Goal, or good goal design.
+
+## What problem it solves
+
+This is a good way to release a worker from one narrow kind of blocking wait:
+an external PR or build whose state can change without any local activity. It
+is not a way to make every idle worker productive.
+
+The worker should first continue any safe independent work. Only when the
+external condition is the remaining useful trigger does it register a watch
+and settle. The watcher then removes repeated provider polling and model turns;
+it does not decide whether the external result is good, complete the Goal, or
+invent more work.
+
+For the current private MLVM deployment, a shared local daemon is the smallest
+complete path from external change to exact worker wake. At larger scale, the
+more mature observation transport is GitHub webhooks or Azure DevOps service
+hooks. Those can replace a polling source adapter later while retaining the
+same one-shot watch and exact-destination contract. A workflow engine or
+message broker is not justified by the current problem.
 
 ## User scenarios
 
@@ -160,6 +183,17 @@ The worktree provisioner may ensure that the CLI is available in a new worker
 environment, but it is a one-shot worktree hook and must not become the owner of
 a long-running service.
 
+In the Herdr image, natural integration therefore means:
+
+1. the image installs the generic client and daemon;
+2. the container entrypoint or service manager starts one daemon;
+3. the provisioner gives every worker the socket location and short usage
+   guidance;
+4. a thin Pi extension registers the supervisor diagnostic destination and
+   may display health.
+
+Pi is neither the polling host nor a required hop for successful events.
+
 ## Minimal persisted state
 
 One atomically replaced local JSON snapshot is sufficient for the PoC:
@@ -189,6 +223,18 @@ Implement only:
 Defer ADO, webhooks, action wrappers that auto-register created PRs/builds, MCP,
 and automatic production rollout until the first path is useful in a real goal.
 They should become adapters or thin CLI conveniences, not changes to the core.
+
+Before production replacement, answer only these operational questions:
+
+- Who starts and restarts the one environment daemon?
+- How are GitHub and ADO credentials supplied to that process?
+- Can Herdr preserve exact native-session delivery while a worker relocates or
+  resumes?
+- Is a bounded duplicate hint acceptable to every worker? The current answer
+  is yes because workers reread authority.
+- What is the ordinary cleanup path for a watch whose external subject never
+  changes? For the PoC, explicit `unwatch`, the watch limit, and supervisor
+  health are enough; do not add leases until live use proves they are needed.
 
 ## Live acceptance
 
@@ -237,6 +283,18 @@ The experiment also found two integration failures:
    Restarting the daemon with an ambient credential recovered without changing
    watch state. Production intervals must be much slower and credentials must
    be provisioned for the daemon.
+
+Follow-up review found four more deterministic edges before another live run:
+
+- a second daemon could replace a live socket;
+- a resumed session could relocate before the wake hint was delivered;
+- a closed daemon connection could leave the worker CLI waiting forever; and
+- re-registration, pagination, interval removal, or a crash during persistence
+  could lose or delay a wake.
+
+The PoC now has focused coverage for those invariants. Unauthenticated GitHub
+watches are also clamped to a five-minute interval. These follow-up fixes still
+need the repeat MLVM run below; unit proof is not presented as live proof.
 
 The live daemon used negligible idle CPU. It was about 56 MB RSS before its
 first GitHub read and about 70–73 MB afterward. That is reasonable for this
