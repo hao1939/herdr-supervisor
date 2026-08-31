@@ -511,6 +511,8 @@ test("a human correction updates durable authority before execution", () => {
   assert.match(prompt, /update that existing contract before reconsidering that goal's execution/);
   assert.match(prompt, /same rule separately to every affected goal/);
   assert.match(prompt, /cannot override a contradictory goal\.json/);
+  assert.match(prompt, /answers an earlier question with execution evidence that does not change the durable contract/);
+  assert.match(prompt, /If the answer changes the contract, apply the durable-update rule instead/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {
