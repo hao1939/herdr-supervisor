@@ -125,7 +125,9 @@ A version 2 `current.json` should contain:
   "attemptCount": 2,
   "activeAttempt": {
     "attemptId": "a_0002",
+    "phase": "running",
     "worker": {},
+    "pendingDelivery": null,
     "evidence": [],
     "progress": "...",
     "lastDecision": {},
@@ -185,8 +187,11 @@ A relay should:
 3. close the attempt with a compact factual summary and evidence references;
 4. choose the next deterministic attempt ID;
 5. ask Herdr to start the replacement worker;
-6. atomically install the new worker binding in `current.json`;
-7. give the new worker the goal plus a compact handoff.
+6. atomically install the new worker binding and a `pending-delivery` phase in
+   `current.json`, including the compact handoff and a deterministic delivery ID;
+7. give the new worker that handoff using the delivery ID as an idempotency key;
+8. after delivery is acknowledged, atomically mark the attempt `running` and
+   clear the pending delivery.
 
 The handoff should contain:
 
@@ -203,6 +208,14 @@ deterministic `attemptId`, and an idempotency key. Do not infer identity from
 objective text or role. If Herdr cannot accept an idempotency key, use a
 deterministic Herdr worker name and reconcile it from a Herdr snapshot before
 starting another worker.
+
+Handoff delivery must also be retry-safe. On restart, a `pending-delivery`
+attempt is not yet running: reconcile the recorded worker, then redeliver the
+recorded handoff with the same delivery ID. The delivery boundary must deduplicate
+that ID before the worker can act, so an accepted delivery whose acknowledgement
+was lost is safe to retry. If Herdr cannot provide idempotent delivery or expose
+enough state to reconcile it, relay must stop and ask the human rather than
+activate the replacement.
 
 Relay is a Supervisor judgment, not the automatic result of a steer counter.
 A steer limit may bound cost, but reaching it does not prove that the worker is
