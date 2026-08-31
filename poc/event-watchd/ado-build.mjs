@@ -86,12 +86,20 @@ export function adoBuildSource({
   now = () => Date.now(),
 } = {}) {
   const budgetedFetch = requestBudget(fetchImpl, requestLimit, now);
+  let pendingAuthorization;
+  const currentAuthorization = async () => {
+    if (authorization) return authorization;
+    if (!pendingAuthorization) {
+      pendingAuthorization = getAuthorization().finally(() => { pendingAuthorization = undefined; });
+    }
+    return pendingAuthorization;
+  };
   return {
     minimumIntervalMs: MINIMUM_INTERVAL_MS,
     maxResources: MAX_RESOURCES,
     async read(subject) {
       const { organization, project, buildId } = parse(subject);
-      const auth = authorization || await getAuthorization();
+      const auth = await currentAuthorization();
       const url = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`
         + `/_apis/build/builds/${buildId}?api-version=7.1`;
       const build = await json(await budgetedFetch(url, {

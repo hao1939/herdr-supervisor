@@ -713,6 +713,36 @@ test("ADO obtains a fresh ambient token for each read", async () => {
   assert.deepEqual(seen, ["Bearer token-1", "Bearer token-2"]);
 });
 
+test("concurrent ADO reads share one ambient token acquisition", async () => {
+  let authorizations = 0;
+  let releaseAuthorization!: () => void;
+  const release = new Promise<void>((resolve) => { releaseAuthorization = resolve; });
+  const seen: string[] = [];
+  const source = adoBuildSource({
+    getAuthorization: async () => {
+      authorizations += 1;
+      await release;
+      return "Bearer shared-token";
+    },
+    fetchImpl: async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(String((init?.headers as Record<string, string>).Authorization));
+      return new Response(JSON.stringify({
+        id: 42, status: "inProgress", result: null, sourceVersion: "abc123", finishTime: null,
+      }), { status: 200 });
+    },
+  });
+
+  const reads = Promise.all([
+    source.read("msazure/CloudNativeCompute/42"),
+    source.read("msazure/CloudNativeCompute/43"),
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(authorizations, 1);
+  releaseAuthorization();
+  await reads;
+  assert.deepEqual(seen, ["Bearer shared-token", "Bearer shared-token"]);
+});
+
 test("ADO supports PAT and bounded provider retry guidance", async () => {
   const authorization = await ambientAdoAuthorization({ pat: "test-pat" });
   assert.equal(authorization, `Basic ${Buffer.from(":test-pat").toString("base64")}`);
