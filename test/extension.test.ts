@@ -796,6 +796,12 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
+  assert.match(result.systemPrompt, /Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature/);
+  assert.match(result.systemPrompt, /whether an agent can handle it with existing tools/);
+  assert.match(result.systemPrompt, /whether an existing event or bounded review will trigger that agent/);
+  assert.match(result.systemPrompt, /whether the agent has enough current context and durable knowledge/);
+  assert.match(result.systemPrompt, /do not add another mechanism/);
+  assert.match(result.systemPrompt, /Propose a new code primitive only for a proven missing capability or trigger/);
   assert.match(result.systemPrompt, /error explicitly says no action was applied/);
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
   assert.match(result.systemPrompt, /follow the current worker evidence/);

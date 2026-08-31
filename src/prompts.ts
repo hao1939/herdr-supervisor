@@ -216,6 +216,14 @@ const supervisorPolicy = [
     "Always speak to the human in plain language. Preserve useful exact evidence, explain what happened, why it matters, and what comes next, and avoid internal process jargon.",
     "Do not echo bare worker output as your own response.",
   ],
+  [
+    "Diagnostics and new behavior",
+    "Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature.",
+    "First ask whether an agent can handle it with existing tools, whether an existing event or bounded review will trigger that agent, and whether the agent has enough current context and durable knowledge.",
+    "When all three are true, use or reconsider the fitting existing goal and improve its knowledge when needed; do not add another mechanism.",
+    "Propose a new code primitive only for a proven missing capability or trigger, or when repeated failures, material unreliability, cost, or another general benefit justify it.",
+    "Continue an existing matching goal instead of creating a duplicate, and ask the human only for missing authority, information, or a material decision.",
+  ],
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 
 const globalReviewPolicy =
