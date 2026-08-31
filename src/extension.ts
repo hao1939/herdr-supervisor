@@ -490,8 +490,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         findAgent(snapshot, binding.paneId),
         findPane(snapshot, binding.paneId),
       )) continue;
-      const warning = await applyWorkerLabel(binding);
-      if (warning) reportBackgroundFailure("Could not name an active worker", new Error(warning.trim()));
+      // Display metadata is best effort. A naming failure cannot block or
+      // compete with supervision of the goal itself.
+      await applyWorkerLabel(binding);
     }
     const retiredPanes = new Set<string>();
     for (const record of goals.completed) {
