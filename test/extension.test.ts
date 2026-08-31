@@ -4884,6 +4884,58 @@ test("a due global review routes explicit reconsideration through ordinary focus
   pi.events.get("session_shutdown")();
 });
 
+test("an authenticated human follow-up settles a global review before its retry", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "600000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.equal(pi.messages[0].customType, "herdr-supervisor-global-review");
+
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Answer this before retrying the global review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  }), { action: "handled" });
+  const relayed = pi.customMessages.at(-1);
+  const stillActive = await pi.tools.get("supervisor_global_result").execute("before-follow-up", {
+    summary: "This invalid result must not settle the review.",
+    findings: [],
+    reconsider: [{ goal_id: "g_missing", reason: "invalid reference" }],
+  });
+  assert.equal(stillActive.isError, true);
+  assert.match(stillActive.content[0].text, /not found/);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  const settled = await pi.tools.get("supervisor_global_result").execute("after-follow-up", {
+    summary: "The old review should already be settled.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(settled.isError, true);
+  assert.match(settled.content[0].text, /No global supervision review is active/);
+  assert.equal(pi.messages.length, 2, "the retry must wait behind the human turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.equal(pi.messages[2].customType, "herdr-supervisor-global-review");
+  assert.match(pi.messages[2].content, /previous global review ended without supervisor_global_result/);
+  pi.events.get("session_shutdown")();
+});
+
 test("a reported global finding does not force a focused review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
