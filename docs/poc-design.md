@@ -1173,3 +1173,31 @@ The PoC is successful when all of these are demonstrated:
 
 These questions are evidence goals for the PoC, not reasons to add mechanisms
 before testing.
+
+## 20. Longer live-run findings
+
+- Seven supervised Codex goals survived a container replacement with their
+  exact goal contracts, checkpoints, panes, and native sessions intact. The
+  resumed supervisor reconciled current Herdr state and retained each concrete
+  wait instead of creating replacement goals or workers.
+- Native Codex Goal completion can briefly report `done` before continuing.
+  In one measured resume, the worker advanced through roughly 25 Herdr state
+  transitions while the per-worker 250 ms settling window produced one final
+  supervisor review. This justified a small event-coalescing fix, not another
+  lifecycle or retry system.
+- Across 972 focused reviews, only 17 were relays for an externally watched PR
+  or build, about 1.7%. Experiments that tried to wake the worker directly from
+  the provider observer added another action and recovery path for that small
+  subset. They were rejected because the ordinary path—record the changed
+  revision, wake one focused review, then let the model decide—was already
+  reliable.
+- A 30-second idle sample with seven supervised goals showed the Pi supervisor
+  using no measurable CPU and writing no session data. The live Herdr server
+  used about 9.6% of one CPU while observing nine agent terminals; an otherwise
+  identical empty Herdr server settled near 0%. This is runtime observation
+  cost, not evidence for adding a supervisor queue, polling loop, or daemon.
+
+These measurements apply the agent-first feature test in both directions: add
+one small deterministic primitive when a common lifecycle race is proven, and
+remove or reject machinery when the existing focused review already reaches
+the correct result.
