@@ -1881,7 +1881,7 @@ test("restart names active workers and retires accepted panes without losing the
     },
     {
       pane_id: completedWorker.paneId,
-      terminal_id: completedWorker.terminalId,
+      terminal_id: "term_completed_after_restart",
       agent_status: "idle",
       state_change_seq: 3,
       agent_session: completedWorker.agentSession,

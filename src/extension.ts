@@ -466,9 +466,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const snapshot = knownSnapshot || await client.snapshot();
     const pane = findPane(snapshot, binding.paneId);
     if (!pane) return `\nWorker pane was already closed; its native ${binding.agentSession.agent} session remains recorded.`;
-    if (pane.terminal_id !== binding.terminalId) {
-      return "\nWorker pane was left open because it now refers to a different terminal.";
-    }
     const agent = findAgent(snapshot, binding.paneId);
     if (agent) {
       const mismatch = identityMismatch(binding, agent, pane);
@@ -476,6 +473,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       if (agent.agent_status === "working") {
         return "\nWorker pane was left open because its process is still working.";
       }
+    } else if (pane.terminal_id !== binding.terminalId) {
+      return "\nWorker pane was left open because it now refers to a different terminal.";
     }
     await client.closePane(binding.paneId);
     return `\nWorker pane closed; its native ${binding.agentSession.agent} session remains recorded.`;
