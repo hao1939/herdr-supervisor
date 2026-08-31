@@ -4,7 +4,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
-  bindingFromRecord,
   loadSupervisorGoals,
   installSupervisorGoal,
   recordDecision,
@@ -462,25 +461,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
   }
 
-  async function closeAcceptedWorkerPane(binding, knownSnapshot?) {
-    const snapshot = knownSnapshot || await client.snapshot();
-    const pane = findPane(snapshot, binding.paneId);
-    if (!pane) return `\nWorker pane was already closed; its native ${binding.agentSession.agent} session remains recorded.`;
-    const agent = findAgent(snapshot, binding.paneId);
-    if (agent) {
-      const mismatch = identityMismatch(binding, agent, pane);
-      if (mismatch) return `\nWorker pane was left open because ${mismatch}.`;
-      if (agent.agent_status === "working") {
-        return "\nWorker pane was left open because its process is still working.";
-      }
-    } else if (pane.terminal_id !== binding.terminalId) {
-      return "\nWorker pane was left open because it now refers to a different terminal.";
-    }
-    await client.closePane(binding.paneId);
-    return `\nWorker pane closed; its native ${binding.agentSession.agent} session remains recorded.`;
-  }
-
-  async function reconcileWorkerPresentation(goals) {
+  async function reconcileWorkerLabels(goals) {
     if (mode() !== "live") return;
     const snapshot = await client.snapshot();
     for (const binding of goals.active) {
@@ -492,23 +473,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       // Display metadata is best effort. A naming failure cannot block or
       // compete with supervision of the goal itself.
       await applyWorkerLabel(binding);
-    }
-    const retiredPanes = new Set<string>();
-    for (const record of goals.completed) {
-      if (record.state?.terminal?.state !== "accepted") continue;
-      const binding = bindingFromRecord(record);
-      if (retiredPanes.has(binding.paneId)) continue;
-      const reused = goals.active.some((active) => (
-        active.paneId === binding.paneId
-        || sameAgentSession(active.agentSession, binding.agentSession)
-      ));
-      if (reused) continue;
-      try {
-        await closeAcceptedWorkerPane(binding, snapshot);
-        retiredPanes.add(binding.paneId);
-      } catch (error) {
-        reportBackgroundFailure(`Could not retire accepted worker ${binding.paneId}`, error);
-      }
     }
   }
 
@@ -1138,6 +1102,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       warning = ` Monitoring setup failed: ${error.message}`;
     }
     if (activateNativeGoal && mode() === "live") {
+      warning += await applyWorkerLabel(binding);
       try {
         await deliverNativeGoal(binding);
       } catch (error) {
@@ -1249,6 +1214,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             } else if (typeof agent.name !== "string" || !agent.name.trim()) {
               deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
+              deliveryWarning += await applyWorkerLabel(refinedBinding);
               await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
             }
           } catch (error) {
@@ -1595,6 +1561,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
       let relocatedBinding: ActiveGoal | undefined;
+      let displayWarning = "";
       try {
         const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
@@ -1664,7 +1631,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             } catch (error) {
               reportBackgroundFailure("Could not watch the relocated worker", error);
             }
-            await applyWorkerLabel(binding);
+            displayWarning = await applyWorkerLabel(binding);
           }
           liveAgent = findAgent(liveSnapshot, binding.paneId);
           livePane = findPane(liveSnapshot, binding.paneId);
@@ -1792,7 +1759,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             : relocated
               ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
               : `Steered ${params.pane_id}: ${params.message.trim()}`;
-          return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
+          return text(`${resultText}${warning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);
@@ -1923,11 +1890,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
       );
       let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
-      try {
-        warning += await closeAcceptedWorkerPane(binding);
-      } catch (error) {
-        warning += `\nWorker pane could not be closed: ${error.message}.`;
-      }
       try {
         await connectObserver();
         await armReviewTimer();
@@ -2141,7 +2103,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
     const storedGoals = await reloadGoals();
-    await reconcileWorkerPresentation(storedGoals);
+    try {
+      await reconcileWorkerLabels(storedGoals);
+    } catch (error) {
+      reportBackgroundFailure("Could not refresh worker display names", error);
+    }
     const goals = await activeBindings();
     for (const binding of goals.active) {
       const runtime = runtimeFor(binding);

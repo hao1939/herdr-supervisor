@@ -538,8 +538,9 @@ test("a copied goal activated after restart keeps its exact goal and worker trac
     acceptance: ["The copied goal is bound to the exact worker."],
   }, root, { goalId: "g_copied_trace" });
   const prompts = [];
+  const names = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working", name: "copied-worker" }));
-  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
+  t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => names.push({ paneId, label }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -555,6 +556,7 @@ test("a copied goal activated after restart keeps its exact goal and worker trac
   });
 
   assert.equal(prompts.length, 1);
+  assert.deepEqual(names, [{ paneId: worker.paneId, label: "Trace the copied goal after restart." }]);
   assert.equal(prompts[0].paneId, worker.paneId);
   assert.ok(prompts[0].prompt.includes('- Goal ID: "g_copied_trace"'));
   assert.ok(prompts[0].prompt.includes('- Worker: "copied-worker"'));
@@ -716,7 +718,9 @@ test("a human refinement updates the durable goal and informs the same worker", 
     acceptance: ["The focused test passes."],
   }, root, { goalId: "g_test" });
   const prompts = [];
+  const names = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working", name: "refined-worker" }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => names.push({ paneId, label }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -738,6 +742,10 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.deepEqual(contract.acceptance, ["The focused test passes.", "The exact commit passes the ADO pipeline."]);
   assert.deepEqual(contract.constraints, ["Use an isolated worktree and a focused PR."]);
   assert.equal(prompts.length, 1);
+  assert.deepEqual(names, [{
+    paneId: worker.paneId,
+    label: "Fix and validate the focused regression.",
+  }]);
   assert.equal(prompts[0].paneId, worker.paneId);
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
@@ -1838,7 +1846,7 @@ test("restart never infers legacy ownership from a completed goal name collision
   pi.events.get("session_shutdown")();
 });
 
-test("restart names active workers and retires accepted panes without losing their sessions", async (t) => {
+test("restart refreshes active worker names without treating completed goals as live", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reconcile-presentation-"));
   const activeWorker = {
     paneId: "w1:p2",
@@ -1892,9 +1900,7 @@ test("restart names active workers and retires accepted panes without losing the
     panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
   const renamed = [];
-  const closed = [];
   t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => { renamed.push({ paneId, label }); });
-  t.mock.method(HerdrClient.prototype, "closePane", async (paneId) => { closed.push(paneId); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -1902,52 +1908,39 @@ test("restart names active workers and retires accepted panes without losing the
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
 
   assert.deepEqual(renamed, [{ paneId: activeWorker.paneId, label: "Keep validating the current release." }]);
-  assert.deepEqual(closed, [completedWorker.paneId]);
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.completed[0].state.worker.agentSession.value, "session_completed");
   pi.events.get("session_shutdown")();
 });
 
-test("restart never retires a completed binding whose session has been reused by an active goal", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reused-session-"));
-  const completed = await registerSupervisedGoal(worker, {
-    objective: "Finish the earlier check.",
-    acceptance: ["The earlier check passes."],
-  }, root, { goalId: "g_earlier" });
-  await recordDecision(completed, "accept", {
-    progress: "The earlier check passed.",
-    action: "Accepted the verified goal.",
-    evidence: ["The exact check passed."],
-    terminal: { state: "accepted", summary: "The earlier check passed." },
-  }, root);
-  await registerSupervisedGoal(worker, {
-    objective: "Run the current check.",
-    acceptance: ["The current check passes."],
-  }, root, { goalId: "g_current" });
-
+test("a display snapshot failure cannot disable supervision startup", async (t) => {
+  const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
   t.after(() => {
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
-  const agent = snapshot({ agent_status: "working", state_change_seq: 4 }).agents[0];
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: [agent],
-    panes: [{ pane_id: agent.pane_id, terminal_id: agent.terminal_id }],
-  }));
-  const closed = [];
-  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
-  t.mock.method(HerdrClient.prototype, "closePane", async (paneId) => { closed.push(paneId); });
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  let snapshots = 0;
+  let subscriptions = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshots += 1;
+    if (snapshots === 1) throw new Error("temporary display read failure");
+    return snapshot({ agent_status: "working", state_change_seq: 2 });
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => {
+    subscriptions += 1;
+    return () => {};
+  });
 
   const pi = fakePi();
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
 
-  assert.deepEqual(closed, []);
-  assert.equal((await loadSupervisorGoals(root)).active[0].goalId, "g_current");
+  assert.equal(subscriptions, 1);
+  assert.ok(snapshots > 1);
+  assert.match(pi.messages[0].content, /Could not refresh worker display names/);
   pi.events.get("session_shutdown")();
 });
 
@@ -2631,6 +2624,1108 @@ test("a settled worker wait receives a bounded review timestamp by default", asy
   pi.events.get("session_shutdown")();
 });
 
+<<<<<<< HEAD
+=======
+test("an external revision change wakes the exact goal while unchanged polls stay quiet", async (t) => {
+  const root = await fixture();
+  const previousGitHubToken = process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN = "test-token";
+  const unrelatedWorker = {
+    paneId: "w1:p9",
+    terminalId: "term_unrelated",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_unrelated" },
+  };
+  await registerSupervisedGoal(unrelatedWorker, {
+    objective: "Finish an unrelated goal.",
+    acceptance: ["The unrelated proof passes."],
+  }, root, { goalId: "g_unrelated" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousGitHubToken;
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let conclusion = null;
+  let fetches = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    fetches += 1;
+    if (String(url).includes("/pulls/")) {
+      return Response.json({
+        head: { sha: "abc123" },
+        state: "open",
+        draft: false,
+        mergeable: true,
+      });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({
+      check_runs: [{
+        name: "test",
+        status: conclusion ? "completed" : "in_progress",
+        conclusion,
+      }],
+    });
+  });
+  const focused = snapshot({ agent_status: "idle", state_change_seq: 3 }).agents[0];
+  const unrelated = {
+    pane_id: unrelatedWorker.paneId,
+    terminal_id: unrelatedWorker.terminalId,
+    agent_status: "working",
+    state_change_seq: 1,
+    agent_session: unrelatedWorker.agentSession,
+    interactive_ready: true,
+  };
+  let workerText = "The worker is waiting for PR checks.";
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [{ ...focused, agent_status: resumed ? "working" : "idle" }, unrelated],
+    panes: [focused, unrelated].map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerText, truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ externalWatchMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The implementation is ready and its PR checks are running.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(leave.isError, false);
+  assert.match(leave.content[0].text, /Watching github-pr hao1939\/herdr-supervisor#16 between model turns/);
+  await pi.events.get("agent_settled")();
+
+  await waitFor(() => fetches >= 2);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.ok(fetches >= 4, "the unchanged source should be observed again");
+  assert.equal(pi.messages.length, 1, "an unchanged observation must not start a model turn");
+
+  conclusion = "success";
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /GitHub PR hao1939\/herdr-supervisor#16 is open; 1\/1 checks completed/);
+  assert.match(pi.messages[1].content, /only a wake hint/);
+  assert.match(pi.messages[1].content, /w1:p2/);
+  assert.doesNotMatch(pi.messages[1].content, /w1:p9/);
+
+  workerText = "";
+  const changedObservation = await pi.tools.get("supervisor_observe").execute("observe-change", { pane_id: worker.paneId });
+  assert.match(changedObservation.content[0].text, /Review trigger: GitHub PR hao1939\/herdr-supervisor#16 is open; 1\/1 checks completed/);
+  const staleRenewal = await pi.tools.get("supervisor_leave").execute("renew-without-reread", {
+    pane_id: worker.paneId,
+    progress: "The old PR snapshot still looks healthy.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(staleRenewal.isError, true);
+  assert.match(staleRenewal.content[0].text, /(external watch change triggered this review|authoritative reread evidence is still pending)/);
+  const staleFinish = await pi.tools.get("supervisor_finish").execute("finish-without-reread", {
+    pane_id: worker.paneId,
+    summary: "The old PR snapshot looked complete.",
+    evidence: ["Only the pre-change snapshot is available."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(staleFinish.isError, true);
+  assert.match(staleFinish.content[0].text, /(external watch change triggered this review|authoritative reread evidence is still pending)/);
+  const staleQuestion = await pi.tools.get("supervisor_ask_human").execute("ask-without-reread", {
+    pane_id: worker.paneId,
+    question: "Should the worker trust the old PR result?",
+  });
+  assert.equal(staleQuestion.isError, true);
+  assert.match(staleQuestion.content[0].text, /authoritative reread evidence is still pending/);
+  const fetchesBeforeSecondChange = fetches;
+  conclusion = "failure";
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => fetches > fetchesBeforeSecondChange);
+  assert.equal(pi.messages.length, 2, "a second change is queued behind the active review");
+  const steer = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Recheck the failed PR checks and continue the same goal.",
+  });
+  assert.equal(steer.isError, false);
+  assert.ok((await loadSupervisorGoals(root)).active.find((item) => item.goalId === "g_test")?.externalChange);
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(pi.messages.length, 2, "clearing the watch also removes its stale queued wake");
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-decision retries keep requiring a reread after an external change wake", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const binding = (await loadSupervisorGoals(root)).active[0];
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 4 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-initial", { pane_id: worker.paneId });
+  const firstLeave = await pi.tools.get("supervisor_leave").execute("leave-initial", {
+    pane_id: worker.paneId,
+    progress: "The old PR snapshot still looks healthy.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(firstLeave.isError, true);
+  assert.match(firstLeave.content[0].text, /authoritative reread evidence is still pending/);
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /authoritative reread is still pending/);
+
+  await pi.tools.get("supervisor_observe").execute("observe-retry", { pane_id: worker.paneId });
+  const retryLeave = await pi.tools.get("supervisor_leave").execute("leave-retry", {
+    pane_id: worker.paneId,
+    progress: "Still no new authoritative read.",
+    waiting_for: "PR checks to change again",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(retryLeave.isError, true);
+  assert.match(retryLeave.content[0].text, /authoritative reread evidence is still pending/);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart retains an external reread until a supervisor accepts the later native result", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-external-restart-"));
+  const sessionFile = join(root, "worker.jsonl");
+  const firstLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old checks are pending." }] },
+  })}\n`;
+  await writeFile(sessionFile, firstLine);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Verify PR 16 after its checks change.",
+    acceptance: ["Current authoritative checks are reread and handled."],
+  }, root, { goalId: "g_external_restart", at: "2026-08-30T05:00:00.000Z" });
+  const cursor = { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(firstLine) };
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    observationCursor: cursor,
+    externalChangeRevision: "changed-revision",
+    workerSequence: 3,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 4,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const beforeEvidence = fakePi();
+  herdrSupervisor(beforeEvidence);
+  await beforeEvidence.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeEvidence.messages.length === 1);
+  assert.match(beforeEvidence.messages[0].content, /authoritative reread is still pending/);
+  await beforeEvidence.tools.get("supervisor_observe").execute("observe-before-evidence", { pane_id: worker.paneId });
+  const staleFinish = await beforeEvidence.tools.get("supervisor_finish").execute("finish-before-evidence", {
+    pane_id: worker.paneId,
+    summary: "The old evidence looked complete.",
+    evidence: ["Only old evidence exists."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(staleFinish.isError, true);
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  beforeEvidence.events.get("session_shutdown")();
+
+  const secondLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:03:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", phase: "final_answer", content: [{ type: "output_text", text: "I reread PR 16; all current checks pass." }] },
+  })}\n`;
+  await appendFile(sessionFile, secondLine);
+  const afterEvidence = fakePi();
+  herdrSupervisor(afterEvidence);
+  await afterEvidence.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterEvidence.messages.length === 1);
+  const observation = await afterEvidence.tools.get("supervisor_observe").execute("observe-after-evidence", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /I reread PR 16; all current checks pass/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "changed-revision");
+  const finish = await afterEvidence.tools.get("supervisor_finish").execute("finish-after-evidence", {
+    pane_id: worker.paneId,
+    summary: "The worker reread PR 16 and verified the current checks.",
+    evidence: ["The post-change native Codex message reports all current checks pass."],
+    external_change_revision: "changed-revision",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, false);
+  assert.equal((await loadSupervisorGoals(root)).active.length, 0);
+  assert.equal((await loadSupervisorGoals(root)).completed[0].state.worker.agentSession.value, exactWorker.agentSession.value);
+  afterEvidence.events.get("session_shutdown")();
+});
+
+test("steering records a delivery boundary after its prompt is accepted", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let sequence = 3;
+  let agentStatus = "idle";
+  let workerOutput = "The old PR state was still pending.";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: agentStatus,
+    state_change_seq: sequence,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") agentStatus = "working";
+    else {
+      agentStatus = "done";
+      workerOutput = "The worker settled while the reread instruction was delivered.";
+    }
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const beforeSteer = fakePi();
+  herdrSupervisor(beforeSteer);
+  await beforeSteer.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeSteer.messages.length === 1);
+  await beforeSteer.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  const steer = await beforeSteer.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread the current PR state and continue.",
+  });
+  assert.equal(steer.isError, false);
+  assert.deepEqual(
+    (await loadSupervisorGoals(root)).active[0].observationCursor,
+    terminalOutputCursor(workerOutput),
+    "the checkpoint conservatively includes output produced during delivery",
+  );
+  beforeSteer.events.get("session_shutdown")();
+
+  sequence = 4;
+  const afterSteer = fakePi();
+  herdrSupervisor(afterSteer);
+  await afterSteer.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterSteer.messages.length === 1);
+  await afterSteer.tools.get("supervisor_observe").execute("observe-same-output", { pane_id: worker.paneId });
+  assert.ok(
+    (await loadSupervisorGoals(root)).active[0].externalChange,
+    "output produced during delivery cannot satisfy the reread",
+  );
+  afterSteer.events.get("session_shutdown")();
+});
+
+test("steering fails closed when its post-delivery boundary cannot be observed", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let reads = 0;
+  let resumed = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => {
+    reads += 1;
+    if (reads > 1) throw new Error("terminal observation unavailable");
+    return { read: { text: "The old PR state was pending.", truncated: false } };
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+    if (message === "/goal resume") resumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread the current PR state and continue.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /safe boundary could not be observed afterward/);
+  assert.equal(prompts[0], "/goal resume");
+  assert.match(prompts[1], /Reread the current PR state and continue\./);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.observationCursor.kind, "reread-boundary-unavailable");
+  assert.equal(stored.externalChange.workerSequence, Number.MAX_SAFE_INTEGER);
+  assert.equal(stored.lastDecision.decision, "steer");
+  pi.events.get("session_shutdown")();
+});
+
+test("Codex fallback cannot treat a non-assistant record as reread evidence", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-codex-fallback-"));
+  const sessionFile = join(root, "worker.jsonl");
+  const oldLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old checks are pending." }] },
+  })}\n`;
+  await writeFile(sessionFile, oldLine);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Verify PR 16 after its checks change.",
+    acceptance: ["Current authoritative checks are reread and handled."],
+  }, root, { goalId: "g_codex_fallback", at: "2026-08-30T05:00:00.000Z" });
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(oldLine) },
+    externalChangeRevision: "changed-revision",
+    workerSequence: 2,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  await appendFile(sessionFile, `${JSON.stringify({
+    timestamp: "2026-08-30T05:03:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Reread PR 16." }] },
+  })}\n`);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "blocked",
+    state_change_seq: 3,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The old terminal text is unchanged.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-non-assistant", { pane_id: worker.paneId });
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  pi.events.get("session_shutdown")();
+});
+
+test("a supervisor can accept a post-instruction final response despite an earlier worker timestamp", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-clock-skew-"));
+  const sessionFile = join(root, "worker.jsonl");
+  const oldLine = `${JSON.stringify({
+    timestamp: "2026-08-30T05:00:00.000Z",
+    type: "response_item",
+    payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "The old checks are pending." }] },
+  })}\n`;
+  await writeFile(sessionFile, oldLine);
+  const exactWorker = {
+    ...worker,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
+  };
+  const binding = await registerSupervisedGoal(exactWorker, {
+    objective: "Verify PR 16 after its checks change.",
+    acceptance: ["Current authoritative checks are reread and handled."],
+  }, root, { goalId: "g_clock_skew", at: "2026-08-30T05:00:00.000Z" });
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "changed-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(oldLine) },
+    externalChangeRevision: "changed-revision",
+    workerSequence: 2,
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  await appendFile(sessionFile, `${JSON.stringify({
+    timestamp: "2026-08-30T04:30:00.000Z",
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "assistant",
+      phase: "final_answer",
+      content: [{ type: "output_text", text: "I reread PR 16; all current checks pass." }],
+    },
+  })}\n`);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    state_change_seq: 3,
+    agent_session: exactWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-skewed-final", { pane_id: worker.paneId });
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "changed-revision");
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-skewed-final", {
+    pane_id: worker.paneId,
+    summary: "The current PR checks were reread.",
+    evidence: ["The post-instruction final response reports the current checks."],
+    external_change_revision: "changed-revision",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, false, "a transcript timestamp behind the supervisor clock cannot block a real reread");
+  pi.events.get("session_shutdown")();
+});
+
+test("acceptance rejects an external change recorded after its cached read", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The old result looked complete.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe-old", { pane_id: worker.paneId });
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "revision-after-cache",
+    observedAt: new Date().toISOString(),
+  }, root);
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-stale", {
+    pane_id: worker.paneId,
+    summary: "The old result passed.",
+    evidence: ["Only the old result was observed."],
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(finish.isError, true);
+  assert.match(finish.content[0].text, /changed before acceptance/);
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange);
+  pi.events.get("session_shutdown")();
+});
+
+test("an unrelated signal does not duplicate the same pending external reread review", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "pending-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let agentStatus = "idle";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: agentStatus,
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Only the old PR result is visible.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    agentStatus = message === "/goal resume" ? "working" : "done";
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
+  await pi.tools.get("supervisor_observe").execute("observe-pending", { pane_id: worker.paneId });
+  const steer = await pi.tools.get("supervisor_steer").execute("steer-reread", {
+    pane_id: worker.paneId,
+    message: "Reread PR 16 now.",
+  });
+  assert.equal(steer.isError, false);
+  await pi.events.get("agent_settled")();
+
+  await pi.tools.get("supervisor_reconsider").execute("human-reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "the human asked for another look",
+  });
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 1, "an unrelated signal must not duplicate the same pending external reread review");
+  pi.events.get("session_shutdown")();
+});
+
+test("a newer external change rejects stale explicit reread acceptance", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const oldOutput = "The old PR 16 terminal result.";
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "first-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "first-revision",
+    workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "I reread PR 16; its current checks pass.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "second-revision",
+    observedAt: "2026-08-30T05:03:00.000Z",
+  }, root, () => "2026-08-30T05:03:00.000Z");
+  const observation = await pi.tools.get("supervisor_observe").execute("observe-after-second-change", { pane_id: worker.paneId });
+  assert.equal(observation.isError, false, "a superseding external change must not lose the worker evidence");
+  assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  const finish = await pi.tools.get("supervisor_finish").execute("finish-stale-reread", {
+    pane_id: worker.paneId,
+    summary: "The first revision was reread.",
+    evidence: ["The worker reported the first revision."],
+    external_change_revision: "first-revision",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(finish.isError, true);
+  assert.match(finish.content[0].text, /changed again before its reread was accepted/);
+  assert.equal(
+    (await loadSupervisorGoals(root)).active[0].externalChange?.revision,
+    "second-revision",
+    "the newer unresolved change survives the stale clear",
+  );
+  pi.events.get("session_shutdown")();
+});
+
+test("a settled terminal fallback needs output produced after its reread instruction", async (t) => {
+  const root = await fixture();
+  const oldOutput = "The old PR 16 terminal result.";
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "fallback-revision",
+    observedAt: "2026-08-30T05:01:00.000Z",
+  }, root, () => "2026-08-30T05:01:00.000Z");
+  await recordDecision(binding, "steer", {
+    progress: "The fallback worker was told to reread PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "fallback-revision",
+    workerSequence: 2,
+    observationCursor: terminalOutputCursor(oldOutput),
+  }, root, () => "2026-08-30T05:02:00.000Z");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let workerOutput = oldOutput;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerOutput, truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const beforeOutput = fakePi();
+  herdrSupervisor(beforeOutput);
+  await beforeOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => beforeOutput.messages.length === 1);
+  await beforeOutput.tools.get("supervisor_observe").execute("observe-old-fallback", { pane_id: worker.paneId });
+  assert.ok((await loadSupervisorGoals(root)).active[0].externalChange, "old terminal output cannot satisfy the reread");
+  beforeOutput.events.get("session_shutdown")();
+
+  workerOutput = "No authoritative GitHub reread was performed.";
+  const refusalOutput = fakePi();
+  herdrSupervisor(refusalOutput);
+  await refusalOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => refusalOutput.messages.length === 1);
+  const refusal = await refusalOutput.tools.get("supervisor_observe").execute("observe-refusal", { pane_id: worker.paneId });
+  assert.match(refusal.content[0].text, /Fresh post-instruction worker result available/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  const staleLeave = await refusalOutput.tools.get("supervisor_leave").execute("leave-refusal", {
+    pane_id: worker.paneId,
+    progress: "The worker explicitly did not reread the PR.",
+    waiting_for: "the authoritative PR reread",
+  });
+  assert.equal(staleLeave.isError, true);
+  assert.match(staleLeave.content[0].text, /authoritative reread evidence is still pending/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+
+  workerOutput = oldOutput;
+  await refusalOutput.events.get("agent_settled")();
+  await waitFor(() => refusalOutput.messages.length === 2);
+  const reverted = await refusalOutput.tools.get("supervisor_observe").execute("observe-reverted-output", { pane_id: worker.paneId });
+  assert.doesNotMatch(reverted.content[0].text, /Fresh post-instruction worker result available/);
+  const staleAcknowledgement = await refusalOutput.tools.get("supervisor_leave").execute("leave-stale-candidate", {
+    pane_id: worker.paneId,
+    progress: "Only the old terminal boundary is visible now.",
+    waiting_for: "the authoritative PR reread",
+    external_change_revision: "fallback-revision",
+  });
+  assert.equal(staleAcknowledgement.isError, true);
+  assert.match(staleAcknowledgement.content[0].text, /Observe a fresh post-instruction worker result/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  refusalOutput.events.get("session_shutdown")();
+
+  workerOutput = "I reread PR 16; its current checks pass.";
+  const afterOutput = fakePi();
+  herdrSupervisor(afterOutput);
+  await afterOutput.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => afterOutput.messages.length === 1);
+  const observation = await afterOutput.tools.get("supervisor_observe").execute("observe-new-fallback", { pane_id: worker.paneId });
+  assert.match(observation.content[0].text, /I reread PR 16; its current checks pass/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange?.revision, "fallback-revision");
+  const leave = await afterOutput.tools.get("supervisor_leave").execute("leave-new-fallback", {
+    pane_id: worker.paneId,
+    progress: "The current PR checks were reread.",
+    waiting_for: "the next requested change",
+    evidence: ["The new terminal result reports the current PR checks."],
+    external_change_revision: "fallback-revision",
+  });
+  assert.equal(leave.isError, false);
+  assert.equal((await loadSupervisorGoals(root)).active[0].externalChange, undefined);
+  afterOutput.events.get("session_shutdown")();
+});
+
+test("a working reread stays quiet until its worker settles", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const reviewAt = new Date(Date.now() + 60_000).toISOString();
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#16",
+    revision: "working-revision",
+    observedAt: new Date(Date.now() + 60_000).toISOString(),
+  }, root);
+  await recordDecision(binding, "steer", {
+    progress: "The worker is rereading PR 16.",
+    action: "Reread current PR 16 checks.",
+    externalChangeRevision: "working-revision",
+    workerSequence: 2,
+    reviewAt,
+  }, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let status = "working";
+  let sequence = 3;
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: status, state_change_seq: sequence }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Current PR reread finished.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 0, "restart must not duplicate a reread already in flight");
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(pi.messages.length, 0, "a working event must not duplicate the reread instruction");
+
+  status = "idle";
+  sequence = 4;
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /authoritative reread is still pending/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a slow failing provider stays single-flight while the bounded review still runs", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let fetches = 0;
+  let failRead;
+  t.mock.method(globalThis, "fetch", async () => {
+    fetches += 1;
+    return new Promise((_resolve, reject) => { failRead = () => reject(new Error("temporary provider failure")); });
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000", externalWatchMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The implementation is waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  assert.equal(leave.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => fetches === 1);
+
+  // The deadline review fires at 1000 ms. Wait past it with enough margin that
+  // CI scheduling jitter cannot make the following waitFor time out.
+  await new Promise((resolve) => setTimeout(resolve, 1400));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 2);
+  assert.equal(fetches, 1, "a worker deadline must not start a second provider read");
+
+  failRead();
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-error"));
+  assert.equal(
+    pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
+    2,
+    "a provider diagnostic must not start another model review",
+  );
+  pi.events.get("session_shutdown")();
+});
+
+test("a decision reserves its exact external subject and rearms polling after it commits", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousGitHubToken = process.env.GITHUB_TOKEN;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.GITHUB_TOKEN = "test-token";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousGitHubToken;
+  });
+  let reads = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (String(url).includes("/pulls/")) {
+      reads += 1;
+      return Response.json({ head: { sha: "abc123" }, state: "open", draft: false, mergeable: true });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({ check_runs: [{ id: 1, name: "test", status: "in_progress", conclusion: null }] });
+  });
+  let gatedSnapshots = 0;
+  let releaseSnapshot;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (gatedSnapshots > 0) {
+      gatedSnapshots -= 1;
+      if (!gatedSnapshots) await new Promise((resolve) => { releaseSnapshot = resolve; });
+    }
+    return snapshot({ agent_status: "idle", state_change_seq: 3 });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => ({}));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ externalWatchMs: "100" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker is waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => reads >= 1);
+  await pi.tools.get("supervisor_reconsider").execute("reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "confirm the wait is still correct",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  await pi.tools.get("supervisor_observe").execute("observe-again", { pane_id: worker.paneId });
+
+  gatedSnapshots = 2;
+  const renewal = pi.tools.get("supervisor_leave").execute("renew", {
+    pane_id: worker.paneId,
+    progress: "The worker is still waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  await waitFor(() => releaseSnapshot !== undefined);
+  const readsWhileHeld = reads;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(reads, readsWhileHeld, "no poll may start between the drain and the decision");
+
+  releaseSnapshot();
+  const renewed = await renewal;
+  assert.equal(renewed.isError, false, renewed.content[0].text);
+  await waitFor(() => reads > readsWhileHeld);
+  pi.events.get("session_shutdown")();
+});
+
+test("steering drains an in-flight external observation before clearing its watch", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let releasePull;
+  let fetches = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    fetches += 1;
+    if (String(url).includes("/pulls/")) {
+      return new Promise((resolve) => {
+        releasePull = () => resolve(Response.json({
+          head: { sha: "abc123" },
+          state: "open",
+          draft: false,
+          mergeable: true,
+        }));
+      });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({ check_runs: [{ id: 1, name: "test", status: "completed", conclusion: "success" }] });
+  });
+  let resumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: resumed ? "working" : "idle",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker can continue independently.", truncated: false } }));
+  let prompt;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    if (message === "/goal resume") {
+      resumed = true;
+      return;
+    }
+    prompt = message;
+    throw new Error("prompt response timed out after possible delivery");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker was waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16", revision: "old" },
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => fetches === 1);
+
+  await pi.tools.get("supervisor_reconsider").execute("reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "independent work can continue without the PR result",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 2);
+  await pi.tools.get("supervisor_observe").execute("observe-again", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the independent work now.",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(prompt, undefined, "steering must wait for the active provider read");
+  releasePull();
+  const steered = await steering;
+  assert.equal(steered.isError, true);
+  assert.match(steered.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
+  assert.match(prompt, /watched github-pr hao1939\/herdr-supervisor#16 changed/);
+  assert.ok((await loadSupervisorGoals(root)).active.find((item) => item.goalId === "g_test")?.externalChange);
+  await pi.events.get("agent_settled")();
+
+  await waitFor(() => fetches === 3);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(
+    pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
+    2,
+    "the drained provider result must not create a duplicate review",
+  );
+  pi.events.get("session_shutdown")();
+});
+
+test("steering rereads worker identity after its provider fence", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let steering = false;
+  let steeringSnapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (steering && ++steeringSnapshots === 2) {
+      return snapshot({
+        agent_status: "idle",
+        agent_session: { ...worker.agentSession, value: "replacement-session" },
+      });
+    }
+    return snapshot({ agent_status: "idle" });
+  });
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The registered worker was ready.", truncated: false },
+  }));
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  steering = true;
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /rereading worker identity: worker value changed/);
+  assert.equal(prompts, 0, "a replacement worker must not receive the instruction");
+  pi.events.get("session_shutdown")();
+});
+
+test("a recovered provider error can be reported again after a later failure", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousGitHubToken = process.env.GITHUB_TOKEN;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.GITHUB_TOKEN = "test-token";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousGitHubToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousGitHubToken;
+  });
+  let pullReads = 0;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    if (String(url).includes("/pulls/")) {
+      pullReads += 1;
+      if (pullReads !== 2) return new Response(null, { status: 503 });
+      return Response.json({ head: { sha: "abc123" }, state: "open", draft: false, mergeable: true });
+    }
+    if (String(url).includes("/status?")) return Response.json({ statuses: [] });
+    return Response.json({ check_runs: [] });
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "10000", externalWatchMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker is waiting for PR checks.",
+    waiting_for: "GitHub PR checks to change",
+    external_watch: { source: "github-pr", subject: "hao1939/herdr-supervisor#16" },
+  });
+  await pi.events.get("agent_settled")();
+
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-error").length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 2100));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-error").length === 2);
+  assert.equal(pullReads, 3);
+  assert.equal(
+    pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length,
+    1,
+    "provider recovery and repeat failure must not start model turns",
+  );
+  pi.events.get("session_shutdown")();
+});
+
+>>>>>>> b33508e (Keep worker naming safe and lightweight)
 test("a working worker cannot be mislabeled as waiting for its own next checkpoint", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

@@ -80,10 +80,10 @@ contract, its latest review checkpoint, and the judgment about what to do next.
 One native agent session can belong to only one unfinished goal, regardless of
 which pane currently routes to it.
 
-Herdr derives each worker's short display label from its goal. The opaque goal
-ID, terminal ID, and native session ID remain authoritative. A label helps a
-human navigate; it is not stored state, never selects a worker, and never
-proves identity.
+The supervisor derives each worker's short display label from its goal and asks
+Herdr to display it. The opaque goal ID, terminal ID, and native session ID
+remain authoritative. A label helps a human navigate; it is not stored state,
+never selects a worker, and never proves identity.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -339,19 +339,12 @@ genuinely exhausted the safe work it can do now, it reports the exact remaining
 condition once and yields. An idle worker costs nothing.
 
 Idle is not the same as inactive. An unfinished goal keeps its pane because it
-may still own a wait, review, or immediate next action. The first lifecycle
-cleanup is deliberately smaller: after the supervisor accepts a completed
-goal, it closes a settled worker pane only after recording the terminal result,
-and keeps the exact native Codex session in the completed checkpoint. Startup
-retries this cleanup for older accepted goals, after proving that no active goal
-reuses their pane or session. A working process is left alone. A close failure
-is a visible cleanup warning and cannot undo completion. Explicit
-`/unsupervise` still leaves the worker alone, as its command promises.
-
-Automatic parking of unfinished waiting goals is deferred. It becomes safe
-only when Herdr can atomically resume and prompt the expected native session;
-until then, saving a little memory does not justify a second parked lifecycle
-or a chance of addressing the wrong process.
+may still own a wait, review, or immediate next action. Herdr preserves native
+Codex sessions when a human closes a settled pane, but the supervisor does not
+close panes automatically: the current `pane.close` operation cannot require
+the expected terminal and native session, so a client-side identity check could
+race pane reuse. Automatic retirement should wait for that small atomic Herdr
+primitive rather than add a second parked lifecycle or risk closing live work.
 
 When the pull request or build later changes, the watch or the bounded review
 wakes that exact session. The worker rereads the current provider state,

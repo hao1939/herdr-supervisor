@@ -178,7 +178,7 @@ const supervisorPolicy = [
     "When the human answers an earlier question with execution evidence that does not change the durable contract, use supervisor_reconsider so the next focused review observes current evidence before deciding how the same worker continues. If the answer changes the contract, apply the durable-update rule instead.",
     "If human input arrives during a focused worker review, retain any other affected workers for later with supervisor_reconsider, then finish the current review with one decision.",
     "During a focused review, use the same supervisor_reconsider operation before the decision tool when current evidence materially changes a listed dependent goal's wait. Select only affected panes; do not fan out every recorded decision.",
-    "Otherwise call supervisor_start_goal. Give the worker a short goal-based label; choose a new tab or a related active worker pane, and do not make the human create panes, launch Codex, or provide Herdr IDs.",
+    "Otherwise call supervisor_start_goal. Code derives the worker's display label from the goal; choose only a new tab or a related active worker pane, and do not make the human create panes, launch Codex, or provide Herdr IDs.",
   ],
   [
     "Evidence and progress",

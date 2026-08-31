@@ -203,7 +203,7 @@ test("createTab creates an unfocused related-work tab in one exact workspace", a
   }
 });
 
-test("pane display operations keep their exact pane target", async (t) => {
+test("pane display names keep their exact pane target", async (t) => {
   const client = new HerdrClient();
   const requests = [];
   t.mock.method(client, "request", async (method, params) => {
@@ -212,16 +212,11 @@ test("pane display operations keep their exact pane target", async (t) => {
   });
 
   await client.renamePane("w1:p2", "Validate Kubernetes versions");
-  await client.closePane("w1:p2");
 
   assert.deepEqual(requests, [
     {
       method: "pane.rename",
       params: { pane_id: "w1:p2", label: "Validate Kubernetes versions" },
-    },
-    {
-      method: "pane.close",
-      params: { pane_id: "w1:p2" },
     },
   ]);
 });
