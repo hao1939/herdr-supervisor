@@ -84,6 +84,89 @@ A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.
 
+## Architecture
+
+```mermaid
+flowchart TD
+    subgraph Human["Human interface"]
+        U[Human]
+        UI[Herdr console]
+        S[Pi supervisor]
+        U <--> UI
+        UI <--> S
+    end
+
+    subgraph Runtime["Runtime owned by Herdr"]
+        H[Herdr server<br/>panes · terminals · processes · events]
+        W[Codex workers<br/>one session per goal]
+        N[Native Codex Goal<br/>work → verify → continue]
+        H <--> W
+        W <--> N
+    end
+
+    subgraph State["Durable supervisor state"]
+        G[(goal.json<br/>desired outcome)]
+        C[(current.json<br/>binding · progress · wait)]
+        J[(journal.jsonl<br/>audit history)]
+    end
+
+    S <-->|socket requests and events| H
+    S -->|create or refine| G
+    S -->|start and bind worker| C
+    S -->|deliver native goal| W
+
+    H -->|worker state changed| Q[Pending review signal]
+    T[Bounded deadline] --> Q
+    P[Peer goal changed] --> Q
+    E[GitHub or ADO watcher] -->|revision changed| Q
+
+    Q --> R[Focused review]
+    R --> O[Read exact worker once]
+    G --> O
+    C --> O
+    W -->|bounded Codex evidence| O
+
+    O --> D{Supervisor chooses one action}
+
+    D -->|leave| L[Worker continues or waits]
+    L --> T
+    L -->|exact external wait| E
+    E <-->|small provider reads| X[GitHub / Azure DevOps]
+
+    D -->|steer| V{Exact worker identity available?}
+    V -->|yes| W
+    V -->|process stopped| RS[Resume exact native session]
+    V -->|pane disappeared| RP[Create or reuse routing pane]
+    RP --> RS
+    RS --> W
+    V -->|identity changed or ambiguous| F[Fail closed]
+
+    D -->|ask human| U
+    D -->|accept| A[Goal completed]
+
+    D --> C
+    D --> J
+
+    GR[Hourly global review] -->|compact view of all goals| S
+    GR -->|schedule affected goals only| Q
+```
+
+In plain language:
+
+- You talk to one supervisor.
+- The supervisor turns each durable outcome into a goal and starts one Codex
+  worker for it. Multiple workers can work in parallel.
+- Workers use their native Codex Goal loop and do not need constant supervisor
+  prompting.
+- The supervisor normally sleeps. Worker events, deadlines, peer changes, or
+  watched PR/build changes wake it.
+- It reads one bounded piece of evidence and makes exactly one decision: leave,
+  steer, ask you, or accept.
+- If a worker pane disappears, the supervisor may restore the exact saved Codex
+  session. It never silently substitutes another worker.
+- `goal.json` says what must be achieved; `current.json` says where execution
+  currently stands; `journal.jsonl` is only an audit trail.
+
 ## Normal flow
 
 1. The human describes an outcome.

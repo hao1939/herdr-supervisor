@@ -13,7 +13,7 @@ jobs:
   e2e:
     if: github.repository == 'hao1939/herdr-supervisor'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -103,34 +103,53 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for worker progress
+      - name: Wait for worker to produce the deliverable
         run: |
-          # Give the worker up to 2 minutes to make progress
-          for i in $(seq 1 12); do
+          # The worker must actually create the file. Fail if it never does.
+          for i in $(seq 1 18); do
             sleep 10
-            status=$(docker exec herdr-e2e herdr agent list 2>&1)
-            echo "Check $i: $status"
+            echo "Check $i: $(docker exec herdr-e2e herdr agent list 2>&1)"
 
-            # If the worker has settled (idle/blocked/done), check the file
             if docker exec herdr-e2e test -f /app/hello.txt 2>/dev/null; then
-              echo "Worker created hello.txt"
-              docker exec herdr-e2e cat /app/hello.txt
-              break
+              content=$(docker exec herdr-e2e cat /app/hello.txt)
+              echo "Worker created hello.txt: $content"
+
+              if echo "$content" | grep -qi "hello world"; then
+                echo "Deliverable matches the acceptance criterion"
+                exit 0
+              fi
+              echo "::error::hello.txt exists but does not contain 'hello world': $content"
+              exit 1
             fi
           done
 
-      - name: Verify goal state
+          echo "::error::Worker never created /app/hello.txt within 3 minutes"
+          exit 1
+
+      - name: Wait for the supervisor to accept the goal
         run: |
-          # Check supervisor goal state
-          docker exec herdr-e2e \
-            herdr agent prompt w0:p0 "Use supervisor_status to show all supervised workers."
+          # The supervisor must observe the deliverable and accept the goal.
+          # An accepted goal leaves the active set.
+          for i in $(seq 1 12); do
+            sleep 15
 
-          docker exec herdr-e2e \
-            herdr agent wait w0:p0 --until idle --timeout 60000
+            docker exec herdr-e2e \
+              herdr agent prompt w0:p0 "Use supervisor_status to show all supervised workers."
+            docker exec herdr-e2e \
+              herdr agent wait w0:p0 --until idle --timeout 60000
 
-          docker exec herdr-e2e herdr agent read w0:p0 --lines 30
+            output=$(docker exec herdr-e2e herdr agent read w0:p0 --lines 40 2>&1)
+            echo "Status check $i:"
+            echo "$output"
 
-          echo "E2E test completed"
+            if echo "$output" | grep -qi "No supervised workers"; then
+              echo "Supervisor accepted the goal and released the binding"
+              exit 0
+            fi
+          done
+
+          echo "::error::Supervisor never accepted the goal within 3 minutes of the deliverable appearing"
+          exit 1
 
       - name: Collect logs on failure
         if: failure()
