@@ -105,6 +105,21 @@ resource, like linking a work item or naming a source branch. A small creation
 tool may add it automatically from the caller's current goal. Workers that use
 provider CLIs directly follow the same metadata convention.
 
+The worker path is therefore ordinary provider work:
+
+1. The normal goal prompt already supplies the durable goal ID.
+2. The worker creates the PR or queues the build with the provider's existing
+   CLI or API.
+3. It writes and verifies the goal metadata once on that resource.
+4. It continues useful goal work without calling the watcher.
+
+A rerun that creates a new build ID is a new resource, so it receives the same
+goal tag once. Commits, reviews, statuses, and other revisions of an existing
+resource need no worker action. Moving the goal to another pane or native
+session also needs no metadata update because delivery resolves current
+canonical goal state. Only an intentional move to a different durable goal
+changes ownership metadata.
+
 There is no matching unregister operation. The metadata remains useful across
 every later revision of that resource. Removing metadata merely makes the
 adapter report that resource absent and the watcher forgets its cache entry;
@@ -296,7 +311,9 @@ The MLVM experiment now proves the metadata path end to end for goal
 - On the recovered daemon, build `179017733` exposed another real revision. The
   checkpoint advanced, the pending wake cleared, and exact Codex session
   `01a04ca8-8771-7473-8e20-cebef028f430` in pane `w1:p11` returned to
-  `working`. Later unchanged scans left the checkpoint timestamp unchanged.
+  `working`. The worker reconciled the changed build, finished a useful PR
+  readiness checkpoint, and moved to another independent route instead of
+  polling. Later unchanged scans left the checkpoint timestamp unchanged.
 
 The metadata lifecycle and live ADO path are proven. The production gates above
 remain open, so this PoC does not replace the current watcher yet.
