@@ -22,6 +22,10 @@ function goalWorkerName(goalId: string) {
   return `goal-${createHash("sha256").update(goalId).digest("hex").slice(0, 27)}`;
 }
 
+function legacyGoalWorkerName(goalId: string) {
+  return `goal-${goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
+}
+
 function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000" } = {}): any {
   const commands = new Map();
   const tools = new Map();
@@ -1143,6 +1147,88 @@ test("restart never adopts a legacy-named session already owned by another goal"
   const goals = await loadSupervisorGoals(root);
   assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value).sort(), ["session_new", "session_owned"]);
   assert.equal(goals.unstarted.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart never infers legacy ownership from a completed goal name collision", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-completed-legacy-collision-"));
+  const completedGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_completed";
+  const targetGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_target";
+  const completed = await registerSupervisedGoal({
+    paneId: "w1:p9",
+    terminalId: "term_completed",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  }, {
+    objective: "Complete the earlier diagnostic.",
+    acceptance: ["The earlier diagnostic is verified."],
+  }, root, { goalId: completedGoalId });
+  await recordDecision(completed, "accept", {
+    progress: "The earlier diagnostic is verified.",
+    action: "Accepted the earlier goal.",
+    evidence: ["The expected result was observed."],
+    terminal: { state: "accepted", summary: "The expected result was observed." },
+  }, root);
+  await installSupervisorGoal({
+    objective: "Start the later diagnostic.",
+    acceptance: ["The later diagnostic is verified."],
+  }, root, { goalId: targetGoalId });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const completedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_completed",
+    name: legacyGoalWorkerName(targetGoalId),
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  };
+  let creates = 0;
+  let starts = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [completedAgent],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: completedAgent.pane_id, terminal_id: completedAgent.terminal_id, workspace_id: "w1", tab_id: completedAgent.tab_id },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    creates += 1;
+    return { root_pane: { pane_id: "w1:p3" } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { starts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
+    goal: "Start the later diagnostic.",
+    acceptance: ["The later diagnostic is verified."],
+    placement: { mode: "new", label: "diagnostic" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /legacy worker name.*ambiguous/i);
+  assert.equal(creates, 0);
+  assert.equal(starts, 0);
+  assert.equal(prompts, 0);
+  const goals = await loadSupervisorGoals(root);
+  assert.equal(goals.completed.length, 1);
+  assert.equal(goals.unstarted.length, 1);
   pi.events.get("session_shutdown")();
 });
 

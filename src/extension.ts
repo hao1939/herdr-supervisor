@@ -1132,14 +1132,19 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
       }
       const pendingAgent = pendingAgents[0];
-      if (
-        pendingAgent?.name === legacyWorkerName
-        && goals.unstarted.some((record) => (
+      if (pendingAgent?.name === legacyWorkerName) {
+        const recorded = await loadSupervisorGoals();
+        const legacyNameConflict = [
+          ...recorded.active,
+          ...recorded.unstarted,
+          ...recorded.completed,
+        ].some((record) => (
           record.goalId !== goalId
           && legacyWorkerNameForGoal(record.goalId) === pendingAgent.name
-        ))
-      ) {
-        throw new Error(`The legacy worker name for installed goal ${goalId} is ambiguous; choose the correct worker before retrying.`);
+        ));
+        if (legacyNameConflict) {
+          throw new Error(`The legacy worker name for installed goal ${goalId} is ambiguous; choose the correct worker before retrying.`);
+        }
       }
       paneId = pendingAgent?.pane_id;
 
