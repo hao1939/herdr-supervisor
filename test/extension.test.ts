@@ -91,6 +91,28 @@ test("optional supervisor tool fields accept null without placeholder values", (
   assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
   assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
 
+  const startGoal = Compile(pi.tools.get("supervisor_start_goal").parameters);
+  assert.equal(startGoal.Check({
+    goal_id: "g_saved",
+    goal: null,
+    context: null,
+    acceptance: null,
+    constraints: null,
+    placement: { mode: "new", label: "saved" },
+    working_directory: "/app",
+    direction: null,
+  }), true);
+  assert.equal(startGoal.Check({
+    goal_id: null,
+    goal: "Complete one new goal.",
+    context: null,
+    acceptance: ["The result is verified."],
+    constraints: null,
+    placement: { mode: "new", label: "new" },
+    working_directory: "/app",
+    direction: null,
+  }), true);
+
   assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
     pane_id: worker.paneId,
     message: "Continue the same goal.",
@@ -279,6 +301,87 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
   assert.deepEqual(goals.active[0].constraints, ["Make changes only in an isolated worktree."]);
+  pi.events.get("session_shutdown")();
+});
+
+test("an unstarted saved goal starts by exact ID without restating its contract", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-saved-start-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  await installSupervisorGoal({
+    objective: "Prove one saved portable goal can start.",
+    context: ["The saved contract is authoritative."],
+    acceptance: ["The exact saved goal ID owns the worker."],
+    constraints: ["Do not create a sibling goal."],
+  }, root, { goalId: "g_saved" });
+  const managed = {
+    pane_id: "w1:p3",
+    terminal_id: "term_saved",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t3",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_saved" },
+  };
+  let startRequest;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [{ ...managed, name: startRequest?.name }],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, workspace_id: "w1", tab_id: managed.tab_id },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => ({
+    root_pane: { pane_id: managed.pane_id },
+  }));
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    startRequest = request;
+    return managed;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const ambiguous = await pi.tools.get("supervisor_start_goal").execute("ambiguous", {
+    goal_id: "g_saved",
+    goal: "Do not replace the saved contract.",
+    placement: { mode: "new", label: "saved-goal" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  const result = await pi.tools.get("supervisor_start_goal").execute("saved", {
+    goal_id: "g_saved",
+    goal: null,
+    context: null,
+    acceptance: null,
+    constraints: null,
+    placement: { mode: "new", label: "saved-goal" },
+    working_directory: "/app",
+    direction: null,
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(ambiguous.isError, true);
+  assert.match(ambiguous.content[0].text, /either goal_id.*or contract fields/);
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /g_saved/);
+  assert.equal(startRequest.name, goalWorkerName("g_saved"));
+  assert.match(prompts.at(-1), /g_saved\/goal\.json/);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.active.map(({ goalId }) => goalId), ["g_saved"]);
+  assert.deepEqual(goals.active[0].acceptance, ["The exact saved goal ID owns the worker."]);
+  assert.equal(goals.unstarted.length, 0);
+  assert.equal(goals.completed.length, 0);
   pi.events.get("session_shutdown")();
 });
 

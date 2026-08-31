@@ -1111,14 +1111,42 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       throw new Error(`Finish preparing or reviewing ${reviewTurn.paneId} before starting another goal.`);
     }
     const goals = await activeBindings();
-    const objective = params.goal.trim();
-    const acceptance = params.acceptance.map((item) => item.trim()).filter(Boolean);
-    const context = (params.context || []).map((item) => item.trim()).filter(Boolean);
-    const constraints = (params.constraints || []).map((item) => item.trim()).filter(Boolean);
-    if (!objective) throw new Error("The goal cannot be empty.");
-    if (!acceptance.length) throw new Error("At least one concrete completion criterion is required.");
-    const existing = goals.active.find((binding) => binding.goal.trim() === objective);
-    if (existing) return { binding: existing, existing: true, warning: "" };
+    const requestedGoalId = typeof params.goal_id === "string" ? params.goal_id.trim() : "";
+    if (params.goal_id !== undefined && params.goal_id !== null && !requestedGoalId) {
+      throw new Error("The saved goal_id cannot be empty.");
+    }
+    const hasContractInput = [params.goal, params.context, params.acceptance, params.constraints]
+      .some((value) => value !== undefined && value !== null);
+    if (requestedGoalId && hasContractInput) {
+      throw new Error("Supply either goal_id for a saved goal or contract fields for a new goal, not both.");
+    }
+
+    let installed;
+    if (requestedGoalId) {
+      const existing = goals.active.find((binding) => binding.goalId === requestedGoalId);
+      if (existing) return { binding: existing, existing: true, warning: "" };
+      installed = goals.unstarted.find((record) => record.goalId === requestedGoalId);
+      if (!installed) throw new Error(`${requestedGoalId} is not an active or unstarted goal.`);
+    } else {
+      const objective = typeof params.goal === "string" ? params.goal.trim() : "";
+      const acceptance = (params.acceptance || []).map((item) => item.trim()).filter(Boolean);
+      const context = (params.context || []).map((item) => item.trim()).filter(Boolean);
+      const constraints = (params.constraints || []).map((item) => item.trim()).filter(Boolean);
+      if (!objective) throw new Error("The goal cannot be empty.");
+      if (!acceptance.length) throw new Error("At least one concrete completion criterion is required.");
+      const existing = goals.active.find((binding) => binding.goal.trim() === objective);
+      if (existing) return { binding: existing, existing: true, warning: "" };
+      installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
+      if (!installed) {
+        installed = await installSupervisorGoal({
+          objective,
+          acceptance,
+          context,
+          constraints,
+        });
+        goalCache?.unstarted.push(installed);
+      }
+    }
 
     if (typeof params.working_directory !== "string") {
       throw new Error("The worker working_directory is required and must be an absolute path.");
@@ -1127,17 +1155,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (!isAbsolute(cwd)) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
-    let installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
-    const continuingInstalledGoal = Boolean(installed);
-    if (!installed) {
-      installed = await installSupervisorGoal({
-        objective,
-        acceptance,
-        context,
-        constraints,
-      });
-      goalCache?.unstarted.push(installed);
-    }
+    const continuingInstalledGoal = goals.unstarted.some((record) => record.goalId === installed.goalId);
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
     const legacyWorkerName = legacyWorkerNameForGoal(goalId);
@@ -1280,21 +1298,22 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerTool({
     name: "supervisor_start_goal",
     label: "Start a supervised goal",
-    description: "Create one Codex worker, give it one explicit goal and completion criteria, and supervise it. Use for a direct human request that needs durable work. Continue a matching existing goal instead of calling this tool again. The worker, not the supervisor, chooses and manages any Git worktrees needed by the goal.",
+    description: "Start one new or saved goal in a Codex worker and supervise it. For a new goal, supply its contract fields. To resume an exact unstarted saved contract, supply goal_id and omit the contract fields. Continue an active goal instead of creating a sibling. The worker, not the supervisor, chooses and manages any Git worktrees needed by the goal.",
     parameters: Type.Object({
-      goal: Type.String({ minLength: 1, description: "The durable outcome the worker must fully achieve." }),
+      goal_id: Optional(Type.String({ minLength: 1, description: "Exact existing goal ID to start or continue. Use null when defining a new goal." })),
+      goal: Optional(Type.String({ minLength: 1, description: "The durable outcome for a new goal. Use null when goal_id names a saved goal." })),
       context: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
-        description: "Durable facts the worker needs to pursue this goal. Keep transient worker state, credentials, waits, and coordination in current evidence instead.",
+        description: "Durable facts for a new goal. Use null with goal_id. Keep transient worker state, credentials, waits, and coordination in current evidence instead.",
       })),
-      acceptance: Type.Array(Type.String({ minLength: 1 }), {
+      acceptance: Optional(Type.Array(Type.String({ minLength: 1 }), {
         minItems: 1,
         maxItems: 10,
-        description: "Concrete evidence that proves the goal is complete.",
-      }),
+        description: "Concrete completion evidence for a new goal. Use null with goal_id.",
+      })),
       constraints: Optional(Type.Array(Type.String({ minLength: 1 }), {
         maxItems: 10,
-        description: "Boundaries the worker must preserve, such as using isolated worktrees in a shared repository.",
+        description: "Lasting boundaries for a new goal. Use null with goal_id.",
       })),
       placement: Type.Union([
         Type.Object({
