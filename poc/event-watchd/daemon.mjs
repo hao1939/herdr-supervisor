@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { adoBuildSource } from "./ado-build.mjs";
 import { EventWatchService } from "./core.mjs";
 import { githubPullRequestSource } from "./github-pr.mjs";
 import { herdrDelivery } from "./herdr.mjs";
@@ -10,7 +11,10 @@ const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "sta
 const socketPath = process.env.EVENT_WATCH_SOCKET || join(stateHome, "event-watch.sock");
 const service = new EventWatchService({
   statePath: join(stateHome, "state.json"),
-  sources: { "github-pr": githubPullRequestSource() },
+  sources: {
+    "github-pr": githubPullRequestSource(),
+    "ado-build": adoBuildSource(),
+  },
   deliveries: { herdr: herdrDelivery() },
 });
 const server = new EventWatchServer({ service, socketPath });

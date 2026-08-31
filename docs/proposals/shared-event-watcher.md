@@ -230,7 +230,7 @@ Implement only:
 
 1. a generic in-memory/persisted one-shot watch core;
 2. a bounded newline-JSON Unix-socket API;
-3. one GitHub PR source adapter;
+3. GitHub PR and ADO build source adapters;
 4. one exact-session Herdr delivery adapter;
 5. a CLI that registers the calling Herdr worker and can reread a source;
 6. health/list/unwatch operations;
@@ -244,7 +244,14 @@ postpones the next source read. This avoids pretending that each watch owns the
 provider quota. Webhooks remain the better transport when lower latency or
 larger scale is required.
 
-Defer ADO, webhooks, action wrappers that auto-register created PRs/builds, MCP,
+The ADO adapter observes one exact build identity in the form
+`organization/project/build-id`. It derives revisions only from the build ID,
+status, result, source commit, and finish time. It obtains a fresh ambient Azure
+CLI token for every read, or uses `AZURE_DEVOPS_EXT_PAT`, and never persists the
+credential. Reads are at least one minute apart and bounded to ten distinct
+builds per daemon.
+
+Defer webhooks, action wrappers that auto-register created PRs/builds, MCP,
 and automatic production rollout until the first path is useful in a real goal.
 They should become adapters or thin CLI conveniences, not changes to the core.
 
@@ -267,7 +274,9 @@ The PoC is convincing only when MLVM proves all of the following:
 - registration establishes a quiet baseline and returns promptly;
 - the worker does other useful work instead of blocking;
 - one controlled GitHub PR revision wakes the exact worker directly;
+- one controlled ADO build revision wakes the exact worker directly;
 - the worker rereads GitHub authority;
+- the worker rereads ADO authority;
 - no supervisor model turn occurs on the successful path;
 - two watches on one PR share one source poll;
 - daemon restart preserves an undelivered change or safely rediscovers it;

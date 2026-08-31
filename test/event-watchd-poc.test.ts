@@ -4,6 +4,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { adoBuildSource, ambientAdoAuthorization } from "../poc/event-watchd/ado-build.mjs";
 import { eventWatchRequest } from "../poc/event-watchd/client.mjs";
 import { EventWatchService } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestSource } from "../poc/event-watchd/github-pr.mjs";
@@ -394,6 +395,101 @@ test("GitHub rate-limit guidance is exposed to the shared scheduler", async () =
     assert.equal(error.retryAfterMs, 7_000);
     return true;
   });
+});
+
+test("ADO observations change only with compact authoritative build state", async () => {
+  let build = {
+    id: 42,
+    status: "inProgress",
+    result: null,
+    sourceVersion: "abc123",
+    finishTime: null,
+    unrelatedProviderField: "first",
+  };
+  const requests: Array<{ url: string; authorization: string }> = [];
+  const source = adoBuildSource({
+    authorization: "Bearer test-token",
+    fetchImpl: async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: String(input),
+        authorization: String((init?.headers as Record<string, string>).Authorization),
+      });
+      return new Response(JSON.stringify(build), { status: 200 });
+    },
+  });
+
+  const first = await source.read("msazure/CloudNativeCompute/42");
+  build = { ...build, unrelatedProviderField: "second" };
+  const unchanged = await source.read("msazure/CloudNativeCompute/42");
+  build = { ...build, status: "completed", result: "succeeded", finishTime: "2026-08-31T12:00:00Z" };
+  const completed = await source.read("msazure/CloudNativeCompute/42");
+
+  assert.equal(first.revision, unchanged.revision);
+  assert.notEqual(first.revision, completed.revision);
+  assert.deepEqual(completed.payload, {
+    id: 42,
+    status: "completed",
+    result: "succeeded",
+    sourceVersion: "abc123",
+    finishTime: "2026-08-31T12:00:00Z",
+  });
+  assert.match(requests[0].url, /msazure\/CloudNativeCompute\/_apis\/build\/builds\/42\?api-version=7\.1/);
+  assert.equal(requests[0].authorization, "Bearer test-token");
+});
+
+test("ADO obtains a fresh ambient token for each read", async () => {
+  let authorizations = 0;
+  const seen: string[] = [];
+  const source = adoBuildSource({
+    getAuthorization: async () => `Bearer token-${++authorizations}`,
+    fetchImpl: async (_input: string | URL | Request, init?: RequestInit) => {
+      seen.push(String((init?.headers as Record<string, string>).Authorization));
+      return new Response(JSON.stringify({
+        id: 42, status: "inProgress", result: null, sourceVersion: "abc123", finishTime: null,
+      }), { status: 200 });
+    },
+  });
+
+  await source.read("msazure/CloudNativeCompute/42");
+  await source.read("msazure/CloudNativeCompute/42");
+  assert.deepEqual(seen, ["Bearer token-1", "Bearer token-2"]);
+});
+
+test("ADO supports PAT and bounded provider retry guidance", async () => {
+  const authorization = await ambientAdoAuthorization({ pat: "test-pat" });
+  assert.equal(authorization, `Basic ${Buffer.from(":test-pat").toString("base64")}`);
+
+  const source = adoBuildSource({
+    authorization,
+    fetchImpl: async () => new Response("busy", { status: 429, headers: { "retry-after": "9" } }),
+  });
+  await assert.rejects(source.read("msazure/CloudNativeCompute/42"), (error: any) => {
+    assert.equal(error.retryAfterMs, 9_000);
+    assert.doesNotMatch(error.message, /busy/);
+    return true;
+  });
+});
+
+test("ADO source enforces a provider-safe polling interval", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-ado-rate-"));
+  const source = adoBuildSource({
+    authorization: "Bearer test-token",
+    fetchImpl: async () => new Response(JSON.stringify({
+      id: 42, status: "inProgress", result: null, sourceVersion: "abc123", finishTime: null,
+    }), { status: 200 }),
+  });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { "ado-build": source },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  const result = await service.watch({
+    source: "ado-build",
+    subject: "msazure/CloudNativeCompute/42",
+    destination: destination("worker"),
+    intervalMs: 1_000,
+  });
+  assert.equal(result.intervalMs, 60_000);
 });
 
 test("unauthenticated GitHub watches use a rate-limit-safe interval", async () => {
