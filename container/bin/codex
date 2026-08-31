@@ -4,6 +4,7 @@ set -eu
 previous=""
 has_full_access=0
 has_hook_trust=0
+has_project_trust=0
 has_resume_cwd=0
 after_resume=0
 resume_arguments=0
@@ -25,8 +26,14 @@ for argument in "$@"; do
   then
     has_resume_cwd=1
   fi
+  if { [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; } &&
+    case "$argument" in projects=*|projects.*.trust_level=*) true ;; *) false ;; esac
+  then
+    has_project_trust=1
+  fi
   case "$argument" in
     -c=tui.resume_cwd=*|--config=tui.resume_cwd=*) has_resume_cwd=1 ;;
+    -c=projects=*|--config=projects=*|-c=projects.*.trust_level=*|--config=projects.*.trust_level=*) has_project_trust=1 ;;
   esac
   previous="$argument"
 done
@@ -50,6 +57,14 @@ if [ "$after_resume" -eq 1 ] && [ "$has_resume_cwd" -eq 0 ]; then
 fi
 
 if [ "${HERDR_SUPERVISOR_CODEX_FULL_ACCESS:-0}" = "1" ]; then
+  # Full-access mode is the operator's explicit choice for unattended workers.
+  # Trust the pane directory too so a restored worker cannot stop at Codex's
+  # interactive project-trust gate. Preserve any project map supplied by the
+  # caller because a second `projects` override could replace it.
+  if [ "$has_project_trust" -eq 0 ]; then
+    project_directory=$(node -e 'process.stdout.write(JSON.stringify(process.cwd()))')
+    set -- -c "projects={$project_directory={trust_level=\"trusted\"}}" "$@"
+  fi
   if [ "$has_hook_trust" -eq 0 ]; then
     set -- --dangerously-bypass-hook-trust "$@"
   fi
