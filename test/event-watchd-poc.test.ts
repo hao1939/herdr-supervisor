@@ -108,6 +108,37 @@ test("restart replaces a pending revision with current provider state before wak
   assert.deepEqual(delivered, ["current"]);
 });
 
+test("a pending wake waits for a current read of its exact resource", async (t) => {
+  const directory = await temporary(t, "event-watch-current-read-");
+  let scan = 0;
+  const delivered = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => {
+      scan += 1;
+      if (scan === 1) return discovery([{
+        subject: "resource-1", goalId: "g_owner", revision: "old", payload: {},
+      }]);
+      if (scan === 2) throw new Error("provider unavailable");
+      return discovery([{
+        subject: "resource-1", goalId: "g_owner", revision: "current", payload: {},
+      }]);
+    } } },
+    deliver: async (_goalId, events) => {
+      delivered.push(events[0].revision);
+      if (delivered.length === 1) throw new Error("worker unavailable");
+    },
+    diagnose: () => {},
+  });
+
+  await watcher.runOnce();
+  await watcher.runOnce();
+  assert.deepEqual(delivered, ["old"]);
+
+  await watcher.runOnce();
+  assert.deepEqual(delivered, ["old", "current"]);
+});
+
 test("authoritative absence forgets a resource without delivering its stale pending revision", async (t) => {
   const directory = await temporary(t, "event-watch-absent-");
   const statePath = join(directory, "state.json");

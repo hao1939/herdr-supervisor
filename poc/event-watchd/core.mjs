@@ -219,11 +219,11 @@ export class DiscoveredEventWatcher {
     return { observations: found, absent };
   }
 
-  async deliverPending() {
+  async deliverPending(observed) {
     const delivered = [];
     const groups = new Map();
     for (const [key, resource] of Object.entries(this.state.resources)) {
-      if (!resource.pending) continue;
+      if (!resource.pending || !observed.has(key)) continue;
       const items = groups.get(resource.pending.goalId) || [];
       items.push({ key, resource, pending: structuredClone(resource.pending) });
       groups.set(resource.pending.goalId, items);
@@ -270,6 +270,7 @@ export class DiscoveredEventWatcher {
   async run() {
     await this.ready;
     const scan = await this.scan();
+    const observed = new Set(scan.observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
     for (const key of scan.absent) {
@@ -301,7 +302,7 @@ export class DiscoveredEventWatcher {
       await save(this.statePath, next);
       this.state = next;
     }
-    await this.deliverPending();
+    await this.deliverPending(observed);
   }
 
   runOnce() {

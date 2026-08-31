@@ -200,6 +200,12 @@ A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
 must be idempotent or independently verified.
 
+A failed wake remains pending, but it is retried only after the exact resource
+appears in a successful current scan. If provider authority is unavailable, the
+daemon keeps the pending revision and sends nothing. This prevents an older
+remembered revision from being delivered after the provider may already have
+advanced.
+
 ## Minimal state
 
 The daemon keeps one atomically replaced bounded checkpoint:
@@ -272,9 +278,18 @@ The MLVM experiment now proves the metadata path end to end for goal
   proof event-driven.
 - The shared daemon remained healthy and retained all three latest revisions in
   its bounded checkpoint.
+- The current PoC runtime was then deployed over the same checkpoint. A direct
+  container start initially lacked the user-local Azure CLI on `PATH`; the
+  existing `AZURE_CLI` environment setting fixed that deployment boundary
+  without adding credentials or watcher state. The resulting provider failure
+  reached the Pi supervisor, whose existing goal checkpoint records the
+  diagnostic and its decision to steer the same worker.
+- On the recovered daemon, build `179017733` exposed another real revision. The
+  checkpoint advanced, the pending wake cleared, and exact Codex session
+  `01a04ca8-8771-7473-8e20-cebef028f430` in pane `w1:p11` returned to
+  `working`. Later unchanged scans left the checkpoint timestamp unchanged.
 
-Live supervisor-visible diagnostics and the atomic exact-session delivery
-boundary remain unproven production gates.
+The remaining production gate is the atomic exact-session delivery boundary.
 
 ## PoC acceptance
 
