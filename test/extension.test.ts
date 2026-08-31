@@ -721,6 +721,8 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
+  assert.match(prompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
   assert.match(prompts[0].prompt, /review the exact final diff/);
   assert.match(prompts[0].prompt, /run the required tests/);
   assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
