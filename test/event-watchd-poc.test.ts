@@ -564,7 +564,7 @@ test("a failed daemon startup releases its socket and process lock", async () =>
   await replacement.stop();
 });
 
-test("a failed daemon startup closes clients accepted during service initialization", async () => {
+test("a daemon does not expose its socket before service initialization", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-startup-client-"));
   const socketPath = join(directory, "watch.sock");
   let initializationStarted!: () => void;
@@ -584,18 +584,23 @@ test("a failed daemon startup closes clients accepted during service initializat
   });
   const startup = server.start();
   await started;
-  const idle = net.createConnection(socketPath);
-  await new Promise<void>((resolve, reject) => {
-    idle.once("connect", resolve);
-    idle.once("error", reject);
-  });
+  await assert.rejects(
+    new Promise<void>((resolve, reject) => {
+      const client = net.createConnection(socketPath);
+      client.once("connect", () => {
+        client.destroy();
+        resolve();
+      });
+      client.once("error", reject);
+    }),
+    /ENOENT/,
+  );
   failInitialization();
 
   await Promise.race([
     assert.rejects(startup, /state is unreadable/),
     new Promise((_, reject) => setTimeout(() => reject(new Error("failed startup cleanup timed out")), 1_000)),
   ]);
-  assert.equal(idle.destroyed, true);
 });
 
 test("daemon shutdown closes an idle client before releasing ownership", async () => {

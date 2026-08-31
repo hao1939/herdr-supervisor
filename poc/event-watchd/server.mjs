@@ -61,27 +61,34 @@ export class EventWatchServer {
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
       }
-      this.server = net.createServer((socket) => this.accept(socket));
-      await new Promise((resolve, reject) => {
-        const cleanup = () => {
-          this.server.off("error", failed);
-          this.server.off("listening", listening);
-        };
-        const failed = (error) => {
-          cleanup();
-          reject(error);
-        };
-        const listening = () => {
-          cleanup();
-          this.ownsSocket = true;
-          resolve();
-        };
-        this.server.once("error", failed);
-        this.server.once("listening", listening);
-        this.server.listen(this.socketPath);
-      });
-      await chmod(this.socketPath, 0o600);
       await this.service.start();
+      this.serviceStarted = true;
+      this.server = net.createServer((socket) => this.accept(socket));
+      const previousMask = process.umask();
+      process.umask(previousMask | 0o077);
+      try {
+        await new Promise((resolve, reject) => {
+          const cleanup = () => {
+            this.server.off("error", failed);
+            this.server.off("listening", listening);
+          };
+          const failed = (error) => {
+            cleanup();
+            reject(error);
+          };
+          const listening = () => {
+            cleanup();
+            this.ownsSocket = true;
+            resolve();
+          };
+          this.server.once("error", failed);
+          this.server.once("listening", listening);
+          this.server.listen(this.socketPath);
+        });
+      } finally {
+        process.umask(previousMask);
+      }
+      await chmod(this.socketPath, 0o600);
     } catch (error) {
       if (this.server?.listening) {
         const closed = new Promise((resolve) => this.server.close(resolve));
@@ -89,6 +96,10 @@ export class EventWatchServer {
         await closed;
       }
       this.server = undefined;
+      if (this.serviceStarted) {
+        await this.service.stop().catch(() => {});
+        this.serviceStarted = false;
+      }
       if (this.ownsSocket) {
         await unlink(this.socketPath).catch((unlinkError) => {
           if (unlinkError?.code !== "ENOENT") throw unlinkError;
@@ -166,6 +177,7 @@ export class EventWatchServer {
       this.ownsSocket = false;
     }
     await this.releaseLock();
+    this.serviceStarted = false;
     const failed = drains.find((result) => result.status === "rejected");
     if (failed) throw failed.reason;
   }
