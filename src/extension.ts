@@ -2328,7 +2328,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         runtime.missingDecisionRetries = 0;
       } else if (runtime.missingDecisionRetries < 1) {
         runtime.missingDecisionRetries += 1;
-        handleSignal(reviewedPane, {
+        queueSignal(reviewedPane, {
           force: true,
           reason: "the previous review ended without an explicit decision",
           key: `missing-decision:${binding.goalId}:${runtime.missingDecisionRetries}:${Date.now()}`,

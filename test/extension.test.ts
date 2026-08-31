@@ -1029,6 +1029,50 @@ test("a command-shaped human follow-up is relayed unchanged and releases its rev
   pi.events.get("session_shutdown")();
 });
 
+test("a missing-decision retry waits until the human follow-up settles", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  pi.events.get("input")({
+    type: "input",
+    text: "Handle my request before retrying the review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(pi.messages.length, 2);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 2, "the retry must not preempt the human follow-up");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /previous review ended without an explicit decision/);
+  pi.events.get("session_shutdown")();
+});
+
 test("settling a direct human decision clears its review fence", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
