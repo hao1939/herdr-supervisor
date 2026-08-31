@@ -5,5 +5,5 @@ export function canRecoverAgentSession(session) {
 }
 
 export function canResumeNativeGoal(session, status) {
-  return canRecoverAgentSession(session) && ["idle", "done"].includes(status);
+  return session?.agent === "codex" && ["idle", "done"].includes(status);
 }

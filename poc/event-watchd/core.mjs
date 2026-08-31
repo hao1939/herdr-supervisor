@@ -166,6 +166,7 @@ export class EventWatchService {
     this.stateReady = load(statePath).then((state) => { this.state = state; });
     this.mutations = Promise.resolve();
     this.resourceLocks = new Map();
+    this.sourceBackoffs = new Map();
     this.reportedDiagnostics = new Set();
     this.scheduleGeneration = 0;
     this.running = false;
@@ -201,7 +202,25 @@ export class EventWatchService {
   async read(source, subject) {
     const adapter = this.sources[source];
     if (!adapter) throw new Error(`unsupported source ${source}`);
-    const observation = await adapter.read(subject);
+    const now = this.now();
+    const backoffUntil = this.sourceBackoffs.get(source);
+    if (backoffUntil > now) {
+      const error = new Error(`source ${source} is backed off`);
+      error.retryAfterMs = backoffUntil - now;
+      throw error;
+    }
+    if (backoffUntil !== undefined) this.sourceBackoffs.delete(source);
+    let observation;
+    try {
+      observation = await adapter.read(subject);
+    } catch (error) {
+      const requestedRetry = Number(error?.retryAfterMs);
+      if (Number.isFinite(requestedRetry)) {
+        const retryAfterMs = Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, requestedRetry));
+        this.sourceBackoffs.set(source, Math.max(this.sourceBackoffs.get(source) ?? 0, this.now() + retryAfterMs));
+      }
+      throw error;
+    }
     return {
       revision: text(observation.revision, "observed revision"),
       payload: data(observation.payload ?? null, "observed payload"),

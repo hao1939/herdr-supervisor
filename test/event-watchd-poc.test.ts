@@ -275,6 +275,43 @@ test("manual poll honors provider retry guidance instead of re-reading during ba
   assert.equal(reads, 3, "a manual poll after the retry window elapses reads again");
 });
 
+test("an initial source retry boundary covers every subject and read entry point", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-source-backoff-"));
+  let now = 10_000;
+  let reads = 0;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: {
+      source: {
+        read: async (subject: string) => {
+          reads += 1;
+          if (reads === 1) {
+            const error: Error & { retryAfterMs?: number } = new Error("rate limited");
+            error.retryAfterMs = 9_000;
+            throw error;
+          }
+          return { revision: subject, payload: null };
+        },
+      },
+    },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  await assert.rejects(service.watch({
+    source: "source", subject: "one", destination: destination("one"), intervalMs: 1_000,
+  }), /rate limited/);
+  await assert.rejects(service.watch({
+    source: "source", subject: "two", destination: destination("two"), intervalMs: 1_000,
+  }), /source source is backed off/);
+  await assert.rejects(service.readCurrent({ source: "source", subject: "three" }), /source source is backed off/);
+  assert.equal(reads, 1);
+
+  now += 9_000;
+  const result = await service.readCurrent({ source: "source", subject: "three" });
+  assert.equal(result.revision, "three");
+  assert.equal(reads, 2);
+});
+
 test("retrying the same registration preserves its unseen pending change", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-idempotent-"));
   let revision = "one";

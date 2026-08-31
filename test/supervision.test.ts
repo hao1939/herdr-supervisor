@@ -91,6 +91,7 @@ test("only settled Codex sessions need a native Goal resume", () => {
   assert.equal(canResumeNativeGoal(session, "idle"), true);
   assert.equal(canResumeNativeGoal(session, "done"), true);
   assert.equal(canResumeNativeGoal(session, "blocked"), false);
+  assert.equal(canResumeNativeGoal({ ...session, kind: "path" }, "idle"), true);
   assert.equal(canResumeNativeGoal({ ...session, agent: "pi" }, "idle"), false);
 });
 
