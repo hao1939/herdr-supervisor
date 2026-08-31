@@ -130,6 +130,11 @@ test("pull request traceability never publishes a path-backed session locator", 
   assert.match(trace, /- Pane: "w1:p9"/);
   assert.doesNotMatch(trace, /Codex session:/);
   assert.doesNotMatch(trace, /\/private\/home/);
+  assert.match(trace, /Write the description in plain language/);
+  assert.match(trace, /what was wrong and what changes for the user/);
+  assert.ok(trace.indexOf("Write the description") < trace.indexOf("## Supervision"));
+  assert.match(trace, /Append this traceability block after the meaningful explanation/);
+  assert.match(trace, /supervision metadata secondary/);
 });
 
 test("terminal cursors do not change when an observation includes more older lines", () => {
@@ -257,6 +262,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
+  assert.match(deliveredPrompts[0].prompt, /run the required tests/);
+  assert.match(deliveredPrompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(deliveredPrompts[0].prompt, /## Supervision/);
   assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[0].bindingExists, true);
@@ -515,6 +523,9 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /review the exact final diff/);
+  assert.match(prompts[0].prompt, /run the required tests/);
+  assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(prompts[0].prompt, /Keep the native Goal active/);
   assert.match(prompts[0].prompt, /## Supervision/);
   assert.match(prompts[0].prompt, /copy the current objective from the canonical goal\.json/);
@@ -793,6 +804,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
+  assert.match(result.systemPrompt, /Express required CI, live validation, or independent review as ordinary acceptance criteria/);
+  assert.match(result.systemPrompt, /Do not create a second goal merely to represent a review phase/);
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
