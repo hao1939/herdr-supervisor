@@ -907,12 +907,14 @@ stores or displays copied live status as goal truth.
 - **Implemented:** an expired external wait cannot be extended from an unchanged
   settled-worker observation; the same worker must check the condition or take
   another concrete action.
-- **Live finding:** after one required ADO reread returned unchanged, a native
-  Codex Goal slept and reread the same build every two minutes even though the
-  supervisor already owned an external watch. No new scheduler was needed: the
-  worker and supervisor policies now say to report an external-only blocker
-  once, let the native Goal block, and resume the same session from the existing
-  watch or bounded review.
+- **Verified live:** after one required ADO reread returned unchanged, a native
+  Codex Goal initially reread the same build every two minutes. It then stopped
+  polling, completed independent owner-safe work, and, once the external build
+  was the only remaining path for three consecutive turns, marked the exact
+  recoverable boundary as blocked. The supervisor retained one ADO watch and a
+  six-hour safety check without queueing a duplicate run. Shared policy was
+  enough; no second scheduler, waiting workflow, or durable retry state was
+  added.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads
   bounded evidence; the audit never advances the cursor.
