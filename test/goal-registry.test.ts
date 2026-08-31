@@ -38,6 +38,85 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
   await assert.rejects(registerSupervisedGoal(worker, {
     objective: "A different goal.",
   }, directory), /already pursues goal g_test/);
+  await assert.rejects(registerSupervisedGoal({
+    ...worker,
+    paneId: "w1:p9",
+    terminalId: "term_other",
+  }, {
+    objective: "Another goal with the same native session.",
+  }, directory), /native agent session already pursues goal g_test/);
+});
+
+test("concurrent registration cannot assign one native session twice", async () => {
+  const directory = await root();
+  const results = await Promise.allSettled([
+    registerSupervisedGoal(worker, { objective: "Finish Alpha." }, directory, { goalId: "g_alpha" }),
+    registerSupervisedGoal({
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_other",
+    }, { objective: "Finish Beta." }, directory, { goalId: "g_beta" }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /native agent session already pursues goal/);
+  assert.equal((await loadSupervisorGoals(directory)).active.length, 1);
+});
+
+test("concurrent relocation and registration cannot assign one pane twice", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Keep the existing goal moving.",
+  }, directory, { goalId: "g_existing" });
+  const destination = {
+    paneId: "w1:p9",
+    terminalId: "term_destination",
+    agentSession: worker.agentSession,
+  };
+  const newcomer = {
+    paneId: destination.paneId,
+    terminalId: destination.terminalId,
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_new" },
+  };
+
+  const results = await Promise.allSettled([
+    refreshWorkerLocation(binding, destination, directory),
+    registerSupervisedGoal(newcomer, {
+      objective: "Start another goal.",
+    }, directory, { goalId: "g_new" }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /already pursues goal/);
+  const active = (await loadSupervisorGoals(directory)).active;
+  assert.equal(new Set(active.map((goal) => goal.paneId)).size, active.length);
+});
+
+test("a queued stale relocation cannot overwrite a newer worker route", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Keep the newest observed worker route.",
+  }, directory, { goalId: "g_route" });
+  const results = await Promise.allSettled([
+    refreshWorkerLocation(binding, {
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_newest",
+    }, directory),
+    refreshWorkerLocation(binding, {
+      ...worker,
+      paneId: "w1:p10",
+      terminalId: "term_stale",
+    }, directory),
+  ]);
+
+  assert.equal(results[0].status, "fulfilled");
+  assert.equal(results[1].status, "rejected");
+  assert.match((results[1] as PromiseRejectedResult).reason.message, /routing changed; reread Herdr/);
+  const [stored] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(stored.paneId, "w1:p9");
+  assert.equal(stored.terminalId, "term_newest");
 });
 
 test("refining a goal replaces its contract without replacing its worker", async () => {
@@ -149,6 +228,39 @@ test("the supervisor starts a copied contract through its single writer", async 
   assert.equal((binding as any).worker, undefined);
   assert.equal(binding.paneId, "w1:p2");
   await assert.rejects(startInstalledGoal("g_copied", worker, directory), /already pursues goal/);
+
+  await installGoal("g_other", createGoalContract({
+    objective: "Run another copied goal.",
+    acceptance: ["The other copied goal is verified."],
+  }), directory);
+  await assert.rejects(startInstalledGoal("g_other", {
+    ...worker,
+    paneId: "w1:p9",
+    terminalId: "term_other",
+  }, directory), /native agent session already pursues goal g_copied/);
+});
+
+test("concurrent installed goals cannot claim one native session twice", async () => {
+  const directory = await root();
+  for (const goalId of ["g_alpha", "g_beta"]) {
+    await installGoal(goalId, createGoalContract({
+      objective: `Finish ${goalId}.`,
+      acceptance: ["The goal is verified."],
+    }), directory);
+  }
+  const results = await Promise.allSettled([
+    startInstalledGoal("g_alpha", worker, directory),
+    startInstalledGoal("g_beta", {
+      ...worker,
+      paneId: "w1:p9",
+      terminalId: "term_other",
+    }, directory),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.match((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message, /native agent session already pursues goal/);
+  assert.equal((await loadSupervisorGoals(directory)).active.length, 1);
 });
 
 test("restart reloads concurrent goals independently and reconsiders fresh Herdr state", async () => {
@@ -264,18 +376,43 @@ test("stale reread acceptance cannot clear a newer external change", async () =>
   assert.equal((await loadSupervisorGoals(directory)).active[0].externalChange.revision, "revision-2");
 });
 
-test("the same native session may refresh its transient terminal after restart", async () => {
+test("the same native session may refresh its transient routing location", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
     objective: "Keep working after restart.",
   }, directory, { goalId: "g_restart", at: "2026-08-28T10:00:00.000Z" });
+  const dependentWorker = {
+    paneId: "w1:p3",
+    terminalId: "term_dependent",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_dependent" },
+  };
+  const dependent = await registerSupervisedGoal(dependentWorker, {
+    objective: "Continue when the peer changes.",
+  }, directory, { goalId: "g_dependent", at: "2026-08-28T10:00:10.000Z" });
+  await recordDecision(dependent, "leave", {
+    progress: "Waiting for the peer.",
+    action: "Wait for the peer.",
+    wait: {
+      condition: "the peer result",
+      paneId: worker.paneId,
+      reviewAt: "2026-08-28T11:00:00.000Z",
+    },
+  }, directory, () => "2026-08-28T10:00:20.000Z");
   const refreshed = await refreshWorkerLocation(binding, {
     ...worker,
+    paneId: "w1:p9",
     terminalId: "term_after_restart",
   }, directory, () => "2026-08-28T10:01:00.000Z");
 
+  assert.equal(refreshed.paneId, "w1:p9");
   assert.equal(refreshed.terminalId, "term_after_restart");
-  const [stored] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(refreshed.updatedAt, "2026-08-28T10:01:00.000Z");
+  const storedGoals = (await loadSupervisorGoals(directory)).active;
+  const stored = storedGoals.find((goal) => goal.goalId === binding.goalId);
+  const storedDependent = storedGoals.find((goal) => goal.goalId === dependent.goalId);
+  assert.equal(stored.paneId, "w1:p9");
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
+  assert.equal(storedDependent.wait.goalId, binding.goalId);
+  assert.equal(storedDependent.wait.paneId, worker.paneId);
 });

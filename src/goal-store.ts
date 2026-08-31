@@ -1,7 +1,8 @@
 import { open, mkdir, readFile, readdir, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
 export const STATE_VERSION = 1;
@@ -29,7 +30,7 @@ const stateFields = new Set([
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
-const waitFields = new Set(["condition", "reviewAt", "paneId"]);
+const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "workerSequence"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
@@ -48,6 +49,10 @@ function serializeWrite(key, operation) {
     if (writes.get(key) === settled) writes.delete(key);
   });
   return update;
+}
+
+export function withGoalRootLock(root, operation) {
+  return serializeWrite(`${resolve(root || defaultGoalsRoot())}\0root`, operation);
 }
 
 export function defaultGoalsRoot(env = process.env) {
@@ -173,6 +178,9 @@ export function validateGoalState(state) {
     onlyFields(state.wait, waitFields, "goal wait");
     requiredString(state.wait.condition, "goal wait condition");
     requiredString(state.wait.reviewAt, "goal wait reviewAt");
+    if (state.wait.goalId !== undefined && !goalIdPattern.test(state.wait.goalId)) {
+      throw new Error("goal wait goalId must be a goal ID");
+    }
     if (state.wait.paneId !== undefined) requiredString(state.wait.paneId, "goal wait paneId");
     if (!Number.isFinite(Date.parse(state.wait.reviewAt))) {
       throw new Error("goal wait reviewAt must be an ISO timestamp");
@@ -349,7 +357,13 @@ export async function listGoalRecords(root = defaultGoalsRoot()) {
   }));
 }
 
-export async function updateGoalState(goalId, change, root = defaultGoalsRoot(), now = () => new Date().toISOString()) {
+export async function updateGoalState(
+  goalId,
+  change,
+  root = defaultGoalsRoot(),
+  now = () => new Date().toISOString(),
+  { allowWorkerRelocation = false } = {},
+) {
   const key = `${root}\0${goalId}\0state`;
   return serializeWrite(key, async () => {
     const current = await loadGoalState(goalId, root);
@@ -359,10 +373,8 @@ export async function updateGoalState(goalId, change, root = defaultGoalsRoot(),
       throw new Error("a goal state update cannot change its identity");
     }
     if (
-      next.worker.paneId !== current.worker.paneId
-      || ["source", "agent", "kind", "value"].some(
-        (field) => next.worker.agentSession?.[field] !== current.worker.agentSession?.[field],
-      )
+      (!allowWorkerRelocation && next.worker.paneId !== current.worker.paneId)
+      || !sameAgentSession(next.worker.agentSession, current.worker.agentSession)
     ) {
       throw new Error("a goal state update cannot replace its worker pane or native session");
     }

@@ -299,6 +299,12 @@ identity is the native agent session; the Herdr pane is its routing slot and
 the terminal ID is a transient location checkpoint. When Herdr restores the
 same native session in the same pane after a restart, the supervisor refreshes
 that checkpoint instead of treating the new terminal process as a replacement.
+If that pane disappeared and the recorded session supports exact resume, one
+`steer` decision may create a new routing pane, resume that saved native session
+there, and update the local location checkpoint. Recovery reuses the goal's
+deterministically named empty tab after an interrupted creation response, so
+retry does not multiply panes. A pane is
+not the durable worker identity.
 Supervised Codex processes keep native Goals enabled. `goal.json` remains the
 single portable authority; the native Goal is the worker's persisted execution
 loop and points back to that file. Codex therefore owns ordinary
@@ -312,7 +318,9 @@ turn on the same exact session. If the process has exited, the same action
 recovers that exact session first. Transport is not a model decision.
 Resume also selects the native session's saved directory when no caller has
 made an explicit choice. Goal-owned worktrees therefore survive process or
-container recovery without an interactive directory-confirmation gate.
+container recovery without an interactive directory-confirmation gate. The
+empty routing pane may start in the supervisor's stable directory; that is not
+the worker's resumed directory and does not become goal state.
 The last recorded `ask_human` decision restores the goal's human-wait state and
 its bounded reconsideration time.
 Until the human answers, ordinary restart noise and worker events remain quiet.
@@ -376,7 +384,7 @@ Supervisor restart or resumed session
   -> fetch one fresh Herdr snapshot
   -> restore exact wait deadlines
   -> reread bounded worker evidence before waking an unchanged settled wait
-  -> reconsider expired waits, linked-worker changes, new evidence,
+  -> reconsider expired waits, selected peer effects, new evidence,
      and failures from current facts
   -> continue normal event-driven supervision
 ```
@@ -389,10 +397,11 @@ Supervisor restart or resumed session
 | `blocked`                                | Review immediately and determine whether the worker or human can answer |
 | `idle` or Herdr `done`                   | Review the result; never assume goal completion                         |
 | Agent process exits but pane remains     | Continue the goal; code resumes the exact session                        |
-| Pane disappears or occupant changes      | Fail closed and ask the human only when a decision is needed             |
+| Pane disappears                          | Let `steer` relocate and resume only the exact saved native session      |
+| Pane occupant changes                     | Fail closed; ask the human only when a real decision is needed           |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
-| Linked worker changes                    | Reconsider only goals explicitly waiting on that worker                 |
+| Peer review changes a linked condition   | The model selects only the affected waiting goals for reconsideration   |
 
 The event means "reconsider this goal now." It never decides success by
 itself.
@@ -485,14 +494,19 @@ the outcome is known, and atomically updates the current goal context.
 `supervisor_leave` also covers a settled worker whose next step has one concrete
 peer or external condition. The model supplies that condition as structured
 input. A direct peer wait also supplies that worker's exact pane identity, so
-code can route its next event without interpreting prose. The runtime assigns
-the normal bounded review interval automatically. If current evidence supplies
-an exact retry time, the model may preserve it instead. A settled worker
-without a concrete condition is still rejected. When several goals share
+code can resolve and store the peer's durable goal identity without interpreting
+prose. The pane remains a last-known routing hint; relocating the peer cannot lose
+the relationship. The runtime assigns the normal bounded review interval when
+the model supplies no exact time. For an event-backed wait, the model may choose
+a slower evidence-appropriate safety check because a selected peer effect or
+watched external change still wakes the goal earlier. A settled worker without a
+concrete condition is still rejected. When several goals share
 scarce capacity, one active worker may use or probe it. That responsibility ends
-when the worker becomes
-idle or externally blocked: linked peers wake and the LLM decides which useful
-work can proceed. This avoids both a resource scheduler and an idle convoy.
+when the worker becomes idle or externally blocked: the peer review shows its
+linked waits, and the LLM selects only conditions that materially changed. A
+terminal peer wakes any remaining dependents. Raw lifecycle changes wake
+only their own goal; they do not spend speculative peer reviews. This avoids
+both a resource scheduler and an idle convoy.
 The peer identity is only an early-wake hint: an invalid or self-referential
 hint is dropped while the concrete condition and bounded deadline remain
 authoritative. Events improve latency; they are never required for eventual
@@ -511,7 +525,7 @@ code supplies the normal review interval when the model omits it; the model
 copies a later time only when current evidence provides a real exact retry
 boundary. The same field can accompany a `steer` decision when a worker should
 continue now but one named operation must be checked at an exact later time.
-A linked peer event may wake the goal earlier. Exact deadlines are checkpointed,
+A peer review may explicitly wake the goal earlier. Exact deadlines are checkpointed,
 restored after restart, and never suppressed as routine activity. A bounded
 native-evidence check suppresses routine working/no-change model turns; new
 evidence, exact deadlines, settled workers, and real failures still wake
@@ -525,8 +539,16 @@ the goal is practical and whether the condition blocks the whole outcome or
 only one route, looks for safe mitigation or alternative proof, and continues
 independent useful work or preparation. It may wait again only when fresh
 evidence shows that nothing meaningful can move and supplies the next exact
-boundary. A linked worker's change triggers the same reconsideration
-immediately.
+boundary. When a peer review proves that the recorded condition changed, the
+model explicitly queues the same reconsideration for that waiting goal; a
+terminal peer queues every remaining dependent. Raw lifecycle changes wake
+only that peer's own goal.
+
+If one external or peer condition is the worker's only remaining blocker, the
+worker reports the exact boundary once and lets its native Goal block. It does
+not sleep, poll, or repeatedly reread unchanged state. The existing external
+watch, selected peer wake, or bounded review resumes that same session; no
+second watcher or waiting workflow is needed.
 
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
@@ -643,10 +665,13 @@ cannot enqueue another review behind itself.
 The global signal coalesces to one pending review and runs after human and
 focused work. It uses the same Pi session and must end with one structured
 `supervisor_global_result`. Its checkpoint stores the last and next review
-times plus snapshot and finding hashes under `goals/.supervisor/`; it is not a
-Task or portable goal state. Restart runs an overdue review immediately.
-Identical findings are displayed at most once. A failed or incomplete global
-turn receives one bounded retry and never partially routes unknown goal IDs.
+times, snapshot and finding hashes, and the last bounded human-visible finding
+under `goals/.supervisor/`; it is not a Task or portable goal state. The next
+review receives that finding and returns the complete set of findings still
+proven by current evidence. Code suppresses an identical set, while an empty
+set clears the remembered finding so a later recurrence is visible. Restart
+runs an overdue review immediately. A failed or incomplete global turn receives
+one bounded retry and never partially routes unknown goal IDs.
 
 A goal waiting for the human keeps a bounded deadline. When it expires, the
 supervisor checks whether the answer is still necessary, whether the blocker can
@@ -659,8 +684,8 @@ events do not repeat the question before that review.
 | ----------------------------- | -------------------------------------------------------------------------------------------------- |
 | Supervisor or Herdr reconnect | Resume the same Pi session when available, load unfinished goals directly, fetch one snapshot, and re-arm watches |
 | Worker occupant changed       | Stop and ask the human; never prompt the replacement automatically                                 |
-| Exact worker process stopped  | Resume only a supported native session in the same terminal, then send one continuation             |
-| Worker pane disappeared       | Fail closed; do not create a pane or replacement worker automatically                               |
+| Exact worker process stopped  | Refresh an empty restored pane's terminal when needed, resume only the exact native session, then continue |
+| Worker pane disappeared       | On `steer`, resume a supported exact saved session in a new routing pane; otherwise ask the human    |
 | Malformed or missing decision | Apply no action or checkpoint, record a visible diagnostic, and schedule one bounded retry         |
 | Prompt/send failure           | Re-read current identity and state before one bounded retry                                        |
 | Herdr reports blocked         | Read new native evidence and determine whether existing context can unblock it before asking the human |
@@ -883,6 +908,14 @@ stores or displays copied live status as goal truth.
 - **Implemented:** an expired external wait cannot be extended from an unchanged
   settled-worker observation; the same worker must check the condition or take
   another concrete action.
+- **Verified live:** after one required ADO reread returned unchanged, a native
+  Codex Goal initially reread the same build every two minutes. It then stopped
+  polling, completed independent owner-safe work, and, once the external build
+  was the only remaining path for three consecutive turns, marked the exact
+  recoverable boundary as blocked. The supervisor retained one ADO watch and a
+  six-hour safety check without queueing a duplicate run. Shared policy was
+  enough; no second scheduler, waiting workflow, or durable retry state was
+  added.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads
   bounded evidence; the audit never advances the cursor.
@@ -972,10 +1005,10 @@ stores or displays copied live status as goal truth.
   enabled on new and restored sessions. Contract refinements update the same
   file and notify the same worker instead of creating or synchronizing a second
   durable goal record.
-- **Implemented:** the restart-stable worker name is derived from the goal UUID
-  but shortened to Herdr's 32-character agent-name limit. The retained 108-bit
-  UUID prefix keeps names practical to correlate without using an invalid full
-  UUID.
+- **Implemented:** the restart-stable worker name is derived from a 108-bit
+  hash of the complete goal ID and shortened to Herdr's 32-character
+  agent-name limit. Names remain practical to correlate without treating a
+  normalized or truncated goal prefix as ownership.
 - **Verified:** the isolated extension test creates one Herdr pane, starts one
   Codex worker with native Goals enabled, persists one goal contract and
   checkpoint, sends `/goal` only after the binding exists, and keeps human
@@ -1013,9 +1046,10 @@ The PoC is successful when all of these are demonstrated:
     useful shared supervisor history remains available.
 12. A live steer ends its review turn; acceptance happens only in a later turn
     triggered by fresh Herdr state.
-13. Continuing a stopped supported process resumes its exact native session and
-    paused Goal in the same terminal without an interactive prompt; a missing
-    pane or changed identity fails closed.
+13. Continuing a stopped supported process refreshes an empty restored pane's
+    transient terminal when needed, then resumes its exact native session and
+    paused Goal without an interactive prompt; a missing pane may be relocated
+    only for the exact saved session; changed native identity fails closed.
 14. Every automatic review ends in one explicit decision; prose alone cannot
     advance a checkpoint or hide an incomplete review.
 15. Restart recovery loads every unfinished goal directly and reconsiders it from current

@@ -38,6 +38,7 @@ export type LegacyRecordedDecision = RecordedDecision | "recover";
 export type GoalWait = {
   condition: string;
   reviewAt: string;
+  goalId?: string;
   paneId?: string;
 };
 
