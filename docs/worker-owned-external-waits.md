@@ -310,12 +310,17 @@ The first two feasibility gates passed in the MLVM container on 2026-08-31:
    successfully, continued the same native Goal turn, and performed a fresh
    authoritative provider read. No repository file, detached process,
    supervisor watch, or second worker was involved.
+3. A third worker checked a deliberately absent path every five seconds in one
+   foreground call. The command returned the expected timeout exit 124 after
+   approximately 45 seconds and nine checks. Codex treated the non-success as
+   evidence, continued the same native Goal turn, reread the path, and proved
+   clean disposal without asking the human or entering a supervisor wait.
 
-Both workers were accepted through the ordinary focused review after their
-turns settled. These results prove that a real provider wait does not require a
-supervisor-owned polling path for normal uninterrupted execution. They do not
-yet prove timeout, interruption, or restart recovery, so the migration remains
-conditional on those tests.
+All three workers were accepted through the ordinary focused review after their
+turns settled. These results prove that a real provider wait and an expected
+timeout do not require a supervisor-owned polling path during uninterrupted
+execution. They do not yet prove interruption or restart recovery, so the
+migration remains conditional on those tests.
 
 If the foreground command cannot survive realistic waits, keep the zero-code
 bounded recheck as the default and measure whether its delay and model cost are
