@@ -522,6 +522,62 @@ test("removing a watch cannot erase a provider retry boundary", async () => {
   assert.equal(remaining.nextPollAt, retryAt);
 });
 
+test("cancellation and delivery have one serialized winner", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-cancel-delivery-"));
+  let revision = "one";
+  let deliveryStarted!: () => void;
+  const started = new Promise<void>((resolve) => { deliveryStarted = resolve; });
+  let releaseDelivery!: () => void;
+  const release = new Promise<void>((resolve) => { releaseDelivery = resolve; });
+  let deliveries = 0;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision, payload: null }) } },
+    deliveries: {
+      test: {
+        deliver: async () => {
+          deliveries += 1;
+          deliveryStarted();
+          await release;
+        },
+      },
+    },
+  });
+  const registered = await service.watch({
+    source: "source",
+    subject: "subject",
+    destination: destination("worker"),
+    intervalMs: 1_000,
+  });
+  revision = "two";
+  const polling = service.pollNow();
+  await started;
+
+  let cancellationSettled = false;
+  const cancellation = service.unwatch(registered.watchId).then((removed) => {
+    cancellationSettled = true;
+    return removed;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cancellationSettled, false, "cancellation waits for in-flight delivery");
+
+  releaseDelivery();
+  await polling;
+  assert.equal(await cancellation, false, "delivery consumed the watch before cancellation acquired the lock");
+  assert.equal(deliveries, 1);
+
+  const second = await service.watch({
+    source: "source",
+    subject: "subject",
+    destination: destination("second-worker"),
+    intervalMs: 1_000,
+  });
+  assert.equal(await service.unwatch(second.watchId), true);
+  revision = "three";
+  await service.pollNow();
+  assert.equal(deliveries, 1, "delivery sees no watch after cancellation wins");
+});
+
 test("a second daemon cannot steal a live socket", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-server-"));
   const socketPath = join(directory, "watch.sock");
@@ -668,16 +724,24 @@ test("daemon shutdown keeps ownership until an active request drains", async () 
   await replacement.stop();
 });
 
-test("one daemon connection cannot queue multiple requests", async () => {
+test("one daemon connection executes at most one request", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-one-request-"));
   const socketPath = join(directory, "watch.sock");
   let polls = 0;
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+  let releaseRequest!: () => void;
+  const release = new Promise<void>((resolve) => { releaseRequest = resolve; });
   const server = new EventWatchServer({
     socketPath,
     service: {
       start: async () => {},
       stop: async () => {},
-      pollNow: async () => { polls += 1; },
+      pollNow: async () => {
+        polls += 1;
+        requestStarted();
+        await release;
+      },
     },
   });
   await server.start();
@@ -686,9 +750,18 @@ test("one daemon connection cannot queue multiple requests", async () => {
     client.once("connect", resolve);
     client.once("error", reject);
   });
-  client.write(`${JSON.stringify({ id: "one", action: "poll" })}\n${JSON.stringify({ id: "two", action: "poll" })}\n`);
-  await new Promise<void>((resolve) => client.once("close", resolve));
-  assert.equal(polls, 0, "a pipelined connection is rejected instead of building a request queue");
+  const response = new Promise<void>((resolve, reject) => {
+    client.once("data", () => resolve());
+    client.once("error", reject);
+  });
+  client.write(`${JSON.stringify({ id: "one", action: "poll" })}\n`);
+  await started;
+  client.write(`${JSON.stringify({ id: "two", action: "poll" })}\n`);
+  client.write(`${JSON.stringify({ id: "three", action: "poll" })}\n`);
+  releaseRequest();
+  await response;
+  client.destroy();
+  assert.equal(polls, 1, "later frames cannot become queued requests");
   await server.stop();
 });
 
@@ -1268,6 +1341,51 @@ test("Herdr delivery resumes a settled native Goal before sending the wake hint"
   assert.match(prompts[1], /event-watch read github-pr owner\/repo#1/);
   assert.deepEqual(calls[1].params.wait, { until: ["working"], timeout_ms: 10_000 });
   assert.equal(calls.at(-1).params.target, "w1:p3", "the hint follows the exact session after resume");
+});
+
+test("Herdr delivery rechecks exact identity after native Goal resume", async () => {
+  const agentSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session" };
+  const replacementSession = { ...agentSession, value: "replacement" };
+  const afterResumeCases = [
+    { name: "missing", agents: [], matches: 0 },
+    {
+      name: "ambiguous",
+      agents: ["w1:p3", "w1:p4"].map((pane_id) => ({ pane_id, agent_status: "working", agent_session: agentSession })),
+      matches: 2,
+    },
+    {
+      name: "replaced",
+      agents: [{ pane_id: "w1:p3", agent_status: "working", agent_session: replacementSession }],
+      matches: 0,
+    },
+  ];
+
+  for (const scenario of afterResumeCases) {
+    const calls: any[] = [];
+    let snapshots = 0;
+    const request = async (method: string, params: any) => {
+      calls.push({ method, params });
+      if (method !== "session.snapshot") return {};
+      snapshots += 1;
+      return {
+        snapshot: {
+          agents: snapshots === 1
+            ? [{ pane_id: "w1:p2", agent_status: "done", agent_session: agentSession }]
+            : scenario.agents,
+        },
+      };
+    };
+
+    await assert.rejects(herdrDelivery({ request }).deliver({ agentSession }, {
+      source: "github-pr",
+      subject: "owner/repo#1",
+      revision: "two",
+      payload: null,
+    }), new RegExp(`resolved to ${scenario.matches} live agents`), scenario.name);
+    const prompts = calls.filter((call) => call.method === "agent.prompt");
+    assert.equal(prompts.length, 1, `${scenario.name}: only native Goal resume may be sent`);
+    assert.equal(prompts[0].params.text, "/goal resume");
+  }
 });
 
 test("Herdr delivery sends no prompt for a missing or ambiguous native session", async () => {

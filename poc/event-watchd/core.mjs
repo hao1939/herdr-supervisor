@@ -406,14 +406,17 @@ export class EventWatchService {
 
   async unwatch(identity) {
     const id = text(identity, "watch id");
-    const removed = await this.mutate((state) => {
+    await this.stateReady;
+    await this.mutations;
+    const resourceIdValue = this.state.watches[id]?.resourceId;
+    if (!resourceIdValue) return false;
+    const removed = await this.locked(resourceIdValue, () => this.mutate((state) => {
       const watch = state.watches[id];
       if (!watch) return false;
-      const resource = watch.resourceId;
       delete state.watches[id];
-      this.rescheduleResource(state, resource);
+      this.rescheduleResource(state, resourceIdValue);
       return true;
-    });
+    }));
     this.schedule();
     return removed;
   }
