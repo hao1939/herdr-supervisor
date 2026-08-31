@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 const UNAUTHENTICATED_INTERVAL_MS = 5 * 60 * 1_000;
+const AUTHENTICATED_INTERVAL_MS = 60 * 1_000;
 const PAYLOAD_ITEMS = 25;
 const LABEL_LENGTH = 200;
 
@@ -13,7 +14,17 @@ function parse(subject) {
 async function json(response, label) {
   if (!response.ok) {
     const body = (await response.text()).slice(0, 300);
-    throw new Error(`${label} returned HTTP ${response.status}${body ? `: ${body}` : ""}`);
+    const error = new Error(`${label} returned HTTP ${response.status}${body ? `: ${body}` : ""}`);
+    const retryAfterHeader = response.headers.get("retry-after");
+    const resetHeader = response.headers.get("x-ratelimit-reset");
+    const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
+    const reset = resetHeader === null ? Number.NaN : Number(resetHeader);
+    if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+      error.retryAfterMs = retryAfter * 1_000;
+    } else if (Number.isFinite(reset) && reset > 0) {
+      error.retryAfterMs = Math.max(1_000, reset * 1_000 - Date.now());
+    }
+    throw error;
   }
   return response.json();
 }
@@ -42,7 +53,8 @@ export function githubPullRequestSource({ fetchImpl = fetch, token = process.env
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
   return {
-    minimumIntervalMs: token ? 1_000 : UNAUTHENTICATED_INTERVAL_MS,
+    minimumIntervalMs: token ? AUTHENTICATED_INTERVAL_MS : UNAUTHENTICATED_INTERVAL_MS,
+    maxResources: token ? 10 : 1,
     async read(subject) {
       const { owner, repository, number } = parse(subject);
       const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;

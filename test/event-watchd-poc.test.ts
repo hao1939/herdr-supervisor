@@ -104,6 +104,69 @@ test("an undelivered revision survives restart and a duplicate wake is bounded",
   assert.doesNotMatch(await readFile(statePath, "utf8"), /delivery unavailable/);
 });
 
+test("a retry observes the latest revision before delivering an older pending hint", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-latest-"));
+  let revision = "one";
+  let fail = true;
+  const attempted: string[] = [];
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision, payload: { revision } }) } },
+    deliveries: {
+      test: {
+        deliver: async (_target: any, event: any) => {
+          attempted.push(event.revision);
+          if (fail) throw new Error("offline");
+        },
+      },
+    },
+  });
+  await service.watch({ source: "source", subject: "subject", destination: destination("worker"), intervalMs: 1_000 });
+  revision = "two";
+  await service.pollNow();
+  revision = "three";
+  fail = false;
+  await service.pollNow();
+
+  assert.deepEqual(attempted, ["two", "three"]);
+  assert.equal(Object.keys((await service.status()).watches).length, 0);
+});
+
+test("source retry guidance postpones both observation and pending delivery", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-retry-after-"));
+  let now = 10_000;
+  let revision = "one";
+  let sourceFails = false;
+  const source = {
+    read: async () => {
+      if (sourceFails) {
+        const error: Error & { retryAfterMs?: number } = new Error("rate limited");
+        error.retryAfterMs = 9_000;
+        throw error;
+      }
+      return { revision, payload: null };
+    },
+  };
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: { source },
+    deliveries: { test: { deliver: async () => { throw new Error("offline"); } } },
+  });
+  await service.watch({ source: "source", subject: "subject", destination: destination("worker"), intervalMs: 1_000 });
+  revision = "two";
+  await service.pollNow();
+  now += 1_000;
+  sourceFails = true;
+  await service.pollNow();
+
+  const resource: any = Object.values((await service.status()).resources)[0];
+  assert.equal(resource.nextPollAt, now + 9_000);
+  assert.match(resource.lastError, /rate limited/);
+  const watch: any = Object.values((await service.status()).watches)[0];
+  assert.equal(watch.pending.retryAt, now + 9_000);
+});
+
 test("retrying the same registration preserves its unseen pending change", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-idempotent-"));
   let revision = "one";
@@ -204,8 +267,11 @@ test("a second daemon cannot steal a live socket", async () => {
   const first = new EventWatchServer({ service: makeService("first"), socketPath });
   const second = new EventWatchServer({ service: makeService("second"), socketPath });
   await first.start();
-  await assert.rejects(second.start(), /already running|already live/);
-  await first.stop();
+  try {
+    await assert.rejects(second.start(), /lock is already owned|already live/);
+  } finally {
+    await first.stop();
+  }
 });
 
 test("a failed daemon startup releases its socket and process lock", async () => {
@@ -316,6 +382,20 @@ test("GitHub observations page through checks with a hard upper bound", async ()
   assert.equal(calls.filter((url) => url.includes("/check-runs")).length, 2);
 });
 
+test("GitHub rate-limit guidance is exposed to the shared scheduler", async () => {
+  const source = githubPullRequestSource({
+    fetchImpl: async () => new Response("rate limited", {
+      status: 429,
+      headers: { "retry-after": "7" },
+    }),
+    token: "test",
+  });
+  await assert.rejects(source.read("owner/repo#42"), (error: any) => {
+    assert.equal(error.retryAfterMs, 7_000);
+    return true;
+  });
+});
+
 test("unauthenticated GitHub watches use a rate-limit-safe interval", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-rate-"));
   const source = githubPullRequestSource({
@@ -335,6 +415,12 @@ test("unauthenticated GitHub watches use a rate-limit-safe interval", async () =
   });
 
   assert.equal(result.intervalMs, 5 * 60 * 1_000);
+  await assert.rejects(service.watch({
+    source: "github-pr",
+    subject: "owner/other#43",
+    destination: destination("other-worker"),
+    intervalMs: 5 * 60 * 1_000,
+  }), /1-resource capacity/);
 });
 
 test("a closed daemon connection cannot leave a CLI request pending", async () => {

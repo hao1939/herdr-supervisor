@@ -8,38 +8,22 @@ function reply(socket, value) {
   if (socket.writable) socket.write(`${JSON.stringify(value)}\n`);
 }
 
-function processExists(pid) {
-  if (!Number.isInteger(pid) || pid < 1) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
 async function acquireLock(path) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let file;
-    try {
-      file = await open(path, "wx", 0o600);
-      await file.writeFile(`${process.pid}\n`);
-      await file.sync();
-      return file;
-    } catch (error) {
-      if (file) {
-        await file.close().catch(() => {});
-        await unlink(path).catch(() => {});
-      }
-      if (error?.code !== "EEXIST") throw error;
-      const owner = Number.parseInt(await readFile(path, "utf8").catch(() => ""), 10);
-      if (processExists(owner)) throw new Error(`event-watchd is already running as process ${owner}`);
-      await unlink(path).catch((unlinkError) => {
-        if (unlinkError?.code !== "ENOENT") throw unlinkError;
-      });
+  let file;
+  try {
+    file = await open(path, "wx", 0o600);
+    await file.writeFile(`${process.pid}\n`);
+    await file.sync();
+    return file;
+  } catch (error) {
+    if (file) {
+      await file.close().catch(() => {});
+      await unlink(path).catch(() => {});
     }
+    if (error?.code !== "EEXIST") throw error;
+    const owner = (await readFile(path, "utf8").catch(() => "unknown")).trim() || "unknown";
+    throw new Error(`event-watchd lock is already owned by process ${owner}; the service manager must remove a stale lock`);
   }
-  throw new Error("could not acquire the event-watchd process lock");
 }
 
 function socketIsLive(path) {

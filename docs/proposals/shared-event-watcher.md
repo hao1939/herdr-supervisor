@@ -142,9 +142,19 @@ records its complete native agent-session identity. Pane ID is only a current
 routing hint.
 
 Before delivery, the Herdr adapter reads the current session snapshot and finds
-the unique agent with that native identity. It sends the hint to that current
-pane. A missing or ambiguous identity fails closed and goes to diagnostics; it
-never guesses from focus, tab order, agent kind, or an old pane.
+the unique agent with that native identity. It rechecks after a Goal resume and
+sends the hint to that current pane. A missing or ambiguous identity fails
+closed and goes to diagnostics; it never guesses from focus, tab order, agent
+kind, or an old pane.
+
+The current Herdr `agent.prompt` API accepts only a pane-like string target. It
+does not accept an exact native-session precondition. Therefore a final,
+unavoidable race remains between the last snapshot and prompt submission: the
+pane could be reused in that gap. Another client-side read cannot remove it.
+Production adoption requires one small Herdr primitive: resolve and submit a
+prompt atomically by exact `agent_session`, or reject the prompt when that
+precondition no longer matches. Keep the current recheck as PoC risk reduction,
+not as proof that the race is closed.
 
 If that exact worker is settled, the adapter first submits `/goal resume` and
 uses Herdr's atomic wait to confirm that the worker started. Only then does it
@@ -165,13 +175,19 @@ the watcher is not an audit log.
 ## Process ownership
 
 Do not run polling inside a Pi extension. The provisioned environment owns one
-daemon:
+daemon, and its service manager owns singleton process enforcement:
 
 - the container image installs `event-watch` and `event-watchd`;
 - the container/service manager starts one daemon with the Herdr environment;
 - worker worktrees inherit only the CLI and socket location;
 - the supervisor Pi extension registers diagnostics and exposes health;
 - credentials stay in the environment and are never written into watch state.
+
+The PoC process lock fails closed when its lock already exists; it does not try
+to reclaim a possibly replaced lock. A production service should use an OS
+lock, such as `flock`, or a service manager that serializes startup and removes
+only its own stale runtime files. Singleton recovery does not belong in the
+watch protocol.
 
 The daemon also exposes a fresh `read` operation over its existing source
 adapters. This lets a woken worker verify authority without copying provider
@@ -201,7 +217,7 @@ One atomically replaced local JSON snapshot is sufficient for the PoC:
 - each exact source/subject and its baseline or latest observed revision;
 - one or more one-shot destinations sharing that subject read;
 - the latest pending revision for each destination;
-- a bounded coalesced diagnostic identity.
+- one diagnostic destination and visible source or delivery errors.
 
 Polling schedules, live sockets, and retry timers are disposable. On restart,
 the daemon reloads watches, immediately rereads each subject, and retries
@@ -219,6 +235,14 @@ Implement only:
 5. a CLI that registers the calling Herdr worker and can reread a source;
 6. health/list/unwatch operations;
 7. focused tests and one MLVM end-to-end experiment.
+
+The GitHub PoC applies a coarse adapter budget: authenticated observation is at
+least one minute apart with at most ten distinct PR subjects; anonymous
+observation is at least five minutes apart and limited to one subject. Multiple
+destinations for one PR still share a read, and provider retry/reset guidance
+postpones the next source read. This avoids pretending that each watch owns the
+provider quota. Webhooks remain the better transport when lower latency or
+larger scale is required.
 
 Defer ADO, webhooks, action wrappers that auto-register created PRs/builds, MCP,
 and automatic production rollout until the first path is useful in a real goal.
@@ -293,8 +317,28 @@ Follow-up review found four more deterministic edges before another live run:
   could lose or delay a wake.
 
 The PoC now has focused coverage for those invariants. Unauthenticated GitHub
-watches are also clamped to a five-minute interval. These follow-up fixes still
-need the repeat MLVM run below; unit proof is not presented as live proof.
+watches are also clamped to a five-minute interval.
+
+The hardened revision was then repeated on MLVM in two real Goal states:
+
+- while the worker was active, a newly dispatched E2E check delivered directly
+  to the same session, the worker made a fresh authenticated read, and the watch
+  was consumed;
+- after the worker had reached the native blocked threshold, another E2E
+  revision resumed that exact Goal, revalidated the same session, delivered the
+  hint, and was consumed.
+
+The first registration attempt also proved an important deployment boundary:
+the container did not automatically inherit the host's GitHub credential. The
+watch was not created and the error stayed visible. Restarting the environment
+daemon with a credential and retrying the same registration succeeded. A real
+deployment must pass provider credentials to the daemon through its container
+or service configuration; a worker login elsewhere is not enough.
+
+Two adoption gaps remain explicit: Herdr lacks an atomic exact-session prompt,
+and the PoC lock deliberately requires service-manager cleanup after an
+unclean daemon exit. They are infrastructure contracts, not reasons to add
+workflow state to the watcher.
 
 The live daemon used negligible idle CPU. It was about 56 MB RSS before its
 first GitHub read and about 70–73 MB afterward. That is reasonable for this

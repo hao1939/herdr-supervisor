@@ -260,6 +260,17 @@ export class EventWatchService {
           existing: true,
         };
       }
+      const sourceCapacity = this.sources[source]?.maxResources;
+      if (sourceCapacity !== undefined) {
+        if (!Number.isInteger(sourceCapacity) || sourceCapacity < 1) {
+          throw new Error(`source ${source} has an invalid resource capacity`);
+        }
+        const existingResources = Object.values(this.state.resources)
+          .filter((resource) => resource.source === source).length;
+        if (!this.state.resources[id] && existingResources >= sourceCapacity) {
+          throw new Error(`source ${source} reached its ${sourceCapacity}-resource capacity`);
+        }
+      }
       let observation;
       try {
         observation = await this.read(source, subject);
@@ -322,19 +333,23 @@ export class EventWatchService {
     await this.stateReady;
     await this.mutations;
     const resource = this.state.resources[id];
-    if (!resource) return;
+    if (!resource) return false;
     let observation;
     try {
       observation = await this.read(resource.source, resource.subject);
     } catch (error) {
       const message = String(error instanceof Error ? error.message : error).slice(0, MAX_TEXT);
+      const requestedRetry = Number(error?.retryAfterMs);
+      const retryAfterMs = Number.isFinite(requestedRetry)
+        ? Math.min(MAX_INTERVAL_MS, Math.max(resource.intervalMs, requestedRetry))
+        : resource.intervalMs;
       await this.mutate((state) => {
         if (!state.resources[id]) return;
         state.resources[id].lastError = message;
-        state.resources[id].nextPollAt = this.now() + state.resources[id].intervalMs;
+        state.resources[id].nextPollAt = this.now() + retryAfterMs;
       });
       await this.report(`source:${resource.source}:${resource.subject}`, message);
-      return;
+      return false;
     }
     await this.mutate((state) => {
       const current = state.resources[id];
@@ -358,6 +373,7 @@ export class EventWatchService {
       }
     });
     await this.deliverResource(id);
+    return true;
   }
 
   async deliverResource(resourceIdValue) {
@@ -392,8 +408,12 @@ export class EventWatchService {
       await this.mutate((state) => {
         const current = state.watches[id];
         if (!current?.pending || current.pending.revision !== watch.pending.revision) return;
+        const currentResource = state.resources[current.resourceId];
         current.lastError = error;
-        current.pending.retryAt = this.now() + state.resources[current.resourceId].intervalMs;
+        current.pending.retryAt = Math.max(
+          this.now() + currentResource.intervalMs,
+          currentResource.nextPollAt,
+        );
       });
       await this.report(`delivery:${id}`, error);
       return;
@@ -418,8 +438,8 @@ export class EventWatchService {
     const ids = Object.keys(this.state.resources);
     await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
       this.locked(id, async () => {
-        await this.deliverResource(id);
-        await this.observe(id);
+        const observed = await this.observe(id);
+        if (!observed) await this.deliverResource(id);
       })
     );
     this.schedule();
@@ -460,10 +480,8 @@ export class EventWatchService {
         .map(([id]) => id);
       await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
         this.locked(id, async () => {
-          await this.deliverResource(id);
-          await this.stateReady;
-          await this.mutations;
-          if (this.state.resources[id]?.nextPollAt <= this.now()) await this.observe(id);
+          const observed = await this.observe(id);
+          if (!observed) await this.deliverResource(id);
         })
       );
     } finally {
