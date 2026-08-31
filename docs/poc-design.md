@@ -384,7 +384,7 @@ Supervisor restart or resumed session
   -> fetch one fresh Herdr snapshot
   -> restore exact wait deadlines
   -> reread bounded worker evidence before waking an unchanged settled wait
-  -> reconsider expired waits, recorded peer decisions, new evidence,
+  -> reconsider expired waits, selected peer effects, new evidence,
      and failures from current facts
   -> continue normal event-driven supervision
 ```
@@ -401,7 +401,7 @@ Supervisor restart or resumed session
 | Pane occupant changes                     | Fail closed; ask the human only when a real decision is needed           |
 | Stale deadline                           | Inspect current evidence before deciding whether to steer               |
 | Human message                            | Review immediately with the new authority or information                |
-| Linked worker records a decision         | Reconsider only goals explicitly waiting on that worker                 |
+| Peer review changes a linked condition   | The model selects only the affected waiting goals for reconsideration   |
 
 The event means "reconsider this goal now." It never decides success by
 itself.
@@ -498,13 +498,13 @@ code can resolve and store the peer's durable goal identity without interpreting
 prose. The pane remains a last-known routing hint; relocating the peer cannot lose
 the relationship. The runtime assigns the normal bounded review interval when
 the model supplies no exact time. For an event-backed wait, the model may choose
-a slower evidence-appropriate safety check because a peer decision or watched
-external change still wakes the goal earlier. A settled worker without a
+a slower evidence-appropriate safety check because a selected peer effect or
+watched external change still wakes the goal earlier. A settled worker without a
 concrete condition is still rejected. When several goals share
 scarce capacity, one active worker may use or probe it. That responsibility ends
-when the worker becomes
-idle or externally blocked: its recorded supervisor decision wakes linked peers
-and the LLM decides which useful work can proceed. Raw lifecycle changes wake
+when the worker becomes idle or externally blocked: the peer review shows its
+linked waits, and the LLM selects only conditions that materially changed. A
+terminal peer wakes any remaining dependents. Raw lifecycle changes wake
 only their own goal; they do not spend speculative peer reviews. This avoids
 both a resource scheduler and an idle convoy.
 The peer identity is only an early-wake hint: an invalid or self-referential
@@ -525,7 +525,7 @@ code supplies the normal review interval when the model omits it; the model
 copies a later time only when current evidence provides a real exact retry
 boundary. The same field can accompany a `steer` decision when a worker should
 continue now but one named operation must be checked at an exact later time.
-A linked peer decision may wake the goal earlier. Exact deadlines are checkpointed,
+A peer review may explicitly wake the goal earlier. Exact deadlines are checkpointed,
 restored after restart, and never suppressed as routine activity. A bounded
 native-evidence check suppresses routine working/no-change model turns; new
 evidence, exact deadlines, settled workers, and real failures still wake
@@ -539,14 +539,15 @@ the goal is practical and whether the condition blocks the whole outcome or
 only one route, looks for safe mitigation or alternative proof, and continues
 independent useful work or preparation. It may wait again only when fresh
 evidence shows that nothing meaningful can move and supplies the next exact
-boundary. A linked peer's next recorded supervisor decision triggers the same
-reconsideration immediately; its raw lifecycle changes wake only that peer's
-own goal.
+boundary. When a peer review proves that the recorded condition changed, the
+model explicitly queues the same reconsideration for that waiting goal; a
+terminal peer queues every remaining dependent. Raw lifecycle changes wake
+only that peer's own goal.
 
 If one external or peer condition is the worker's only remaining blocker, the
 worker reports the exact boundary once and lets its native Goal block. It does
 not sleep, poll, or repeatedly reread unchanged state. The existing external
-watch, peer-decision wake, or bounded review resumes that same session; no
+watch, selected peer wake, or bounded review resumes that same session; no
 second watcher or waiting workflow is needed.
 
 `ask_human` is an explicit supervisor operation because it has different

@@ -3,6 +3,7 @@ import { goalPaths } from "./goal-store.ts";
 import type { GoalBinding } from "./types.ts";
 
 type GoalTrace = Pick<GoalBinding, "goalId" | "goal" | "paneId" | "agentSession">;
+type DependentWait = Pick<GoalBinding, "goalId" | "paneId" | "wait">;
 
 const workerExecutionBoundary = [
   "You own only execution spaces that you explicitly create or claim for this goal.",
@@ -72,7 +73,7 @@ export function refinedGoalPrompt(binding: GoalTrace, workerName: string) {
   ].join(" ");
 }
 
-export function reviewMessage(binding, agent, reason, now = new Date()) {
+export function reviewMessage(binding, agent, reason, now = new Date(), dependents: DependentWait[] = []) {
   const criteria = binding.acceptance.length
     ? binding.acceptance.map((item) => `- ${item}`).join("\n")
     : "- The stated goal is fully achieved with convincing evidence.";
@@ -91,6 +92,14 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
   const wait = binding.wait
     ? `\n\nCurrent wait\n  ${binding.wait.condition}\n  Review at: ${binding.wait.reviewAt}`
     : "";
+  const dependentWaits = dependents.length
+    ? [
+        "",
+        "Goals waiting on this goal",
+        ...dependents.map((dependent) => `- ${dependent.goalId} (${dependent.paneId}): ${dependent.wait?.condition}`),
+        "If this review proves that one of these conditions materially changed, call supervisor_reconsider for exactly those panes before the decision tool. Do not wake them merely because this goal recorded another decision.",
+      ]
+    : [];
 
   return [
     `Worker review · ${binding.agentSession.agent} ${binding.paneId}`,
@@ -112,6 +121,7 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
     "",
     "Current evidence",
     evidence,
+    ...dependentWaits,
     "",
     "Why review now",
     `  ${reason}; Herdr reports ${agent?.agent_status || "missing"}.`,
@@ -128,6 +138,7 @@ export function reviewMessage(binding, agent, reason, now = new Date()) {
       "If the criteria quietly narrow a broader or ongoing objective to one milestone, continue the remaining outcome or ask the human one concrete correction; do not accept it.",
       "When the human's outcome is a standing improvement loop, each inventory pass, fixed backlog, PR, merge, or raised threshold is only a checkpoint: learn from it, raise the rubric, and continue until the human explicitly stops or replaces the goal. Do not invent a finite convergence boundary for standing work.",
       "If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there.",
+      "If another goal is shown as waiting on this goal and current evidence materially changes its condition, call supervisor_reconsider for exactly that goal before the decision tool. An ordinary recorded decision is not itself a reason to wake every dependent.",
       "If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work, alternative proof, or preparation.",
       "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If an external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
       "Leave it waiting again only when that fresh evidence shows nothing useful can move and supplies the next exact boundary.",
@@ -165,6 +176,7 @@ const supervisorPolicy = [
     "For transient evidence, a resolved wait, or a request to recheck, call supervisor_reconsider once with every affected pane and the concrete new fact, then end the direct turn.",
     "When the human answers an earlier question, use supervisor_reconsider so the next focused review observes current evidence before deciding how the same worker continues.",
     "If human input arrives during a focused worker review, retain any other affected workers for later with supervisor_reconsider, then finish the current review with one decision.",
+    "During a focused review, use the same supervisor_reconsider operation before the decision tool when current evidence materially changes a listed dependent goal's wait. Select only affected panes; do not fan out every recorded decision.",
     "Otherwise call supervisor_start_goal. Choose a new tab with a short label or a related active worker pane; do not make the human create panes, launch Codex, or provide Herdr IDs.",
   ],
   [
@@ -184,7 +196,7 @@ const supervisorPolicy = [
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; the supervisor's watch and bounded review will resume the same native Goal.",
-    "Supply review_at when current evidence justifies a specific safety-check time. A peer decision or external watch already wakes the goal early, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
+    "Supply review_at when current evidence justifies a specific safety-check time. A peer review can select a materially affected wait and an external watch wakes on change, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",
     "A human question also receives bounded reconsideration and does not prevent unrelated useful work.",
   ],

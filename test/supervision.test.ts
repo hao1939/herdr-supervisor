@@ -450,6 +450,14 @@ test("review notice explains the goal and signal in plain language", () => {
     agent({ agent_status: "idle" }),
     "worker is idle",
     new Date("2026-08-28T23:59:00.000Z"),
+    [{
+      goalId: "g_waiter",
+      paneId: "w1:p7",
+      wait: {
+        condition: "Fix cancellation to release the shared test slot",
+        reviewAt: "2026-08-29T01:00:00Z",
+      },
+    }],
   );
   assert.match(message, /Worker review · codex w1:p2/);
   assert.match(message, /Review time: 2026-08-28T23:59:00.000Z \(UTC\)/);
@@ -458,6 +466,10 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Worker acceptance criteria\n- focused test passes/);
   assert.match(message, /Current wait\n  the server retry boundary\n  Review at: 2026-08-29T00:00:00Z/);
   assert.match(message, /Current evidence\n- The server supplied retry boundary/);
+  assert.match(message, /Goals waiting on this goal/);
+  assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to release the shared test slot/);
+  assert.match(message, /supervisor_reconsider for exactly those panes/);
+  assert.match(message, /Do not wake them merely because this goal recorded another decision/);
   assert.match(message, /Observe this exact worker/);
   assert.match(message, /supervisor_status to read current recorded peer progress/);
   assert.match(message, /only this worker's evidence can prove this goal complete/);

@@ -190,15 +190,16 @@ Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
 
-- a direct peer wait resolves the selected pane to the peer's durable goal ID,
-  so the peer's next recorded supervision decision wakes the goal after either
-  worker is relocated;
+- a direct peer wait resolves the selected pane to the peer's durable goal ID;
+  when a peer review proves that condition materially changed, the model
+  selects the exact affected waits for early review, and a terminal peer wakes
+  all remaining dependents after either worker is relocated;
 - a wait on one exact GitHub PR or ADO build may register a disposable external
   watch chosen by the model;
 - every wait has a bounded recheck;
-- the model chooses an evidence-appropriate safety time; a peer decision or
-  external watch still wakes the goal earlier, avoiding repeated short reviews
-  of unchanged state;
+- the model chooses an evidence-appropriate safety time; a selected peer effect
+  or external watch still wakes the goal earlier, avoiding repeated short
+  reviews of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
 A human question follows the same rule. It is concrete, asks for the minimum

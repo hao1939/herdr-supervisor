@@ -787,7 +787,7 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
-  assert.match(result.systemPrompt, /peer decision or external watch already wakes the goal early/);
+  assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
   assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
@@ -1780,10 +1780,12 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
-test("a peer decision wakes its waiter without spending reviews on raw peer events", async (t) => {
+test("a peer review wakes only the dependent wait selected by the model", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-peer-wait-"));
   const sessionFile = join(root, "waiting-worker.jsonl");
+  const unrelatedSessionFile = join(root, "unrelated-waiting-worker.jsonl");
   await writeFile(sessionFile, "");
+  await writeFile(unrelatedSessionFile, "");
   const waitingWorker = {
     ...worker,
     agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
@@ -1792,6 +1794,11 @@ test("a peer decision wakes its waiter without spending reviews on raw peer even
     paneId: "w1:p7",
     terminalId: "term_peer",
     agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_peer" },
+  };
+  const unrelatedWaitingWorker = {
+    paneId: "w1:p3",
+    terminalId: "term_other_waiter",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: unrelatedSessionFile },
   };
   const waiting = await registerSupervisedGoal(waitingWorker, {
     objective: "Run the next useful validation when capacity is free.",
@@ -1803,9 +1810,25 @@ test("a peer decision wakes its waiter without spending reviews on raw peer even
     wait: {
       condition: "w1:p7 to stop using shared capacity",
       paneId: peerWorker.paneId,
+      goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: 0 },
+  }, root);
+  const unrelatedWaiting = await registerSupervisedGoal(unrelatedWaitingWorker, {
+    objective: "Publish the peer's eventual capacity report.",
+    acceptance: ["The report is published."],
+  }, root, { goalId: "g_other_waiter" });
+  await recordDecision(unrelatedWaiting, "leave", {
+    progress: "The report template is ready.",
+    action: "Wait for the peer's final report.",
+    wait: {
+      condition: "w1:p7 to publish its final capacity report",
+      paneId: peerWorker.paneId,
+      goalId: "g_peer",
+      reviewAt: new Date(Date.now() + 60_000).toISOString(),
+    },
+    observationCursor: { kind: "codex-jsonl", path: unrelatedSessionFile, offset: 0 },
   }, root);
   await registerSupervisedGoal(peerWorker, {
     objective: "Check shared validation capacity.",
@@ -1832,6 +1855,13 @@ test("a peer decision wakes its waiter without spending reviews on raw peer even
       agent_status: "working",
       state_change_seq: 3,
       agent_session: peerWorker.agentSession,
+    },
+    {
+      pane_id: unrelatedWaitingWorker.paneId,
+      terminal_id: unrelatedWaitingWorker.terminalId,
+      agent_status: "idle",
+      state_change_seq: 2,
+      agent_session: unrelatedWaitingWorker.agentSession,
     },
   ];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
@@ -1864,7 +1894,14 @@ test("a peer decision wakes its waiter without spending reviews on raw peer even
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /fresh capacity decision/);
+  assert.match(pi.messages[0].content, /Goals waiting on this goal/);
+  assert.match(pi.messages[0].content, /g_waiting \(w1:p2\): w1:p7 to stop using shared capacity/);
+  assert.match(pi.messages[0].content, /g_other_waiter \(w1:p3\): w1:p7 to publish its final capacity report/);
   await pi.tools.get("supervisor_observe").execute("observe-peer", { pane_id: peerWorker.paneId });
+  await pi.tools.get("supervisor_reconsider").execute("route-peer-effect", {
+    pane_ids: [waitingWorker.paneId],
+    reason: "the fresh capacity decision materially changed the shared-capacity wait but not the final-report wait",
+  });
   const leave = await pi.tools.get("supervisor_leave").execute("leave-peer", {
     pane_id: peerWorker.paneId,
     progress: "The peer recorded its current capacity decision.",
@@ -1872,8 +1909,9 @@ test("a peer decision wakes its waiter without spending reviews on raw peer even
   assert.equal(leave.isError, false);
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 2);
-  assert.match(pi.messages[1].content, /supervisor decision for w1:p7 changed/);
+  assert.match(pi.messages[1].content, /fresh capacity decision materially changed/);
   assert.match(pi.messages[1].content, /w1:p2/);
+  assert.doesNotMatch(pi.messages[1].content, /w1:p3/);
   pi.events.get("session_shutdown")();
 });
 

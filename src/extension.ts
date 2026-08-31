@@ -798,10 +798,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
   }
 
-  function wakeAfterDurableDecision(
-    peer,
-    reason = `supervisor decision for ${peer.paneId} changed; reconsider whether useful work can proceed`,
-  ) {
+  function wakeTerminalDependents(peer, reason: string) {
     void wakeDependentWaiters(peer, reason).catch((error) => {
       reportBackgroundFailure(`Could not wake goals waiting on ${peer.goalId || peer.paneId}`, error);
     });
@@ -898,7 +895,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     paneId: string,
     signal?: ReviewSignal,
   ) {
-    const [stored, snapshot] = await Promise.all([bindingForPane(paneId), client.snapshot()]);
+    const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
+    const stored = goals.active.find((binding) => binding.paneId === paneId);
     if (!stored) return;
     const agent = findAgent(snapshot, paneId);
     const pane = findPane(snapshot, paneId);
@@ -982,7 +980,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pi.sendMessage(
         {
           customType: reviewMessageType,
-          content: `${reviewMessage(binding, agent, decision.reason)}\n\nSupervisor mode: ${currentMode}.`,
+          content: `${reviewMessage(
+            binding,
+            agent,
+            decision.reason,
+            new Date(),
+            dependentBindings(goals.active, binding),
+          )}\n\nSupervisor mode: ${currentMode}.`,
           display: true,
         },
         { triggerTurn: currentMode !== "observe", deliverAs: "followUp" },
@@ -1386,7 +1390,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_reconsider",
     label: "Reconsider supervised goals",
-    description: "Schedule one focused event review for each affected existing goal. Use when the human supplies transient evidence, resolves a wait, or asks the supervisor to recheck current execution. The LLM selects the exact affected workers; code only queues their normal reviews. If human input arrives during another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
+    description: "Schedule one focused event review for each affected existing goal. Use when new evidence materially changes a wait or the human asks the supervisor to recheck current execution. The LLM selects the exact affected workers; code only queues their normal reviews. During another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
     parameters: Type.Object({
       pane_ids: Type.Array(Pane, { minItems: 1, maxItems: 10 }),
       reason: Type.String({ minLength: 1, maxLength: 2000, description: "The concrete new fact or request each focused review must evaluate." }),
@@ -1404,7 +1408,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       for (const paneId of queued) {
         queueSignal(paneId, {
           force: true,
-          reason: `the human supplied new execution information: ${params.reason.trim()}`,
+          reason: `new execution information: ${params.reason.trim()}`,
           key: `human:${sequence}:${paneId}`,
         });
       }
@@ -1574,12 +1578,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a linked peer decision or watched external change still wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a peer review can select a materially affected wait and a watched external change wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
-      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose next recorded supervisor decision should wake this wait. Use null for self or external waits." })),
+      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker this wait depends on. Its reviews receive this condition so the model can wake this goal only when materially affected. Use null for self or external waits." })),
       external_watch: Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
@@ -1699,7 +1703,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           resolvedExternalChangeRevision: resolution.revision,
         });
         cacheCheckpoint(binding, result.state);
-        wakeAfterDurableDecision(binding);
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = undefined;
         runtime.externalRereadCandidateRevision = undefined;
@@ -1923,9 +1926,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             unavailableRereadBoundary(),
             resolution.revision,
           );
-          if (checkpoint.saved) {
-            wakeAfterDurableDecision(continuedBinding);
-          }
           const deliveryNote = delivery.deliveryError
             ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
             : "";
@@ -1944,9 +1944,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             deliveryBoundary,
             resolution.revision,
           );
-          if (checkpoint.saved) {
-            wakeAfterDurableDecision(continuedBinding);
-          }
           return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
@@ -1962,7 +1959,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             deliveryBoundary,
             resolution.revision,
           );
-          wakeAfterDurableDecision(continuedBinding);
           runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
@@ -2044,7 +2040,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             },
           });
           cacheCheckpoint(binding, result.state);
-          wakeAfterDurableDecision(binding);
           runtimeFor(binding).pendingCursor = undefined;
           runtimeFor(binding).externalRereadCandidateRevision = undefined;
           clearExternalWatch(binding);
@@ -2119,7 +2114,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         held.release();
       }
       reviewTurn.close(params.pane_id);
-      wakeAfterDurableDecision(
+      wakeTerminalDependents(
         binding,
         `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
       );
@@ -2192,7 +2187,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         } finally {
           held.release();
         }
-        wakeAfterDurableDecision(
+        wakeTerminalDependents(
           binding,
           `supervision of ${paneId} stopped; reconsider whether useful work can proceed`,
         );
