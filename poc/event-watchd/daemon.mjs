@@ -1,38 +1,46 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { adoBuildSource } from "./ado-build.mjs";
-import { EventWatchService } from "./core.mjs";
-import { githubPullRequestSource } from "./github-pr.mjs";
-import { herdrDelivery } from "./herdr.mjs";
-import { EventWatchServer } from "./server.mjs";
+import { setTimeout as delay } from "node:timers/promises";
+import { adoBuildDiscovery } from "./ado-build.mjs";
+import { DiscoveredEventWatcher } from "./core.mjs";
+import { githubPullRequestDiscovery } from "./github-pr.mjs";
+import { herdrGoalDelivery } from "./herdr.mjs";
 
-const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "event-watchd");
-const socketPath = process.env.EVENT_WATCH_SOCKET || join(stateHome, "event-watch.sock");
-const service = new EventWatchService({
-  statePath: join(stateHome, "state.json"),
-  sources: {
-    "github-pr": githubPullRequestSource(),
-    "ado-build": adoBuildSource(),
-  },
-  deliveries: { herdr: herdrDelivery() },
+function list(name) {
+  return String(process.env[name] || "").split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+const githubRepositories = list("HERDR_WATCH_GITHUB_REPOSITORIES");
+const adoProjects = list("HERDR_WATCH_ADO_PROJECTS");
+const sources = {};
+if (githubRepositories.length) sources["github-pr"] = githubPullRequestDiscovery({ repositories: githubRepositories });
+if (adoProjects.length) sources["ado-build"] = adoBuildDiscovery({ projects: adoProjects });
+if (!Object.keys(sources).length) {
+  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_PROJECTS");
+}
+
+const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "herdr-supervisor");
+const intervalMs = Number(process.env.HERDR_WATCH_INTERVAL_MS || 60_000);
+if (!Number.isFinite(intervalMs) || intervalMs < 10_000) {
+  throw new Error("HERDR_WATCH_INTERVAL_MS must be at least 10000");
+}
+const watcher = new DiscoveredEventWatcher({
+  statePath: join(stateHome, "external-events.json"),
+  sources,
+  deliver: herdrGoalDelivery(),
 });
-const server = new EventWatchServer({ service, socketPath });
 
-await server.start();
-console.log(`event-watchd listening on ${socketPath}`);
-
-let stopping = false;
+const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    if (stopping) return;
-    stopping = true;
-    void server.stop().then(
-      () => process.exit(0),
-      (error) => {
-        console.error(`event-watchd shutdown failed: ${error instanceof Error ? error.message : error}`);
-        process.exit(1);
-      },
-    );
-  });
+  process.once(signal, () => controller.abort());
+}
+
+while (!controller.signal.aborted) {
+  await watcher.runOnce();
+  try {
+    await delay(intervalMs, undefined, { signal: controller.signal });
+  } catch (error) {
+    if (error?.name !== "AbortError") throw error;
+  }
 }

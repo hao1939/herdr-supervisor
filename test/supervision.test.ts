@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canResumeNativeGoal, sameAgentSession } from "../src/identity.ts";
+import { sameAgentSession } from "../src/identity.ts";
 import {
   captureIdentity,
   DEFAULT_REVIEW_INTERVAL_MS,
@@ -84,15 +84,6 @@ test("native session equality has one exact identity contract", () => {
   assert.equal(sameAgentSession(session, { ...session }), true);
   assert.equal(sameAgentSession(session, { ...session, value: "replacement" }), false);
   assert.equal(sameAgentSession(session, undefined), false);
-});
-
-test("only settled Codex sessions need a native Goal resume", () => {
-  const session = agent().agent_session;
-  assert.equal(canResumeNativeGoal(session, "idle"), true);
-  assert.equal(canResumeNativeGoal(session, "done"), true);
-  assert.equal(canResumeNativeGoal(session, "blocked"), false);
-  assert.equal(canResumeNativeGoal({ ...session, kind: "path" }, "idle"), true);
-  assert.equal(canResumeNativeGoal({ ...session, agent: "pi" }, "idle"), false);
 });
 
 test("one nearest deadline selects only workers due for review", () => {

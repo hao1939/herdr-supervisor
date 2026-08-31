@@ -3,56 +3,20 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
-const MINIMUM_INTERVAL_MS = 60 * 1_000;
-const MAX_RESOURCES = 10;
-const MAX_CREDENTIAL_BYTES = 16 * 1024;
-const REQUEST_WINDOW_MS = 60 * 60 * 1_000;
-const REQUESTS_PER_HOUR = 600;
+const GOAL_TAG = /^herdr-goal:(g_[a-zA-Z0-9_-]+)$/;
 const execFileAsync = promisify(execFile);
 
-function credential(value, name) {
-  if (typeof value !== "string" || !value.trim()
-    || Buffer.byteLength(value.trim()) > MAX_CREDENTIAL_BYTES) {
-    throw new Error(`${name} must be non-empty and no larger than ${MAX_CREDENTIAL_BYTES} bytes`);
-  }
-  return value.trim();
+function parseProject(value) {
+  const match = /^([^/]+)\/([^/]+)$/.exec(value);
+  if (!match) throw new Error(`ADO project must look like organization/project: ${value}`);
+  return { organization: match[1], project: match[2] };
 }
 
-function parse(subject) {
-  const match = /^([^/]+)\/([^/]+)\/([1-9]\d*)$/.exec(subject);
-  if (!match) throw new Error("ADO build subject must look like organization/project/build-id");
-  return { organization: match[1], project: match[2], buildId: Number(match[3]) };
-}
-
-function retryAfter(response) {
-  const value = response.headers.get("retry-after");
-  const seconds = value === null ? Number.NaN : Number(value);
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1_000 : undefined;
-}
-
-async function json(response) {
-  if (!response.ok) {
-    const error = new Error(`Azure DevOps build returned HTTP ${response.status}`);
-    error.retryAfterMs = retryAfter(response);
-    throw error;
-  }
-  return response.json();
-}
-
-function requestBudget(fetchImpl, limit, now) {
-  if (!Number.isInteger(limit) || limit < 1) throw new Error("ADO request limit must be a positive integer");
-  const timestamps = [];
-  return async (input, init) => {
-    const cutoff = now() - REQUEST_WINDOW_MS;
-    while (timestamps[0] <= cutoff) timestamps.shift();
-    if (timestamps.length >= limit) {
-      const error = new Error(`ADO source reached its ${limit}-request hourly budget`);
-      error.retryAfterMs = Math.max(1_000, timestamps[0] + REQUEST_WINDOW_MS - now());
-      throw error;
-    }
-    timestamps.push(now());
-    return fetchImpl(input, init);
-  };
+export function taggedGoal(tags) {
+  const matches = Array.isArray(tags)
+    ? tags.map((tag) => GOAL_TAG.exec(tag)?.[1]).filter(Boolean)
+    : [];
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 export async function ambientAdoAuthorization({
@@ -60,7 +24,7 @@ export async function ambientAdoAuthorization({
   azureCli = process.env.AZURE_CLI || "az",
   exec = execFileAsync,
 } = {}) {
-  if (pat) return `Basic ${Buffer.from(`:${credential(pat, "Azure DevOps PAT")}`).toString("base64")}`;
+  if (pat) return `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
   try {
     const { stdout } = await exec(azureCli, [
       "account",
@@ -72,51 +36,68 @@ export async function ambientAdoAuthorization({
       "--output",
       "tsv",
     ], { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024 });
-    return `Bearer ${credential(stdout, "Azure access token")}`;
+    if (!stdout.trim()) throw new Error("empty Azure access token");
+    return `Bearer ${stdout.trim()}`;
   } catch {
     throw new Error("could not obtain Azure DevOps credentials; renew az login or set AZURE_DEVOPS_EXT_PAT");
   }
 }
 
-export function adoBuildSource({
+async function json(fetchImpl, url, authorization) {
+  const response = await fetchImpl(url, {
+    headers: { Accept: "application/json", Authorization: authorization },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`Azure DevOps build discovery returned HTTP ${response.status}`);
+  return response.json();
+}
+
+function hash(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+export function adoBuildDiscovery({
+  projects,
   fetchImpl = fetch,
   authorization,
   getAuthorization = ambientAdoAuthorization,
-  requestLimit = REQUESTS_PER_HOUR,
-  now = () => Date.now(),
 } = {}) {
-  const budgetedFetch = requestBudget(fetchImpl, requestLimit, now);
-  let pendingAuthorization;
-  const currentAuthorization = async () => {
-    if (authorization) return authorization;
-    if (!pendingAuthorization) {
-      pendingAuthorization = getAuthorization().finally(() => { pendingAuthorization = undefined; });
-    }
-    return pendingAuthorization;
-  };
+  if (!Array.isArray(projects) || !projects.length) {
+    throw new Error("ADO discovery requires at least one project");
+  }
+  const scopes = projects.map(parseProject);
   return {
-    minimumIntervalMs: MINIMUM_INTERVAL_MS,
-    maxResources: MAX_RESOURCES,
-    async read(subject) {
-      const { organization, project, buildId } = parse(subject);
-      const auth = await currentAuthorization();
-      const url = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`
-        + `/_apis/build/builds/${buildId}?api-version=7.1`;
-      const build = await json(await budgetedFetch(url, {
-        headers: { Accept: "application/json", Authorization: auth },
-        signal: AbortSignal.timeout(30_000),
-      }));
-      const stable = {
-        id: build.id,
-        status: build.status,
-        result: build.result || null,
-        sourceVersion: build.sourceVersion,
-        finishTime: build.finishTime || null,
-      };
-      return {
-        revision: createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
-        payload: stable,
-      };
+    async scan() {
+      const auth = authorization || await getAuthorization();
+      const observations = [];
+      for (const { organization, project } of scopes) {
+        const base = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`;
+        const result = await json(
+          fetchImpl,
+          `${base}/_apis/build/builds?queryOrder=lastModifiedDescending&$top=100&api-version=7.1`,
+          auth,
+        );
+        if (!Array.isArray(result.value)) throw new Error("Azure DevOps build discovery returned an invalid list");
+        for (const build of result.value) {
+          const goalId = taggedGoal(build.tags);
+          if (!goalId) continue;
+          const stable = {
+            id: build.id,
+            sourceVersion: build.sourceVersion,
+            status: build.status,
+            result: build.result || null,
+            finishTime: build.finishTime || null,
+            lastChangedDate: build.lastChangedDate || null,
+          };
+          observations.push({
+            subject: `${organization}/${project}/${build.id}`,
+            goalId,
+            revision: hash(stable),
+            payload: stable,
+          });
+        }
+      }
+      return observations;
     },
   };
 }

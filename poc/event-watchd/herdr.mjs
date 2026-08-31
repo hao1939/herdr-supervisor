@@ -1,7 +1,7 @@
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { canResumeNativeGoal } from "../../src/identity.ts";
+import { loadSupervisorGoals } from "../../src/goal-registry.ts";
 import { identityMismatch } from "../../src/supervision.ts";
 
 export function defaultHerdrSocket(env = process.env) {
@@ -46,48 +46,47 @@ export function herdrRequest(method, params = {}, {
   });
 }
 
-export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
-  return {
-    async deliver(target, event) {
-      if (!target?.agentSession) throw new Error("Herdr destination requires agentSession");
-      const findExact = async () => {
-        const result = await request("session.snapshot", {}, options);
-        const binding = { agentSession: target.agentSession };
-        const matches = result.snapshot.agents.filter((agent) => !identityMismatch(binding, agent));
-        if (matches.length !== 1) {
-          throw new Error(`exact Herdr agent session resolved to ${matches.length} live agents`);
-        }
-        return matches[0];
-      };
-      let agent = await findExact();
-      const message = event.diagnostic
-        ? `External event watcher needs diagnosis. ${event.payload.error}`
-        : [
-            `External state changed for ${event.source} ${event.subject}.`,
-            `Reread current authority directly or run event-watch read ${event.source} ${event.subject}, handle what changed, and continue your active goal.`,
-            "This notification is only a wake hint; do not treat its payload as completion proof.",
-          ].join(" ");
-      if (!event.diagnostic && canResumeNativeGoal(target.agentSession, agent.agent_status)) {
-        await request("agent.prompt", {
-          target: agent.pane_id,
-          text: "/goal resume",
-          wait: { until: ["working"], timeout_ms: 10_000 },
-        }, { ...options, timeoutMs: 12_000 });
-        agent = await findExact();
-        if (agent.agent_status !== "working") {
-          throw new Error("exact Herdr agent session settled again before watcher delivery");
-        }
+export function herdrGoalDelivery({
+  goalsRoot,
+  request = herdrRequest,
+  ...options
+} = {}) {
+  return async (goalId, event) => {
+    const goals = await loadSupervisorGoals(goalsRoot);
+    const binding = goals.active.find((goal) => goal.goalId === goalId);
+    if (!binding) {
+      if (goals.completed.some((goal) => goal.goalId === goalId)) return { ignored: "goal completed" };
+      if (goals.errors.some((goal) => goal.goalId === goalId)) throw new Error("canonical goal state is unreadable");
+      throw new Error("active canonical goal was not found");
+    }
+    const findExact = async () => {
+      const result = await request("session.snapshot", {}, options);
+      const matches = result.snapshot.agents.filter((agent) => !identityMismatch(binding, agent));
+      if (matches.length !== 1) {
+        throw new Error(`canonical goal worker resolved to ${matches.length} live native sessions`);
       }
-      await request("agent.prompt", { target: agent.pane_id, text: message }, options);
-      return { paneId: agent.pane_id };
-    },
+      return matches[0];
+    };
+    let agent = await findExact();
+    if (binding.agentSession.agent === "codex" && ["idle", "done"].includes(agent.agent_status)) {
+      await request("agent.prompt", {
+        target: agent.pane_id,
+        text: "/goal resume",
+        wait: { until: ["working"], timeout_ms: 10_000 },
+      }, { ...options, timeoutMs: 12_000 });
+      agent = await findExact();
+      if (agent.agent_status !== "working") {
+        throw new Error("exact worker settled again before event delivery");
+      }
+    }
+    await request("agent.prompt", {
+      target: agent.pane_id,
+      text: [
+        `External resource changed for goal ${goalId}: ${event.source} ${event.subject}.`,
+        "Reread current provider authority, decide what the change means, and continue useful work toward the goal.",
+        "This is only a wake hint, not completion proof.",
+      ].join(" "),
+    }, options);
+    return { paneId: agent.pane_id };
   };
-}
-
-export async function currentHerdrDestination({ paneId = process.env.HERDR_PANE_ID, ...options } = {}) {
-  if (!paneId) throw new Error("HERDR_PANE_ID is required to infer the current worker");
-  const result = await herdrRequest("agent.get", { target: paneId }, options);
-  const agent = result.agent;
-  if (!agent?.agent_session) throw new Error("the current Herdr pane has no exact native agent session");
-  return { adapter: "herdr", target: { agentSession: agent.agent_session } };
 }
