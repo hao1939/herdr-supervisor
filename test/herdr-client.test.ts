@@ -32,6 +32,24 @@ test("request correlates a newline-delimited Herdr response", async () => {
   } finally { await fake.close(); }
 });
 
+test("request preserves Herdr's structured error code", async () => {
+  const fake = await fakeHerdr((request, socket) => {
+    socket.write(`${JSON.stringify({
+      id: request.id,
+      error: { code: "agent_not_found", message: "localized detail" },
+    })}\n`);
+  });
+  try {
+    const client = new HerdrClient({ socketPath: fake.socketPath });
+    await assert.rejects(client.getAgent("w1:p2"), (error) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, "localized detail");
+      assert.equal(Reflect.get(error, "code"), "agent_not_found");
+      return true;
+    });
+  } finally { await fake.close(); }
+});
+
 test("startAgent requests one exact agent session in an existing pane", async () => {
   let observed;
   const fake = await fakeHerdr((request, socket) => {
@@ -52,6 +70,30 @@ test("startAgent requests one exact agent session in an existing pane", async ()
   } finally {
     await fake.close();
   }
+});
+
+test("startAgent keeps the transport open for Herdr's start deadline", async (t) => {
+  const client = new HerdrClient();
+  let observed;
+  t.mock.method(client, "request", async (method, params, timeoutMs) => {
+    observed = { method, params, timeoutMs };
+    return { type: "agent_started" };
+  });
+  await client.startAgent({ name: "codex", kind: "codex", paneId: "w1:p2" });
+  assert.equal(observed.timeoutMs, 31_000);
+  assert.equal(observed.params.timeout_ms, 30_000);
+});
+
+test("startAgent keeps a response margin inside a shorter caller deadline", async (t) => {
+  const client = new HerdrClient();
+  let observed;
+  t.mock.method(client, "request", async (method, params, timeoutMs) => {
+    observed = { method, params, timeoutMs };
+    return { type: "agent_started" };
+  });
+  await client.startAgent({ name: "codex", kind: "codex", paneId: "w1:p2" }, 5_000);
+  assert.equal(observed.timeoutMs, 5_000);
+  assert.equal(observed.params.timeout_ms, 4_900);
 });
 
 test("promptAgent can atomically wait for the submitted prompt to start work", async () => {
@@ -189,6 +231,110 @@ test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () =
   } finally {
     await fake.close();
   }
+});
+
+test("startAndWaitAgent preserves Herdr's full launch allowance by default", async (t) => {
+  const client = new HerdrClient();
+  let launchTimeout;
+  t.mock.method(client, "startAgent", async (_request, timeoutMs) => {
+    launchTimeout = timeoutMs;
+    return { type: "agent_started" };
+  });
+  t.mock.method(client, "getAgent", async () => ({ interactive_ready: true }));
+
+  await client.startAndWaitAgent({ paneId: "w1:p2" });
+  assert.equal(launchTimeout, 31_000);
+});
+
+test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) => {
+  const client = new HerdrClient();
+  let reads = 0;
+  t.mock.method(client, "startAgent", async () => ({ type: "agent_started" }));
+  t.mock.method(client, "getAgent", async () => {
+    reads += 1;
+    if (reads === 1) {
+      throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+    }
+    return { pane_id: "w1:p2", interactive_ready: true };
+  });
+  const agent = await client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000);
+  assert.equal(agent.pane_id, "w1:p2");
+  assert.equal(reads, 2);
+});
+
+test("startAndWaitAgent immediately rejects unrelated agent lookup errors", async (t) => {
+  const client = new HerdrClient();
+  const error = new Error("Herdr agent.get connection closed");
+  t.mock.method(client, "startAgent", async () => ({ type: "agent_started" }));
+  t.mock.method(client, "getAgent", async () => { throw error; });
+
+  await assert.rejects(client.startAndWaitAgent({ paneId: "w1:p2" }), error);
+});
+
+test("startAndWaitAgent shares one deterministic launch and readiness deadline", async (t) => {
+  const client = new HerdrClient();
+  let now = 1_000;
+  let readinessTimeout;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(client, "startAgent", async (_request, timeoutMs) => {
+    assert.equal(timeoutMs, 1_000);
+    now += 400;
+    return { type: "agent_started" };
+  });
+  t.mock.method(client, "getAgent", async (_paneId, timeoutMs) => {
+    readinessTimeout = timeoutMs;
+    now += timeoutMs;
+    throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+  });
+
+  await assert.rejects(
+    client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000),
+    /did not become ready/,
+  );
+  assert.equal(readinessTimeout, 600);
+  assert.equal(now, 2_000);
+});
+
+test("native session discovery tolerates a brief missing-agent transition", async (t) => {
+  const client = new HerdrClient();
+  let reads = 0;
+  t.mock.method(client, "getAgent", async () => {
+    reads += 1;
+    if (reads === 1) {
+      throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+    }
+    return { pane_id: "w1:p2", agent_session: { value: "session-1" } };
+  });
+  const agent = await client.waitForAgentSession("w1:p2", 1_000);
+  assert.equal(agent.agent_session.value, "session-1");
+  assert.equal(reads, 2);
+});
+
+test("native session discovery stops at its original deadline", async (t) => {
+  const client = new HerdrClient();
+  let now = 1_000;
+  let lookupTimeout;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(client, "getAgent", async (_paneId, timeoutMs) => {
+    lookupTimeout = timeoutMs;
+    now += timeoutMs;
+    throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+  });
+
+  await assert.rejects(
+    client.waitForAgentSession("w1:p2", 1_000),
+    /did not report a native session/,
+  );
+  assert.equal(lookupTimeout, 1_000);
+  assert.equal(now, 2_000);
+});
+
+test("native session discovery immediately rejects unrelated agent lookup errors", async (t) => {
+  const client = new HerdrClient();
+  const error = new Error("Herdr agent.get connection closed");
+  t.mock.method(client, "getAgent", async () => { throw error; });
+
+  await assert.rejects(client.waitForAgentSession("w1:p2"), error);
 });
 
 test("subscription returns immediately and forwards events", async () => {
