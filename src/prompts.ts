@@ -146,7 +146,7 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
       "If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there.",
       "If another goal is shown as waiting on this goal and current evidence materially changes its condition, call supervisor_reconsider for exactly that goal before the decision tool. An ordinary recorded decision is not itself a reason to wake every dependent.",
       "If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work, alternative proof, or preparation.",
-      "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If an external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
+      "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If a peer or external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
       "Leave it waiting again only when that fresh evidence shows nothing useful can move and supplies the next exact boundary.",
       "If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling.",
       "Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.",
