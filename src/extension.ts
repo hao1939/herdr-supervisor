@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
+import { createHash } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
@@ -14,6 +15,7 @@ import {
 } from "./goal-registry.ts";
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
+import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
 import {
   ExternalPollFence,
   observeExternalWatches,
@@ -39,6 +41,7 @@ import {
   DEFAULT_GLOBAL_REVIEW_INTERVAL_MS,
   emptyGlobalReviewState,
   globalFindingHash,
+  globalFindingSummary,
   globalReviewMessage,
   loadGlobalReviewState,
   saveGlobalReviewState,
@@ -94,6 +97,17 @@ function text(value: string, isError = false) {
   return { content: [{ type: "text" as const, text: value }], isError, details: undefined };
 }
 
+function markRecoveryPreflightError(error) {
+  if (error && typeof error === "object") {
+    (error as { recoveryPreflight?: boolean }).recoveryPreflight = true;
+  }
+  return error;
+}
+
+function isRecoveryPreflightError(error): error is Error & { recoveryPreflight: true } {
+  return Boolean(error && typeof error === "object" && "recoveryPreflight" in error && error.recoveryPreflight);
+}
+
 function codexLaunchArgs(cwd?: string) {
   const args: string[] = [];
   if (process.env.HERDR_SUPERVISOR_CODEX_FULL_ACCESS === "1") {
@@ -109,8 +123,23 @@ function codexLaunchArgs(cwd?: string) {
 }
 
 function workerNameForGoal(goalId: string) {
+  const suffix = createHash("sha256").update(goalId).digest("hex").slice(0, 27);
+  return `goal-${suffix}`;
+}
+
+function legacyWorkerNameForGoal(goalId: string) {
   const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
   return `goal-${suffix.slice(0, 27)}`;
+}
+
+function exactSessionAgent(snapshot, session) {
+  const matches = snapshot.agents?.filter((agent) => (
+    sameAgentSession(agent.agent_session, session)
+  )) || [];
+  if (matches.length > 1) {
+    throw new Error(`multiple Herdr agents expose the same ${session.agent} session`);
+  }
+  return matches[0];
 }
 
 export default function herdrSupervisor(pi: ExtensionAPI) {
@@ -410,7 +439,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     resolvedExternalChangeRevision?,
   ) {
     try {
-      return await saveSteerCheckpoint(
+      const warning = await saveSteerCheckpoint(
         binding,
         instruction,
         progress,
@@ -419,18 +448,110 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         boundary,
         resolvedExternalChangeRevision,
       );
+      return { saved: true, warning };
     } catch (error) {
-      return `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
+      return {
+        saved: false,
+        warning: `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`,
+      };
     }
   }
 
   async function refreshObservedLocation(binding, agent) {
-    if (!agent || identityMismatch(binding, agent, agent) || agent.terminal_id === binding.terminalId) {
+    if (
+      !agent
+      || identityMismatch(binding, agent, agent)
+      || (agent.pane_id === binding.paneId && agent.terminal_id === binding.terminalId)
+    ) {
       return binding;
     }
     const refreshed = await refreshWorkerLocation(binding, captureIdentity(agent));
+    return rememberWorkerLocation(binding, refreshed);
+  }
+
+  async function rememberWorkerLocation(previous, refreshed) {
     cacheBinding(refreshed);
-    return { ...refreshed, ...runtimeFor(refreshed) };
+    if (previous.paneId !== refreshed.paneId) {
+      try { await reloadGoals(); }
+      catch (error) { reportBackgroundFailure("Could not refresh relocated worker cache", error); }
+    }
+    const current = goalCache?.active.get(refreshed.goalId) || refreshed;
+    return { ...current, ...runtimeFor(current) };
+  }
+
+  async function adoptExactSession(binding, snapshot) {
+    const agent = exactSessionAgent(snapshot, binding.agentSession);
+    if (!agent) return;
+    return refreshObservedLocation(binding, agent);
+  }
+
+  function reusableRecoveryPane(snapshot, workspaceId, goalId) {
+    const tabs = snapshot.tabs?.filter((tab) => (
+      tab.workspace_id === workspaceId && tab.label === workerNameForGoal(goalId)
+    )) || [];
+    if (!tabs.length) return;
+    if (tabs.length > 1) throw new Error(`multiple recovery tabs exist for goal ${goalId}`);
+    const panes = snapshot.panes?.filter((pane) => pane.tab_id === tabs[0].tab_id) || [];
+    if (panes.length !== 1) throw new Error(`recovery tab for goal ${goalId} does not contain one pane`);
+    if (findAgent(snapshot, panes[0].pane_id)) {
+      throw new Error(`recovery tab for goal ${goalId} contains a different agent session`);
+    }
+    return panes[0];
+  }
+
+  async function recoverWorkerRouting(binding, snapshot) {
+    let recoveryMayHaveMutated = false;
+    const session = binding.agentSession;
+    try {
+      if (!canRecoverAgentSession(session)) {
+        throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
+      }
+      const existingBinding = await adoptExactSession(binding, snapshot);
+      if (existingBinding) return existingBinding;
+      const currentPane = findPane(snapshot, binding.paneId);
+      if (currentPane) {
+        recoveryMayHaveMutated = true;
+        const refreshed = await refreshWorkerLocation(binding, {
+          paneId: currentPane.pane_id,
+          terminalId: currentPane.terminal_id,
+          agentSession: session,
+        });
+        cacheBinding(refreshed);
+        return refreshed;
+      }
+      const supervisorPaneId = process.env.HERDR_PANE_ID;
+      const supervisorPane = supervisorPaneId ? findPane(snapshot, supervisorPaneId) : undefined;
+      if (!supervisorPane?.workspace_id) {
+        throw new Error("the supervisor's Herdr workspace is not available for worker recovery");
+      }
+      let pane = reusableRecoveryPane(snapshot, supervisorPane.workspace_id, binding.goalId);
+      if (!pane) {
+        recoveryMayHaveMutated = true;
+        const created = await client.createTab({
+          workspaceId: supervisorPane.workspace_id,
+          cwd: process.env.HERDR_SUPERVISOR_DIRECTORY || "/app",
+          label: workerNameForGoal(binding.goalId),
+          focus: false,
+        });
+        const paneId = created?.root_pane?.pane_id;
+        if (!paneId) throw new Error("Herdr created recovery space but did not return its pane identity");
+        const freshSnapshot = await client.snapshot();
+        const restoredBinding = await adoptExactSession(binding, freshSnapshot);
+        if (restoredBinding) return restoredBinding;
+        pane = findPane(freshSnapshot, paneId);
+      }
+      if (!pane?.terminal_id) throw new Error(`Herdr did not expose the recovery pane for goal ${binding.goalId}`);
+      recoveryMayHaveMutated = true;
+      const relocated = await refreshWorkerLocation(binding, {
+        paneId: pane.pane_id,
+        terminalId: pane.terminal_id,
+        agentSession: session,
+      });
+      return rememberWorkerLocation(binding, relocated);
+    } catch (error) {
+      if (!recoveryMayHaveMutated) throw markRecoveryPreflightError(error);
+      throw error;
+    }
   }
 
   async function reconcileCacheAfterWriteFailure() {
@@ -682,24 +803,29 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     if (!pendingSignals.has(paneId) || signal.force) pendingSignals.set(paneId, signal);
   }
 
-  async function wakeDependentWaiters(paneId: string, reason: string) {
+  async function wakeDependentWaiters(peer, reason: string) {
     const goals = await activeBindings();
-    for (const binding of dependentBindings(goals.active, paneId)) {
+    const reference = typeof peer === "string"
+      ? goals.active.find((binding) => binding.paneId === peer) || { paneId: peer }
+      : peer;
+    for (const binding of dependentBindings(goals.active, reference)) {
       if (runtimeFor(binding).awaitingHuman) continue;
       handleSignal(binding.paneId, {
         force: true,
         reason,
-        key: `peer:${paneId}:${++workerEventSequence}`,
+        key: `peer:${reference.goalId || reference.paneId}:${++workerEventSequence}`,
       });
     }
   }
 
+  function wakeTerminalDependents(peer, reason: string) {
+    void wakeDependentWaiters(peer, reason).catch((error) => {
+      reportBackgroundFailure(`Could not wake goals waiting on ${peer.goalId || peer.paneId}`, error);
+    });
+  }
+
   async function handleWorkerEvent(paneId: string) {
     handleSignal(paneId);
-    await wakeDependentWaiters(
-      paneId,
-      `supervised worker ${paneId} changed; reconsider whether useful work can proceed`,
-    );
   }
 
   async function reconsiderCurrentBindings() {
@@ -773,7 +899,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     try {
       pi.sendMessage({
         customType: globalReviewMessageType,
-        content: globalReviewMessage(compactSnapshot, reason),
+        content: globalReviewMessage(compactSnapshot, reason, globalState.lastFinding),
         display: false,
       }, { triggerTurn: true, deliverAs: "followUp" });
       globalState.snapshotHash = snapshotHash;
@@ -789,7 +915,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     paneId: string,
     signal?: ReviewSignal,
   ) {
-    const [stored, snapshot] = await Promise.all([bindingForPane(paneId), client.snapshot()]);
+    const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
+    const stored = goals.active.find((binding) => binding.paneId === paneId);
     if (!stored) return;
     const agent = findAgent(snapshot, paneId);
     const pane = findPane(snapshot, paneId);
@@ -873,7 +1000,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       pi.sendMessage(
         {
           customType: reviewMessageType,
-          content: `${reviewMessage(binding, agent, decision.reason)}\n\nSupervisor mode: ${currentMode}.`,
+          content: `${reviewMessage(
+            binding,
+            agent,
+            decision.reason,
+            new Date(),
+            dependentBindings(goals.active, binding),
+          )}\n\nSupervisor mode: ${currentMode}.`,
           display: true,
         },
         { triggerTurn: currentMode !== "observe", deliverAs: "followUp" },
@@ -987,6 +1120,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
     let installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
+    const continuingInstalledGoal = Boolean(installed);
     if (!installed) {
       installed = await installSupervisorGoal({
         objective,
@@ -998,6 +1132,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     }
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
+    const legacyWorkerName = legacyWorkerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
     const retryingPendingStart = Boolean(paneId);
     if (!paneId) {
@@ -1007,9 +1142,34 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const snapshot = await client.snapshot();
       const supervisor = findPane(snapshot, supervisorPane);
       if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
-      const pendingAgent = snapshot.agents?.find(
-        (agent) => agent.name === workerName && agent.workspace_id === supervisor.workspace_id,
-      );
+      const recognizedNames = new Set([workerName]);
+      if (continuingInstalledGoal) recognizedNames.add(legacyWorkerName);
+      const pendingAgents = snapshot.agents?.filter((agent) => (
+        recognizedNames.has(agent.name)
+        && agent.workspace_id === supervisor.workspace_id
+        && !goals.active.some((binding) => (
+          binding.paneId === agent.pane_id
+          || sameAgentSession(binding.agentSession, agent.agent_session)
+        ))
+      )) || [];
+      if (pendingAgents.length > 1) {
+        throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
+      }
+      const pendingAgent = pendingAgents[0];
+      if (pendingAgent?.name === legacyWorkerName) {
+        const recorded = await loadSupervisorGoals();
+        const legacyNameConflict = [
+          ...recorded.active,
+          ...recorded.unstarted,
+          ...recorded.completed,
+        ].some((record) => (
+          record.goalId !== goalId
+          && legacyWorkerNameForGoal(record.goalId) === pendingAgent.name
+        ));
+        if (legacyNameConflict) {
+          throw new Error(`The legacy worker name for installed goal ${goalId} is ambiguous; choose the correct worker before retrying.`);
+        }
+      }
       paneId = pendingAgent?.pane_id;
 
       if (!paneId && params.placement.mode === "related") {
@@ -1250,7 +1410,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_reconsider",
     label: "Reconsider supervised goals",
-    description: "Schedule one focused event review for each affected existing goal. Use when the human supplies transient evidence, resolves a wait, or asks the supervisor to recheck current execution. The LLM selects the exact affected workers; code only queues their normal reviews. If human input arrives during another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
+    description: "Schedule one focused event review for each affected existing goal. Use when new evidence materially changes a wait or the human asks the supervisor to recheck current execution. The LLM selects the exact affected workers; code only queues their normal reviews. During another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
     parameters: Type.Object({
       pane_ids: Type.Array(Pane, { minItems: 1, maxItems: 10 }),
       reason: Type.String({ minLength: 1, maxLength: 2000, description: "The concrete new fact or request each focused review must evaluate." }),
@@ -1268,7 +1428,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       for (const paneId of queued) {
         queueSignal(paneId, {
           force: true,
-          reason: `the human supplied new execution information: ${params.reason.trim()}`,
+          reason: `new execution information: ${params.reason.trim()}`,
           key: `human:${sequence}:${paneId}`,
         });
       }
@@ -1286,7 +1446,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_global_result",
     label: "Finish global supervision review",
-    description: "Finish the current compact all-goal review. Findings report relationships or system problems and name the goals they concern; they do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
+    description: "Finish the current compact all-goal review. Findings are the complete set of problems still proven now, including unchanged active findings; an empty set means earlier findings resolved. They name the goals they concern but do not schedule work. Put only goals that actually need a fresh one-goal decision in reconsider. This tool never prompts or changes workers directly.",
     parameters: Type.Object({
       summary: Type.String({ minLength: 1, maxLength: 4000 }),
       findings: Type.Array(Type.Object({
@@ -1336,13 +1496,15 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         affectedGoalIds: [...new Set(finding.affected_goal_ids)],
       }));
       const findingHash = globalFindingHash(findings);
+      const findingSummary = findings.length ? globalFindingSummary(findings) : undefined;
       const isNewFinding = findings.length > 0 && findingHash !== globalState.lastFindingHash;
       const nextState = {
         version: 1,
         lastReviewedAt: now.toISOString(),
         nextReviewAt,
         snapshotHash: globalState.snapshotHash,
-        lastFindingHash: findings.length ? findingHash : globalState.lastFindingHash,
+        lastFindingHash: findings.length ? findingHash : undefined,
+        lastFinding: findingSummary,
       };
       try {
         await saveGlobalReviewState(nextState);
@@ -1371,7 +1533,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       if (isNewFinding) {
         pi.sendMessage({
           customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findings.map((finding) => `- ${finding.problem}\n  Evidence: ${finding.evidence.join("; ")}\n  Affects: ${finding.affectedGoalIds.join(", ")}`).join("\n")}`,
+          content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
           display: true,
         }, { triggerTurn: false, deliverAs: "followUp" });
       }
@@ -1436,12 +1598,12 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. The runtime uses the normal review interval unless review_at supplies a real exact retry time. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a peer review can select a materially affected wait and a watched external change wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
-      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker whose change should wake this wait. Use null for self or external waits." })),
+      waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker this wait depends on. Its reviews receive this condition so the model can wake this goal only when materially affected. Use null for self or external waits." })),
       external_watch: Optional(Type.Union([
         Type.Object({
           source: Type.Literal("github-pr"),
@@ -1456,7 +1618,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       ], { description: "Optional deterministic observation for the exact external condition. It does not prove completion." })),
       external_change_revision: ExternalChangeRevision,
       evidence: Evidence,
-      review_at: Optional(Type.String({ minLength: 1, description: "Optional exact ISO 8601 retry time no more than 24 hours ahead. Use null for the normal bounded review interval." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. Use null for the normal interval." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1468,6 +1630,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const waitingOnPane = params.waiting_on_pane?.trim();
       const externalWatch = params.external_watch;
       let effectiveWaitingOnPane = waitingOnPane;
+      let waitingOnGoalId;
       let warning = "";
       if (waitingOnPane && !waitingFor) {
         return text("waiting_on_pane requires a concrete waiting_for condition.", true);
@@ -1519,6 +1682,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           warning = `\nPeer wake warning: ignored unknown worker ${peerPane}; the bounded review deadline remains active.`;
           effectiveWaitingOnPane = undefined;
         } else {
+          waitingOnGoalId = peer.goalId;
           const peerAgent = findAgent(snapshot, peerPane);
           const peerProblem = identityMismatch(peer, peerAgent, findPane(snapshot, peerPane));
           if (peerProblem || peerAgent?.agent_status !== "working") {
@@ -1551,7 +1715,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           wait: waitingFor ? {
             condition: waitingFor,
             reviewAt,
-            ...(effectiveWaitingOnPane ? { paneId: effectiveWaitingOnPane } : {}),
+            ...(effectiveWaitingOnPane ? { paneId: effectiveWaitingOnPane, goalId: waitingOnGoalId } : {}),
           } : undefined,
           reviewAt: waitingFor ? undefined : params.review_at?.trim(),
           evidence: params.evidence || binding.evidence,
@@ -1610,6 +1774,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
       let releaseExternalPolling = () => {};
+      let relocatedBinding: ActiveGoal | undefined;
       try {
         const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
@@ -1628,19 +1793,66 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           agent,
           pane,
         );
-        const canResume = !agent && pane?.terminal_id === binding.terminalId;
-        if (mismatch && !canResume) return text(`Refusing to continue: ${mismatch}.`, true);
+        const canRecover = !agent && canRecoverAgentSession(binding.agentSession);
+        if (mismatch && !canRecover) return text(`Refusing to continue: ${mismatch}.`, true);
         if (mode() !== "live") {
           reviewTurn.close(params.pane_id);
-          const action = canResume ? `resume the exact ${binding.agentSession.agent} session in` : "prompt";
+          const action = canRecover && !pane
+            ? `create a new routing pane and resume the exact ${binding.agentSession.agent} session for`
+            : canRecover
+              ? `resume the exact ${binding.agentSession.agent} session in`
+              : "prompt";
           return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         }
         const held = await holdExternalPolling(binding);
         binding = held.binding;
         releaseExternalPolling = held.release;
-        const liveSnapshot = await client.snapshot();
-        const liveAgent = findAgent(liveSnapshot, params.pane_id);
-        const livePane = findPane(liveSnapshot, params.pane_id);
+        const resolution = externalResolution(binding, params.external_change_revision);
+        if (resolution.error) return text(resolution.error, true);
+        let liveSnapshot = await client.snapshot();
+        let liveAgent = findAgent(liveSnapshot, params.pane_id);
+        let livePane = findPane(liveSnapshot, params.pane_id);
+        let relocated = false;
+        if (!liveAgent) {
+          const previousPaneId = binding.paneId;
+          try {
+            binding = await recoverWorkerRouting(binding, liveSnapshot);
+          } catch (error) {
+            if (isRecoveryPreflightError(error)) {
+              return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.`, true);
+            }
+            reviewTurn.close(params.pane_id);
+            scheduleReview(binding);
+            let warning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied, but no worker instruction was sent.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
+          }
+          relocated = binding.paneId !== previousPaneId;
+          if (relocated) {
+            reviewTurn.retarget(params.pane_id, binding.paneId);
+            relocatedBinding = binding;
+          }
+          liveSnapshot = await client.snapshot();
+          const latestBinding = await adoptExactSession(binding, liveSnapshot);
+          if (latestBinding && latestBinding.paneId !== binding.paneId) {
+            reviewTurn.retarget(binding.paneId, latestBinding.paneId);
+            binding = latestBinding;
+            relocated = true;
+            relocatedBinding = binding;
+          } else if (latestBinding) {
+            binding = latestBinding;
+          }
+          if (relocated) {
+            try {
+              await connectObserver();
+            } catch (error) {
+              reportBackgroundFailure("Could not watch the relocated worker", error);
+            }
+          }
+          liveAgent = findAgent(liveSnapshot, binding.paneId);
+          livePane = findPane(liveSnapshot, binding.paneId);
+        }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
         const canResumeNativeGoal = Boolean(
@@ -1649,36 +1861,35 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           && ["idle", "done"].includes(liveAgent.agent_status),
         );
         if (liveMismatch && !canResumeNow) {
+          if (relocatedBinding) throw new Error(liveMismatch);
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
-        const resolution = externalResolution(binding, params.external_change_revision);
-        if (resolution.error) return text(resolution.error, true);
         let continuedBinding = binding;
         let resumed = false;
         let deliveryBoundary;
         const instruction = workerInstruction(binding, params.message, resolution.revision);
         if (canResumeNow) {
           const request = recoveryRequest(binding, liveSnapshot);
+          if (relocated) request.name = workerNameForGoal(binding.goalId);
           // An interrupted native Codex Goal is paused by design. Resume that
           // lifecycle explicitly before queuing the supervisor's fresh
           // steering; otherwise Codex waits at an interactive "Resume goal?"
           // gate and the apparently recovered worker never moves.
           request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
-          let resumeAccepted = false;
+          reviewTurn.close(binding.paneId);
           let resumedAgent;
           try {
-            resumedAgent = await client.startAndWaitAgent(request, 30_000, () => {
-              resumeAccepted = true;
-              reviewTurn.close(params.pane_id);
-            });
+            resumedAgent = await client.startAndWaitAgent(request, 30_000);
           } catch (error) {
-            if (!resumeAccepted) throw error;
             scheduleReview(binding);
-            return text(`Herdr accepted the exact-session resume for ${params.pane_id}, but the worker did not become ready: ${error.message}.\n\nDo not resume it again. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            let warning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+            return text(`Could not confirm the exact-session resume for ${binding.paneId}: ${error.message}. The resume may have started, but no follow-up instruction was sent.${warning}\n\nDo not resume it again in this turn. The bounded review will reread current worker state and continue safely.`, true);
           }
           const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
           if (resumedMismatch) {
-            reviewTurn.close(params.pane_id);
+            reviewTurn.close(binding.paneId);
             scheduleReview(binding);
             return text(`The exact-session resume ran, but the resulting worker identity did not match: ${resumedMismatch}. No further message was sent.\n\nEnd this supervisor turn now; do not retry without fresh evidence.`, true);
           }
@@ -1686,49 +1897,50 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           resumed = true;
         } else if (canResumeNativeGoal) {
           try {
-            await client.promptAgent(params.pane_id, "/goal resume", {
+            await client.promptAgent(binding.paneId, "/goal resume", {
               until: ["working"],
               timeout_ms: 5000,
             });
           } catch (error) {
-            reviewTurn.close(params.pane_id);
+            reviewTurn.close(binding.paneId);
             scheduleReview(binding);
-            return text(`Could not confirm that the native Goal resumed in ${params.pane_id}: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`Could not confirm that the native Goal resumed in ${binding.paneId}: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
-          reviewTurn.close(params.pane_id);
+          reviewTurn.close(binding.paneId);
           let resumedSnapshot;
           try {
             resumedSnapshot = await client.snapshot();
           } catch (error) {
             scheduleReview(binding);
-            return text(`The native Goal resumed in ${params.pane_id}, but its updated worker state could not be observed: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`The native Goal resumed in ${binding.paneId}, but its updated worker state could not be observed: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
-          const resumedAgent = findAgent(resumedSnapshot, params.pane_id);
+          const resumedAgent = findAgent(resumedSnapshot, binding.paneId);
           const resumedMismatch = identityMismatch(
             binding,
             resumedAgent,
-            findPane(resumedSnapshot, params.pane_id),
+            findPane(resumedSnapshot, binding.paneId),
           );
           if (resumedMismatch) {
-            reviewTurn.close(params.pane_id);
+            reviewTurn.close(binding.paneId);
             scheduleReview(binding);
             return text(`The native Goal resumed, but the resulting worker identity did not match: ${resumedMismatch}. No follow-up instruction was sent.\n\nEnd this supervisor turn now and wait for fresh evidence.`, true);
           }
           if (resumedAgent.agent_status !== "working") {
             scheduleReview(binding);
-            return text(`The native Goal resumed in ${params.pane_id}, but it settled again before the follow-up instruction could be sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`The native Goal resumed in ${binding.paneId}, but it settled again before the follow-up instruction could be sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
         }
         const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+        relocatedBinding = undefined;
         deliveryBoundary = delivery.boundary;
         if (delivery.boundaryError) {
           scheduleReview(continuedBinding);
           const deliveryProgress = delivery.deliveryError
             ? "Both instruction delivery and its post-delivery reread boundary are uncertain; another bounded review is required."
             : "The instruction was delivered, but the post-delivery reread boundary could not be observed; another bounded review is required.";
-          const checkpointWarning = await saveUncertainSteer(
+          const checkpoint = await saveUncertainSteer(
             continuedBinding,
             instruction,
             deliveryProgress,
@@ -1740,13 +1952,13 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const deliveryNote = delivery.deliveryError
             ? ` Delivery was also uncertain: ${delivery.deliveryError.message}.`
             : "";
-          return text(`Steering for ${params.pane_id} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpointWarning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
+          return text(`Steering for ${continuedBinding.paneId} was attempted, but a safe boundary could not be observed afterward: ${delivery.boundaryError.message}.${deliveryNote}${checkpoint.warning}\n\nDo not send the instruction again in this turn. End this supervisor turn now and wait for the bounded review.`, true);
         }
         if (delivery.deliveryError) {
           // A transport error cannot prove that Herdr did not accept the
           // prompt. Fail closed against duplicate delivery.
           scheduleReview(continuedBinding);
-          const checkpointWarning = await saveUncertainSteer(
+          const checkpoint = await saveUncertainSteer(
             continuedBinding,
             instruction,
             "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
@@ -1755,7 +1967,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
             deliveryBoundary,
             resolution.revision,
           );
-          return text(`Could not confirm whether ${params.pane_id} received the instruction: ${delivery.deliveryError.message}.${checkpointWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
@@ -1764,9 +1976,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           const warning = await saveSteerCheckpoint(
             continuedBinding,
             instruction,
-            resumed
-              ? "The exact native Goal was resumed and asked to continue."
-              : `The worker was steered to continue: ${params.message.trim()}`,
+            `The worker was steered to continue: ${params.message.trim()}`,
             params.evidence || continuedBinding.evidence,
             reviewAt,
             deliveryBoundary,
@@ -1775,15 +1985,33 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           runtimeFor(continuedBinding).externalRereadCandidateRevision = undefined;
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
-            ? `${canResumeNow ? `Resumed the exact ${binding.agentSession.agent} session and native Goal` : "Resumed the exact native Goal"} in ${params.pane_id}, then asked it to continue.`
-            : `Steered ${params.pane_id}: ${params.message.trim()}`;
+            ? `${relocated
+              ? canResumeNow
+                ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
+                : `Relocated the exact ${binding.agentSession.agent} session and resumed its native Goal`
+              : canResumeNow
+                ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
+                : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
+            : relocated
+              ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
+              : `Steered ${params.pane_id}: ${params.message.trim()}`;
           return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);
           return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
         }
-      } catch (error) { return text(`Could not continue worker: ${error.message}`, true); }
+      } catch (error) {
+        if (relocatedBinding) {
+          reviewTurn.close(relocatedBinding.paneId);
+          scheduleReview(relocatedBinding);
+          let warning = "";
+          try { await armReviewTimer(); }
+          catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+          return text(`Could not finish the relocated worker action: ${error.message}. Recovery may have partly applied, but no action was retried.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
+        }
+        return text(`Could not continue worker: ${error.message}`, true);
+      }
       finally { releaseExternalPolling(); }
     },
   });
@@ -1909,6 +2137,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         held.release();
       }
       reviewTurn.close(params.pane_id);
+      wakeTerminalDependents(
+        binding,
+        `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
+      );
       let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
       try {
         await connectObserver();
@@ -1978,8 +2210,8 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
         } finally {
           held.release();
         }
-        await wakeDependentWaiters(
-          paneId,
+        wakeTerminalDependents(
+          binding,
           `supervision of ${paneId} stopped; reconsider whether useful work can proceed`,
         );
         let refreshWarning = "";
@@ -2105,12 +2337,6 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
           runtime.missingDecisionRetries = 0;
           if (!runtime.awaitingHuman) scheduleReview(binding);
         }
-      }
-      if (decisionApplied) {
-        await wakeDependentWaiters(
-          reviewedPane,
-          `supervisor decision for ${reviewedPane} changed; reconsider whether useful work can proceed`,
-        );
       }
     }
     await drainSignals();

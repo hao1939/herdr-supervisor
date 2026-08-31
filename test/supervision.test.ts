@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { sameAgentSession } from "../src/identity.ts";
 import {
   captureIdentity,
   dependentBindings,
@@ -73,6 +74,13 @@ test("worker identity captures the exact native session", () => {
   });
 });
 
+test("native session equality has one exact identity contract", () => {
+  const session = agent().agent_session;
+  assert.equal(sameAgentSession(session, { ...session }), true);
+  assert.equal(sameAgentSession(session, { ...session, value: "replacement" }), false);
+  assert.equal(sameAgentSession(session, undefined), false);
+});
+
 test("one nearest deadline selects only workers due for review", () => {
   const now = new Date("2026-08-28T00:00:00.000Z");
   const workers = [
@@ -92,15 +100,15 @@ test("bindings without a deadline receive one recovery review", () => {
   assert.deepEqual(dueBindings(workers).map((worker) => worker.paneId), ["w1:p1"]);
 });
 
-test("a worker change selects only waits linked to that exact worker", () => {
+test("a durable peer identity selects only waits linked to that exact goal", () => {
   const workers = [
-    { paneId: "w1:p2", wait: { paneId: "w1:p7" } },
-    { paneId: "w1:p3", wait: { paneId: "w1:p8" } },
-    { paneId: "w1:p4", wait: { condition: "an external approval" } },
-    { paneId: "w1:p7" },
+    { goalId: "g_waiting", paneId: "w1:p2", wait: { goalId: "g_peer", paneId: "w1:p7" } },
+    { goalId: "g_other", paneId: "w1:p3", wait: { goalId: "g_else", paneId: "w1:p8" } },
+    { goalId: "g_external", paneId: "w1:p4", wait: { condition: "an external approval" } },
+    { goalId: "g_peer", paneId: "w1:p9" },
   ];
   assert.deepEqual(
-    dependentBindings(workers, "w1:p7").map((worker) => worker.paneId),
+    dependentBindings(workers, workers[3]).map((worker) => worker.paneId),
     ["w1:p2"],
   );
 });
@@ -185,6 +193,61 @@ test("stopped process is shown as recoverable supervision work, not changed iden
   );
 });
 
+test("an empty replacement terminal is shown as recoverable supervision work", () => {
+  const current = binding({ goalId: "g_restarted" });
+  const output = formatWorker(liveWorker(current, {
+    agents: [],
+    panes: [{ pane_id: "w1:p2", terminal_id: "term-replaced" }],
+  }));
+
+  assert.match(output, /Worker: codex w1:p2 · terminal replaced/);
+  assert.match(output, /Next: supervisor should review whether the exact session can resume/);
+  assert.doesNotMatch(output, /Needs you/);
+});
+
+test("a missing pane is recoverable supervision work, not human work", () => {
+  const current = binding({ goalId: "g_open" });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /Worker: codex w1:p2 · pane missing/);
+  assert.match(output, /Next: supervisor should review whether the exact session can resume in a new pane/);
+  assert.doesNotMatch(output, /Needs you/);
+});
+
+test("a missing pane does not promise recovery for an unsupported session", () => {
+  const current = binding({
+    goalId: "g_legacy",
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/tmp/legacy-session.jsonl",
+    },
+  });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /Worker: codex w1:p2 · pane missing/);
+  assert.match(output, /Needs you: worker pane is no longer present; supervision is paused/);
+  assert.doesNotMatch(output, /exact session can resume/);
+});
+
+test("a stopped process does not promise recovery for an unsupported session", () => {
+  const current = binding({
+    goalId: "g_legacy",
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/tmp/legacy-session.jsonl",
+    },
+  });
+  const output = formatWorker(liveWorker(current, snapshot(null)));
+
+  assert.match(output, /Worker: codex w1:p2 · process stopped/);
+  assert.match(output, /Needs you: worker agent process is no longer detected; supervision is paused/);
+  assert.doesNotMatch(output, /exact session can resume/);
+});
+
 test("a finished worker turn is not presented as a finished goal", () => {
   const current = binding({
     goalId: "g_open",
@@ -212,6 +275,43 @@ test("a persisted human question is the next action shown after restart", () => 
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
   assert.match(output, /Next: answer the supervisor's question above/);
   assert.doesNotMatch(output, /review current evidence/);
+});
+
+test("a missing pane does not hide an outstanding human question", () => {
+  const current = binding({
+    lastDecision: {
+      decision: "ask_human",
+      at: "2026-08-28T10:00:00.000Z",
+      action: "May this worker use shared capacity?",
+    },
+  });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /^Goal g_test · waiting for you$/m);
+  assert.match(output, /Next: answer the supervisor's question above/);
+  assert.match(output, /worker recovery can follow your answer/);
+});
+
+test("a human question does not promise recovery for an unsupported missing session", () => {
+  const current = binding({
+    agentSession: {
+      source: "herdr:codex",
+      agent: "codex",
+      kind: "path",
+      value: "/tmp/legacy-session.jsonl",
+    },
+    lastDecision: {
+      decision: "ask_human",
+      at: "2026-08-28T10:00:00.000Z",
+      action: "May this worker use shared capacity?",
+    },
+  });
+  const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
+
+  assert.match(output, /^Goal g_test · waiting for you$/m);
+  assert.match(output, /answer the supervisor's question above/);
+  assert.match(output, /unsupported worker session still needs repair/);
+  assert.doesNotMatch(output, /worker recovery can follow/);
 });
 
 test("the all-worker view stays bounded while one-worker detail stays complete", () => {
@@ -350,6 +450,14 @@ test("review notice explains the goal and signal in plain language", () => {
     agent({ agent_status: "idle" }),
     "worker is idle",
     new Date("2026-08-28T23:59:00.000Z"),
+    [{
+      goalId: "g_waiter",
+      paneId: "w1:p7",
+      wait: {
+        condition: "Fix cancellation to release the shared test slot",
+        reviewAt: "2026-08-29T01:00:00Z",
+      },
+    }],
   );
   assert.match(message, /Worker review · codex w1:p2/);
   assert.match(message, /Review time: 2026-08-28T23:59:00.000Z \(UTC\)/);
@@ -358,11 +466,17 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Worker acceptance criteria\n- focused test passes/);
   assert.match(message, /Current wait\n  the server retry boundary\n  Review at: 2026-08-29T00:00:00Z/);
   assert.match(message, /Current evidence\n- The server supplied retry boundary/);
+  assert.match(message, /Goals waiting on this goal/);
+  assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to release the shared test slot/);
+  assert.match(message, /supervisor_reconsider for exactly those panes/);
+  assert.match(message, /Do not wake them merely because this goal recorded another decision/);
   assert.match(message, /Observe this exact worker/);
   assert.match(message, /supervisor_status to read current recorded peer progress/);
   assert.match(message, /only this worker's evidence can prove this goal complete/);
   assert.match(message, /Your own response is not worker evidence/);
   assert.match(message, /confirm that the condition still exists/);
+  assert.match(message, /fresh evidence must cover every part you claim remains unchanged/);
+  assert.match(message, /steer the worker to reread it rather than infer unchanged state from silence or older evidence/);
   assert.match(message, /continue any independent useful work/);
   assert.match(message, /durable goal is still coherent, useful, and achievable/);
   assert.match(message, /current blocker stops the whole outcome or only one path/);

@@ -9,10 +9,24 @@ import {
   startGoal,
   updateGoalContract,
   updateGoalState,
+  withGoalRootLock,
 } from "./goal-store.ts";
+import { sameAgentSession } from "./identity.ts";
 import type { GoalBinding } from "./types.ts";
 
 export const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
+
+function assertWorkerAvailable(active, worker, exceptGoalId?) {
+  const candidates = active.filter((binding) => binding.goalId !== exceptGoalId);
+  const paneOwner = candidates.find((binding) => binding.paneId === worker.paneId);
+  if (paneOwner) {
+    throw new Error(`${worker.paneId} already pursues goal ${paneOwner.goalId}; stop it before assigning another goal`);
+  }
+  const sessionOwner = candidates.find((binding) => sameAgentSession(binding.agentSession, worker.agentSession));
+  if (sessionOwner) {
+    throw new Error(`the native agent session already pursues goal ${sessionOwner.goalId}; stop it before assigning another goal`);
+  }
+}
 
 export function bindingFromRecord(record): GoalBinding {
   if (!record?.contract || !record?.state) throw new Error("goal has no local execution");
@@ -71,35 +85,33 @@ export async function installSupervisorGoal(input, root?, options: any = {}) {
 }
 
 export async function registerSupervisedGoal(worker, input, root?, options: any = {}) {
-  const goals = await loadSupervisorGoals(root);
-  if (goals.errors.length) {
-    throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
-  }
-  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
-  if (existing) {
-    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
-  }
-  const { goalId, contract } = await installSupervisorGoal(input, root, options);
-  const state = await startGoal(goalId, worker, root, { at: options.at });
-  return bindingFromRecord({ goalId, contract, state });
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before registering another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    assertWorkerAvailable(goals.active, worker);
+    const { goalId, contract } = await installSupervisorGoal(input, root, options);
+    const state = await startGoal(goalId, worker, root, { at: options.at });
+    return bindingFromRecord({ goalId, contract, state });
+  });
 }
 
 export async function startInstalledGoal(goalId, worker, root?, options: any = {}) {
-  const goals = await loadSupervisorGoals(root);
-  if (goals.errors.length) {
-    throw new Error(`repair unreadable goals before starting another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
-  }
-  const existing = goals.active.find((binding) => binding.paneId === worker.paneId);
-  if (existing) {
-    throw new Error(`${worker.paneId} already pursues goal ${existing.goalId}; stop it before assigning another goal`);
-  }
-  const installed = goals.unstarted.find((record) => record.goalId === goalId);
-  if (!installed) {
-    await loadGoalContract(goalId, root);
-    throw new Error(`goal ${goalId} already has local execution state`);
-  }
-  const state = await startGoal(goalId, worker, root, { at: options.at });
-  return bindingFromRecord({ goalId, contract: installed.contract, state });
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before starting another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    assertWorkerAvailable(goals.active, worker);
+    const installed = goals.unstarted.find((record) => record.goalId === goalId);
+    if (!installed) {
+      await loadGoalContract(goalId, root);
+      throw new Error(`goal ${goalId} already has local execution state`);
+    }
+    const state = await startGoal(goalId, worker, root, { at: options.at });
+    return bindingFromRecord({ goalId, contract: installed.contract, state });
+  });
 }
 
 export async function refineSupervisorGoal(goalId, input, root?, options: any = {}) {
@@ -159,18 +171,55 @@ export async function refineSupervisorGoal(goalId, input, root?, options: any = 
 }
 
 export async function refreshWorkerLocation(binding, worker, root?, now?) {
-  if (worker.paneId !== binding.paneId) throw new Error("the worker pane changed");
-  if (["source", "agent", "kind", "value"].some(
-    (field) => worker.agentSession?.[field] !== binding.agentSession?.[field],
-  )) {
-    throw new Error("the native agent session changed");
-  }
-  if (worker.terminalId === binding.terminalId) return binding;
-  const state = await updateGoalState(binding.goalId, (current) => {
-    current.worker.terminalId = worker.terminalId;
-    return current;
-  }, root, now);
-  return { ...binding, terminalId: state.worker.terminalId };
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before relocating a worker: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    const current = goals.active.find((candidate) => candidate.goalId === binding.goalId);
+    if (!current) throw new Error(`active goal ${binding.goalId} was not found`);
+    if (!sameAgentSession(worker.agentSession, current.agentSession)) {
+      throw new Error("the native agent session changed");
+    }
+    if (worker.paneId === current.paneId && worker.terminalId === current.terminalId) return current;
+    if (binding.paneId !== current.paneId || binding.terminalId !== current.terminalId) {
+      throw new Error("the worker routing changed; reread Herdr before relocating it");
+    }
+    assertWorkerAvailable(goals.active, worker, current.goalId);
+    if (worker.paneId !== current.paneId) {
+      const legacyDependents = goals.active.filter((candidate) => (
+        candidate.goalId !== current.goalId
+        && !candidate.wait?.goalId
+        && candidate.wait?.paneId === current.paneId
+      ));
+      // Make the durable goal identity authoritative before changing its
+      // replaceable pane. If interrupted, the peer remains at the old pane and
+      // this idempotent upgrade is retried before relocation.
+      for (const dependent of legacyDependents) {
+        await updateGoalState(dependent.goalId, (goalState) => {
+          if (goalState.wait?.paneId === current.paneId && !goalState.wait.goalId) {
+            goalState.wait.goalId = current.goalId;
+          }
+          return goalState;
+        }, root, now);
+      }
+    }
+    const state = await updateGoalState(current.goalId, (goalState) => {
+      goalState.worker.paneId = worker.paneId;
+      goalState.worker.terminalId = worker.terminalId;
+      return goalState;
+    }, root, now, { allowWorkerRelocation: true });
+    return bindingFromRecord({
+      goalId: current.goalId,
+      contract: {
+        objective: current.goal,
+        context: current.context,
+        acceptance: current.acceptance,
+        constraints: current.constraints,
+      },
+      state,
+    });
+  });
 }
 
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
