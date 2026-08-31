@@ -178,8 +178,9 @@ In plain language:
 9. Supervision ends only when evidence proves the complete outcome or the human
    explicitly stops it.
 
-When the human corrects a fact or boundary already stored in a goal contract,
-the supervisor updates that same contract before asking its worker to continue.
+When the human contradicts, retracts, or disowns a statement already stored in
+a goal contract, the supervisor updates that same contract before asking its
+worker to continue.
 A transient reconsideration can carry new execution evidence, but it cannot
 override a contradictory `goal.json` or substitute for removing a constraint
 the human did not authorize.
