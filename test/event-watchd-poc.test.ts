@@ -470,6 +470,14 @@ test("ADO supports PAT and bounded provider retry guidance", async () => {
   });
 });
 
+test("ADO accepts current Entra token sizes without exposing the token", async () => {
+  const realisticToken = "x".repeat(3_000);
+  const authorization = await ambientAdoAuthorization({
+    exec: async () => ({ stdout: `${realisticToken}\n` }),
+  });
+  assert.equal(authorization, `Bearer ${realisticToken}`);
+});
+
 test("ADO source enforces a provider-safe polling interval", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-ado-rate-"));
   const source = adoBuildSource({

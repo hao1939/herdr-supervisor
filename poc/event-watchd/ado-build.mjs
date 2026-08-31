@@ -5,12 +5,13 @@ import { promisify } from "node:util";
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const MINIMUM_INTERVAL_MS = 60 * 1_000;
 const MAX_RESOURCES = 10;
-const MAX_TEXT = 2_000;
+const MAX_CREDENTIAL_BYTES = 16 * 1024;
 const execFileAsync = promisify(execFile);
 
-function requiredText(value, name) {
-  if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) {
-    throw new Error(`${name} must be a non-empty string no longer than ${MAX_TEXT} characters`);
+function credential(value, name) {
+  if (typeof value !== "string" || !value.trim()
+    || Buffer.byteLength(value.trim()) > MAX_CREDENTIAL_BYTES) {
+    throw new Error(`${name} must be non-empty and no larger than ${MAX_CREDENTIAL_BYTES} bytes`);
   }
   return value.trim();
 }
@@ -41,7 +42,7 @@ export async function ambientAdoAuthorization({
   azureCli = process.env.AZURE_CLI || "az",
   exec = execFileAsync,
 } = {}) {
-  if (pat) return `Basic ${Buffer.from(`:${requiredText(pat, "Azure DevOps PAT")}`).toString("base64")}`;
+  if (pat) return `Basic ${Buffer.from(`:${credential(pat, "Azure DevOps PAT")}`).toString("base64")}`;
   try {
     const { stdout } = await exec(azureCli, [
       "account",
@@ -53,7 +54,7 @@ export async function ambientAdoAuthorization({
       "--output",
       "tsv",
     ], { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024 });
-    return `Bearer ${requiredText(stdout, "Azure access token")}`;
+    return `Bearer ${credential(stdout, "Azure access token")}`;
   } catch {
     throw new Error("could not obtain Azure DevOps credentials; renew az login or set AZURE_DEVOPS_EXT_PAT");
   }
