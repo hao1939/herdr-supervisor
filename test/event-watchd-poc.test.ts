@@ -668,6 +668,30 @@ test("daemon shutdown keeps ownership until an active request drains", async () 
   await replacement.stop();
 });
 
+test("one daemon connection cannot queue multiple requests", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-one-request-"));
+  const socketPath = join(directory, "watch.sock");
+  let polls = 0;
+  const server = new EventWatchServer({
+    socketPath,
+    service: {
+      start: async () => {},
+      stop: async () => {},
+      pollNow: async () => { polls += 1; },
+    },
+  });
+  await server.start();
+  const client = net.createConnection(socketPath);
+  await new Promise<void>((resolve, reject) => {
+    client.once("connect", resolve);
+    client.once("error", reject);
+  });
+  client.write(`${JSON.stringify({ id: "one", action: "poll" })}\n${JSON.stringify({ id: "two", action: "poll" })}\n`);
+  await new Promise<void>((resolve) => client.once("close", resolve));
+  assert.equal(polls, 0, "a pipelined connection is rejected instead of building a request queue");
+  await server.stop();
+});
+
 function githubResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
     status,

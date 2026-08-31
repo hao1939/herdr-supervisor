@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { MAX_FRAME_BYTES } from "./protocol.mjs";
 
 function reply(socket, value) {
-  if (socket.writable) socket.write(`${JSON.stringify(value)}\n`);
+  if (socket.writable) socket.end(`${JSON.stringify(value)}\n`);
 }
 
 async function acquireLock(path) {
@@ -115,27 +115,26 @@ export class EventWatchServer {
     this.sockets.add(socket);
     socket.once("close", () => this.sockets.delete(socket));
     let buffer = "";
-    let requests = Promise.resolve();
+    let accepted = false;
     socket.setEncoding("utf8");
     socket.on("error", () => {});
     socket.on("data", (chunk) => {
+      if (accepted) return;
       buffer += chunk;
-      for (;;) {
-        const newline = buffer.indexOf("\n");
-        if (newline < 0) break;
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        if (!line.trim()) continue;
-        if (Buffer.byteLength(line) > MAX_FRAME_BYTES) return socket.destroy(new Error("frame too large"));
-        const request = requests.then(() => this.handle(socket, line));
-        requests = request;
-        this.requests.add(request);
-        void request.then(
-          () => this.requests.delete(request),
-          () => this.requests.delete(request),
-        );
-      }
-      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) socket.destroy(new Error("frame too large"));
+      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) return socket.destroy(new Error("frame too large"));
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      const line = buffer.slice(0, newline);
+      const remainder = buffer.slice(newline + 1);
+      if (!line.trim() || remainder.trim()) return socket.destroy(new Error("one request is allowed per connection"));
+      accepted = true;
+      socket.pause();
+      const request = this.handle(socket, line);
+      this.requests.add(request);
+      void request.then(
+        () => this.requests.delete(request),
+        () => this.requests.delete(request),
+      );
     });
   }
 
