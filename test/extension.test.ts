@@ -523,6 +523,9 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /review the exact final diff/);
+  assert.match(prompts[0].prompt, /run the required tests/);
+  assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(prompts[0].prompt, /Keep the native Goal active/);
   assert.match(prompts[0].prompt, /## Supervision/);
   assert.match(prompts[0].prompt, /copy the current objective from the canonical goal\.json/);

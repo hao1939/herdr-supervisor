@@ -70,6 +70,7 @@ export function refinedGoalPrompt(binding: GoalTrace, workerName: string) {
   return [
     `The human refined the canonical contract for your active Codex Goal at ${JSON.stringify(resolve(goalPaths(goalId).contract))}.`,
     "Re-read the complete goal.json now and continue under its latest objective, context, completion criteria, and constraints.",
+    workerExecutionBoundary,
     "Keep the native Goal active until the revised contract is fully proved. If you had already completed it, start the same native Goal again from this canonical contract.",
     pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language.",
