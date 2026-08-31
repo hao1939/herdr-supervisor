@@ -82,6 +82,7 @@ export function adoBuildDiscovery({
   const allowedDefinitions = new Set(scopes.map((scope) =>
     `${scope.organization}/${scope.project}/${scope.definitionId}`));
   const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS);
+  const recentWindow = boundedRefreshWindow(MAX_BUILDS);
   return {
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
@@ -108,7 +109,6 @@ export function adoBuildDiscovery({
         const current = recent.get(resource.subject);
         if (current) {
           if (!taggedGoal(current.tags)) absent.push(resource.subject);
-          else if (selected.size < MAX_BUILDS) selected.set(resource.subject, current);
           continue;
         }
         missing.push({ subject: resource.subject, parsed });
@@ -130,9 +130,9 @@ export function adoBuildDiscovery({
           else throw error;
         }
       }
-      for (const [subject, build] of recent) {
-        if (selected.size >= MAX_BUILDS) break;
-        if (!selected.has(subject) && taggedGoal(build.tags)) selected.set(subject, build);
+      const recentAnnotated = [...recent].filter(([, build]) => taggedGoal(build.tags));
+      for (const [subject, build] of recentWindow(recentAnnotated, MAX_BUILDS - selected.size)) {
+        selected.set(subject, build);
       }
       const observations = [];
       for (const [subject, build] of selected) {

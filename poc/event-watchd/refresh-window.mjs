@@ -4,11 +4,12 @@
 // the window simply starts again from the beginning.
 export function boundedRefreshWindow(limit) {
   let cursor = 0;
-  return (known = []) => {
+  return (known = [], requested = limit) => {
     const items = Array.isArray(known) ? known : [];
-    if (items.length <= limit) return items;
+    const size = Math.min(items.length, limit, Math.max(0, requested));
+    if (items.length <= size) return items;
     const start = cursor % items.length;
-    cursor = start + limit;
-    return [...items, ...items].slice(start, start + limit);
+    cursor = start + size;
+    return [...items, ...items].slice(start, start + size);
   };
 }

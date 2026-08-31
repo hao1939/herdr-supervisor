@@ -561,7 +561,7 @@ test("ADO discovery forgets builds outside the configured definition scope", asy
   assert.deepEqual(found, { observations: [], absent: ["org/project/101"] });
 });
 
-test("ADO discovery bounds output without dropping remembered builds", async () => {
+test("ADO discovery rotates across full definitions without dropping remembered builds", async () => {
   const definitions = Array.from({ length: 6 }, (_, index) => `org/project/${index + 1}`);
   const source = adoBuildDiscovery({
     definitions,
@@ -588,10 +588,13 @@ test("ADO discovery bounds output without dropping remembered builds", async () 
     },
   });
 
-  const { observations: found } = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
+  const first = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
+  const second = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
 
-  assert.equal(found.length, 500);
-  assert.ok(found.some((item) => item.subject === "org/project/999"));
+  assert.equal(first.observations.length, 500);
+  assert.equal(second.observations.length, 500);
+  assert.ok(first.observations.some((item) => item.subject === "org/project/999"));
+  assert.ok(second.observations.some((item) => item.subject === "org/project/6000"));
 });
 
 test("Herdr delivery resolves a goal to its current exact native session", async (t) => {
