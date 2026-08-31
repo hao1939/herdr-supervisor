@@ -1,49 +1,13 @@
-import net from "node:net";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { loadSupervisorGoals } from "../../src/goal-registry.ts";
+import { HerdrClient } from "../../src/herdr-client.ts";
 import { identityMismatch } from "../../src/supervision.ts";
 
-export function defaultHerdrSocket(env = process.env) {
-  return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
-}
-
 export function herdrRequest(method, params = {}, {
-  socketPath = defaultHerdrSocket(),
+  socketPath,
   timeoutMs = 5_000,
 } = {}) {
-  return new Promise((resolve, reject) => {
-    const id = `event-watchd:${process.pid}:${Date.now()}:${Math.random()}`;
-    const socket = net.createConnection(socketPath);
-    let buffer = "";
-    let settled = false;
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      error ? reject(error) : resolve(value);
-    };
-    const timer = setTimeout(() => finish(new Error(`Herdr ${method} timed out`)), timeoutMs);
-    socket.on("error", (error) => finish(error));
-    socket.on("close", () => finish(new Error(`Herdr ${method} connection closed`)));
-    socket.on("connect", () => socket.write(`${JSON.stringify({ id, method, params })}\n`));
-    socket.setEncoding("utf8");
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      for (;;) {
-        const newline = buffer.indexOf("\n");
-        if (newline < 0) return;
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        let message;
-        try { message = JSON.parse(line); } catch { continue; }
-        if (message.id !== id) continue;
-        if (message.error) finish(new Error(message.error.message || message.error.code || "Herdr request failed"));
-        else finish(undefined, message.result);
-      }
-    });
-  });
+  const client = new HerdrClient({ ...(socketPath ? { socketPath } : {}), timeoutMs });
+  return client.request(method, params, timeoutMs);
 }
 
 export function herdrGoalDelivery({
