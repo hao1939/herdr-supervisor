@@ -95,7 +95,8 @@ flowchart LR
     U[Human] <--> S[Pi supervisor]
     S <-->|socket| H[Herdr]
     H --> W[Codex workers]
-    S --> F[(Goal files)]
+    S -->|write| F[(Goal files)]
+    F -.->|read goal contract| W
 
     style U fill:#e8f0fe
     style S fill:#fff4e5
@@ -115,10 +116,10 @@ evidence, and judgment. Workers own implementation. Each goal keeps three files:
 flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
-    C[Peer goal changed] --> Q
-    D[Watched PR or build] --> Q
+    C[Selected peer goal changed] --> Q
+    D[Watched PR or build revision changed] --> Q
     Q --> R[Focused review]
-    E[Hourly global check] --> G[Compact global review]
+    E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
 ```
 
@@ -328,14 +329,13 @@ completion.
 ### A pending review is a thread, not a barrier
 
 A pull request or pipeline run is one workstream inside the goal, not the end
-of it. A worker that opens a pull request must not stop and wait for it. It
-moves to the next useful thing in the same goal: another change, a test,
-preparation for the next step, or verifying its own earlier work.
+of it. While one is pending, the worker continues any safe useful work in the
+same goal: another change, a test, preparation for the next step, or verifying
+its own earlier work.
 
-The worker never blocks, sleeps, or polls for an external condition. Blocking
-holds a worker that could be making progress, and it makes a waiting worker
-look busy to Herdr. When a worker has genuinely exhausted the safe work it can
-do now, its turn simply ends. An idle worker costs nothing.
+The worker never sleeps or polls for an external condition. When it has
+genuinely exhausted the safe work it can do now, it reports the exact remaining
+condition once and yields. An idle worker costs nothing.
 
 When the pull request or build later changes, the watch or the bounded review
 wakes that exact session. The worker rereads the current provider state,

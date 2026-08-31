@@ -293,8 +293,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
   assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
-  assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work/);
-  assert.match(deliveredPrompts[0].prompt, /opening a pull request or starting a pipeline is never a reason to stop/);
+  assert.match(deliveredPrompts[0].prompt, /While it is pending, continue any safe useful work/);
+  assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
+  assert.match(deliveredPrompts[0].prompt, /Keep independent useful paths moving while a pull request, pipeline, or another path is pending/);
   assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
   assert.match(deliveredPrompts[0].prompt, /run the required tests/);
   assert.match(deliveredPrompts[0].prompt, /evidence matches the current candidate revision/);
