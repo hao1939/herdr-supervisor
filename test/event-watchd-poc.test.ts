@@ -6,7 +6,7 @@ import test from "node:test";
 import { adoBuildDiscovery, taggedGoal } from "../poc/event-watchd/ado-build.mjs";
 import { DiscoveredEventWatcher } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestDiscovery, supervisionGoal } from "../poc/event-watchd/github-pr.mjs";
-import { herdrGoalDelivery } from "../poc/event-watchd/herdr.mjs";
+import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../poc/event-watchd/herdr.mjs";
 import { registerSupervisedGoal } from "../src/goal-registry.ts";
 
 async function temporary(t, label) {
@@ -150,6 +150,26 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   sourceFails = true;
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery", "source"]);
+});
+
+test("a failed diagnostic delivery is retried without blocking observation", async (t) => {
+  const directory = await temporary(t, "event-watch-diagnostic-retry-");
+  let attempts = 0;
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => { throw new Error("provider unavailable"); } } },
+    deliver: async () => {},
+    diagnose: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("supervisor unavailable");
+    },
+  });
+
+  await watcher.runOnce();
+  await watcher.runOnce();
+  await watcher.runOnce();
+
+  assert.equal(attempts, 2);
 });
 
 test("the checkpoint stays bounded and prefers pending deliveries", async (t) => {
@@ -408,6 +428,46 @@ test("Herdr delivery fails closed when canonical goal ownership is missing", asy
   const root = await temporary(t, "event-watch-missing-goal-");
   const deliver = herdrGoalDelivery({ goalsRoot: root, request: async () => assert.fail("Herdr must not be called") });
   await assert.rejects(deliver("g_missing", [{ source: "github-pr", subject: "owner/repo#42" }]), /active canonical goal was not found/);
+});
+
+test("watcher failures wake the one Pi supervisor with bounded evidence", async () => {
+  const calls = [];
+  const diagnose = herdrSupervisorDiagnostic({
+    request: async (method, params) => {
+      calls.push([method, params]);
+      if (method === "session.snapshot") return { snapshot: { agents: [
+        {
+          agent: "pi",
+          pane_id: "w1:p2",
+          agent_session: { source: "herdr:pi", agent: "pi", kind: "path", value: "/session" },
+        },
+        {
+          agent: "codex",
+          pane_id: "w1:p3",
+          agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "worker" },
+        },
+      ] } };
+      return {};
+    },
+  });
+
+  await diagnose({ message: "ADO discovery failed" });
+
+  const prompt = calls.find(([method]) => method === "agent.prompt")[1];
+  assert.equal(prompt.target, "w1:p2");
+  assert.match(prompt.text, /ADO discovery failed/);
+  assert.match(prompt.text, /not a new goal/);
+});
+
+test("watcher diagnostics fail closed when the supervisor is ambiguous", async () => {
+  const diagnose = herdrSupervisorDiagnostic({
+    request: async () => ({ snapshot: { agents: [
+      { agent: "pi", pane_id: "w1:p1", agent_session: { source: "herdr:pi" } },
+      { agent: "pi", pane_id: "w1:p2", agent_session: { source: "herdr:pi" } },
+    ] } }),
+  });
+
+  await assert.rejects(diagnose({ message: "failure" }), /expected one Pi supervisor, found 2/);
 });
 
 function response(value, ok = true, status = 200) {

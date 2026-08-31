@@ -5,7 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { adoBuildDiscovery } from "./ado-build.mjs";
 import { DiscoveredEventWatcher } from "./core.mjs";
 import { githubPullRequestDiscovery } from "./github-pr.mjs";
-import { herdrGoalDelivery } from "./herdr.mjs";
+import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
 
 function list(name) {
   return String(process.env[name] || "").split(",").map((item) => item.trim()).filter(Boolean);
@@ -29,6 +29,7 @@ const watcher = new DiscoveredEventWatcher({
   statePath: join(stateHome, "external-events.json"),
   sources,
   deliver: herdrGoalDelivery(),
+  diagnose: herdrSupervisorDiagnostic(),
 });
 
 const controller = new AbortController();

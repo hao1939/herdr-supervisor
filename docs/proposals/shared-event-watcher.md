@@ -174,12 +174,15 @@ worker, delivery fails closed. The daemon does not guess another worker or
 create a goal. It records one bounded diagnostic for the supervisor. The
 supervisor uses ordinary goal reasoning and tools to repair the situation.
 
-The PoC still has two production gates. Its standalone daemon currently writes
-diagnostics to service stderr rather than the supervisor conversation, and its
-final exact-worker check and Herdr prompt are separate requests. Replacing the
-current watcher requires one small supervisor-visible diagnostic adapter and a
-session-addressed or atomic Herdr prompt boundary. These are delivery safety
-requirements, not reasons to add watch registration.
+The daemon resolves the environment's one Pi supervisor from fresh Herdr state
+and sends it a bounded diagnostic. It persists no supervisor destination. If
+the supervisor is missing or ambiguous, the diagnostic fails closed, remains
+visible in service stderr, and is retried on the next failing scan.
+
+One production gate remains: the final exact-worker check and Herdr prompt are
+separate requests. Replacing the current watcher requires a session-addressed
+or atomic Herdr prompt boundary. This is a delivery safety requirement, not a
+reason to add watch registration.
 
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
@@ -258,8 +261,8 @@ The MLVM experiment now proves the metadata path end to end for goal
 - The shared daemon remained healthy and retained all three latest revisions in
   its bounded checkpoint.
 
-Supervisor-visible diagnostics and the atomic exact-session delivery boundary
-remain unproven production gates.
+Live supervisor-visible diagnostics and the atomic exact-session delivery
+boundary remain unproven production gates.
 
 ## PoC acceptance
 

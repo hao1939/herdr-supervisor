@@ -92,3 +92,27 @@ export function herdrGoalDelivery({
     return { paneId: agent.pane_id };
   };
 }
+
+export function herdrSupervisorDiagnostic({
+  request = herdrRequest,
+  ...options
+} = {}) {
+  return async (diagnostic) => {
+    const result = await request("session.snapshot", {}, options);
+    const supervisors = result.snapshot.agents.filter((agent) =>
+      agent.agent === "pi" && agent.agent_session?.source === "herdr:pi");
+    if (supervisors.length !== 1) {
+      throw new Error(`expected one Pi supervisor, found ${supervisors.length}`);
+    }
+    const message = String(diagnostic?.message || "external event watcher failed").slice(0, 2_000);
+    await request("agent.prompt", {
+      target: supervisors[0].pane_id,
+      text: [
+        "External event watcher diagnostic:",
+        message,
+        "Inspect current service and provider evidence, repair the failure if safe, and keep affected goals moving.",
+        "This is diagnostic evidence, not a new goal and not completion proof.",
+      ].join("\n"),
+    }, options);
+  };
+}

@@ -154,10 +154,14 @@ export class DiscoveredEventWatcher {
     this.reported = new Set();
   }
 
-  report(key, diagnostic) {
+  async report(key, diagnostic) {
     if (this.reported.has(key)) return;
-    this.reported.add(key);
-    this.diagnose(diagnostic);
+    try {
+      await this.diagnose(diagnostic);
+      this.reported.add(key);
+    } catch (error) {
+      console.error(`event watcher diagnostic delivery failed: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   async scan() {
@@ -182,7 +186,7 @@ export class DiscoveredEventWatcher {
         }
         this.reported.delete(`source:${source}`);
       } catch (error) {
-        this.report(`source:${source}`, {
+        await this.report(`source:${source}`, {
           kind: "source",
           source,
           message: `${source} discovery failed: ${error instanceof Error ? error.message : error}`,
@@ -217,7 +221,7 @@ export class DiscoveredEventWatcher {
         this.reported.delete(`delivery:${goalId}`);
       } catch (error) {
         const subjects = batch.map(({ resource }) => `${resource.source} ${resource.subject}`).join(", ");
-        this.report(`delivery:${goalId}`, {
+        await this.report(`delivery:${goalId}`, {
           kind: "delivery",
           goalId,
           message: `could not wake ${goalId} for ${subjects}: ${error instanceof Error ? error.message : error}`,
