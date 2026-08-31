@@ -168,6 +168,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let reconnectDelay = 250;
   let observerInterrupted = false;
   let workerEventSequence = 0;
+  const pendingHumanFollowUps = new Set<string>();
   const reviewTurn = new ReviewTurnFence();
   let goalCache: undefined | {
     active: Map<string, GoalBinding>;
@@ -2266,14 +2267,29 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     },
   });
 
+  function userMessageKey(content) {
+    const parts = typeof content === "string"
+      ? [{ type: "text", text: content }]
+      : content.map((part) => part.type === "text"
+        ? { type: "text", text: part.text }
+        : { type: "image", data: part.data, mimeType: part.mimeType });
+    return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+  }
+
   pi.on("input", (event) => {
     const automaticReview = reviewTurn.isActive() || activeGlobalReview;
-    if (event.source === "extension" || event.streamingBehavior !== "steer" || !automaticReview) {
+    if (event.source === "extension" || !automaticReview) {
       return { action: "continue" };
     }
     const content = event.images?.length
       ? [{ type: "text" as const, text: event.text }, ...event.images]
       : event.text;
+    if (event.streamingBehavior === "followUp") {
+      pendingHumanFollowUps.add(userMessageKey(content));
+      return { action: "continue" };
+    }
+    if (event.streamingBehavior !== "steer") return { action: "continue" };
+    pendingHumanFollowUps.add(userMessageKey(content));
     pi.sendUserMessage(content, {
       deliverAs: "followUp",
       expandPromptTemplates: true,
@@ -2330,6 +2346,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("message_start", async (event) => {
     if (event.message.role !== "user") return;
+    if (!pendingHumanFollowUps.delete(userMessageKey(event.message.content))) return;
     if (!activeGlobalReview && !reviewTurn.isActive()) return;
     const settledGlobal = await settleGlobalReview();
     if (!settledGlobal) await settleFocusedReview();
@@ -2412,6 +2429,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (globalReviewTimer) clearTimeout(globalReviewTimer);
     pendingSignals.clear();
     pendingStarts.clear();
+    pendingHumanFollowUps.clear();
     runtimeGoals.clear();
     goalCache = undefined;
     agentTurnActive = false;

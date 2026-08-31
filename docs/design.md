@@ -295,6 +295,7 @@ decision at a time.
 - Human input arriving during an automatic review uses Pi's built-in follow-up
   delivery. The current review makes its one decision, then the human request
   gets the next direct turn before more background reviews. The supervisor does
+  not confuse extension-generated steering with that human follow-up and does
   not add another durable message queue; after a process failure the human may
   simply resend the request.
 - A low-frequency compact global review sees every unfinished goal, including

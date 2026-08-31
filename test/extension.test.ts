@@ -925,6 +925,16 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
 
   await pi.events.get("message_start")({
     type: "message_start",
+    message: { role: "user", content: [{ type: "text", text: "Unrelated extension steering." }] },
+  });
+  const unrelatedSteering = await pi.tools.get("supervisor_status").execute("unrelated-steering", {
+    pane_id: null,
+  });
+  assert.equal(unrelatedSteering.isError, true);
+  assert.match(unrelatedSteering.content[0].text, /decision is already applied/);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
     message: { role: "user", content: [{ type: "text", text: "Start the saved goal after this review." }] },
   });
   const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
@@ -940,6 +950,51 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
     streamingBehavior: "followUp",
   }), { action: "continue" });
   assert.equal(pi.userMessages.length, 1);
+  pi.events.get("session_shutdown")();
+});
+
+test("a native human follow-up releases its automatic review when delivery begins", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Review this status next.",
+    source: "rpc",
+    streamingBehavior: "followUp",
+  }), { action: "continue" });
+
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The reviewed worker finished one useful turn.",
+  });
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "user", content: [{ type: "text", text: "Review this status next." }] },
+  });
+  const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
+    pane_id: null,
+  });
+  assert.equal(directTurn.isError, false);
   pi.events.get("session_shutdown")();
 });
 
