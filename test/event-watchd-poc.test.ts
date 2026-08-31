@@ -26,8 +26,8 @@ test("provider metadata names one durable goal without a watch registration", ()
   ].join("\n")), "g_exact-1");
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\n- Goal ID: g_two"), undefined);
   assert.equal(supervisionGoal("No metadata"), undefined);
-  assert.equal(taggedGoal(["unrelated", "herdr-goal:g_exact-1"]), "g_exact-1");
-  assert.equal(taggedGoal(["herdr-goal:g_one", "herdr-goal:g_two"]), undefined);
+  assert.equal(taggedGoal(["unrelated", "herdr-goal=g_exact-1"]), "g_exact-1");
+  assert.equal(taggedGoal(["herdr-goal=g_one", "herdr-goal=g_two"]), undefined);
 });
 
 test("first discovery and every later revision wake the goal without renewal", async (t) => {
@@ -181,7 +181,7 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
     fetchImpl: async () => response({ value: [
       {
         id: 101,
-        tags: ["herdr-goal:g_build"],
+        tags: ["herdr-goal=g_build"],
         sourceVersion: "abc",
         status: "inProgress",
         result: null,

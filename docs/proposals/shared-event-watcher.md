@@ -83,7 +83,7 @@ supervisor make those decisions with the goal contract and current evidence.
 The portable ownership field is:
 
 ```text
-herdr-goal:<goal-id>
+herdr-goal=<goal-id>
 ```
 
 Each provider stores it in the simplest durable metadata it already supports:
@@ -91,7 +91,9 @@ Each provider stores it in the simplest durable metadata it already supports:
 - GitHub pull requests use the existing secondary `## Supervision` description
   block. The adapter reads only its `Goal` value for routing.
 - Azure DevOps builds use a build tag such as
-  `herdr-goal:g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde`.
+  `herdr-goal=g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde`. Azure DevOps
+  rejects a colon in the build-tag API path, so the portable spelling uses an
+  equals sign.
 
 The human-readable PR block may also show a pane or native session for audit
 and debugging. Those values are presentation only. They may become stale and

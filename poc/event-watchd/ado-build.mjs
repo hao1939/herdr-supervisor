@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
-const GOAL_TAG = /^herdr-goal:(g_[a-zA-Z0-9_-]+)$/;
+const GOAL_TAG = /^herdr-goal=(g_[a-zA-Z0-9_-]+)$/;
 const execFileAsync = promisify(execFile);
 
 function parseProject(value) {
