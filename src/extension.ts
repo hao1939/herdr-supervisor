@@ -2278,21 +2278,20 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("input", (event) => {
     const automaticReview = reviewTurn.isActive() || activeGlobalReview;
-    if (event.source === "extension" || !automaticReview) {
+    if (
+      event.source === "extension"
+      || !automaticReview
+      || !["steer", "followUp"].includes(event.streamingBehavior || "")
+    ) {
       return { action: "continue" };
     }
     const content = event.images?.length
       ? [{ type: "text" as const, text: event.text }, ...event.images]
       : event.text;
-    if (event.streamingBehavior === "followUp") {
-      pendingHumanFollowUps.add(userMessageKey(content));
-      return { action: "continue" };
-    }
-    if (event.streamingBehavior !== "steer") return { action: "continue" };
     pendingHumanFollowUps.add(userMessageKey(content));
     pi.sendUserMessage(content, {
       deliverAs: "followUp",
-      expandPromptTemplates: true,
+      expandPromptTemplates: false,
     });
     return { action: "handled" };
   });

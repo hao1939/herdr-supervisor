@@ -908,7 +908,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   assert.deepEqual(queued, { action: "handled" });
   assert.deepEqual(pi.userMessages, [{
     content: "Start the saved goal after this review.",
-    options: { deliverAs: "followUp", expandPromptTemplates: true },
+    options: { deliverAs: "followUp", expandPromptTemplates: false },
   }]);
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
@@ -953,7 +953,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   pi.events.get("session_shutdown")();
 });
 
-test("a native human follow-up releases its automatic review when delivery begins", async (t) => {
+test("a command-shaped human follow-up is relayed unchanged and releases its review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -977,10 +977,14 @@ test("a native human follow-up releases its automatic review when delivery begin
   await waitFor(() => pi.messages.length === 1);
   assert.deepEqual(pi.events.get("input")({
     type: "input",
-    text: "Review this status next.",
+    text: "/review src/index.ts",
     source: "rpc",
     streamingBehavior: "followUp",
-  }), { action: "continue" });
+  }), { action: "handled" });
+  assert.deepEqual(pi.userMessages, [{
+    content: "/review src/index.ts",
+    options: { deliverAs: "followUp", expandPromptTemplates: false },
+  }]);
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   await pi.tools.get("supervisor_leave").execute("leave", {
@@ -989,7 +993,7 @@ test("a native human follow-up releases its automatic review when delivery begin
   });
   await pi.events.get("message_start")({
     type: "message_start",
-    message: { role: "user", content: [{ type: "text", text: "Review this status next." }] },
+    message: { role: "user", content: [{ type: "text", text: "/review src/index.ts" }] },
   });
   const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
     pane_id: null,
