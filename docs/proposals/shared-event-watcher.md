@@ -68,8 +68,9 @@ The system has four small responsibilities:
 
 1. **Resource producer:** attaches the current goal ID when it creates a PR or
    queues a build.
-2. **Provider adapter:** discovers annotated resources and computes a stable
-   revision from authoritative provider fields.
+2. **Provider adapter:** discovers annotated resources, computes a stable
+   revision from authoritative provider fields, and reports when a remembered
+   resource is authoritatively absent.
 3. **Watcher core:** remembers revisions and requests delivery for changes.
 4. **Herdr delivery adapter:** resolves the durable goal to its current exact
    worker and sends a wake hint.
@@ -106,9 +107,11 @@ provider CLIs directly follow the same metadata convention.
 
 There is no matching unregister operation. The metadata remains useful across
 every later revision of that resource. Removing metadata merely makes the
-resource undiscoverable; completing a goal makes later delivery irrelevant;
-and evicting an old checkpoint entry is ordinary bounded-cache cleanup. None
-of those cases needs a worker-owned lifecycle.
+adapter report that resource absent and the watcher forgets its cache entry;
+provider retention and a removed configured scope work the same way. Completing
+a goal makes later delivery irrelevant, and evicting an old checkpoint entry
+is ordinary bounded-cache cleanup. None of those cases needs a worker-owned
+lifecycle.
 
 ## Discovery
 
@@ -131,7 +134,7 @@ Recently closed or completed resources stay in the discovery window long enough
 to observe their final transition.
 
 Adapters own provider syntax and pagination. The core sees only normalized
-observations:
+observations and exact remembered subjects that are now absent:
 
 ```json
 {
@@ -142,6 +145,11 @@ observations:
   "payload": {}
 }
 ```
+
+An omitted recent resource is not automatically absent because bounded scans
+may omit healthy older resources. Absence is explicit only after the adapter
+checks that remembered subject and proves its metadata, resource, or configured
+scope is gone.
 
 The payload is bounded context for the wake hint, not completion evidence.
 

@@ -56,7 +56,11 @@ async function json(fetchImpl, url, authorization) {
     headers: { Accept: "application/json", Authorization: authorization },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`Azure DevOps build discovery returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`Azure DevOps build discovery returned HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -75,11 +79,14 @@ export function adoBuildDiscovery({
   }
   const scopes = definitions.map(parseDefinition);
   const allowedProjects = new Set(scopes.map((scope) => `${scope.organization}/${scope.project}`));
+  const allowedDefinitions = new Set(scopes.map((scope) =>
+    `${scope.organization}/${scope.project}/${scope.definitionId}`));
   const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS);
   return {
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
       const recent = new Map();
+      const absent = [];
       for (const { organization, project, definitionId } of scopes) {
         const base = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`;
         const result = await json(
@@ -94,10 +101,14 @@ export function adoBuildDiscovery({
       const missing = [];
       for (const resource of known) {
         const parsed = parseSubject(resource.subject);
-        if (!parsed || !allowedProjects.has(`${parsed.organization}/${parsed.project}`)) continue;
+        if (!parsed || !allowedProjects.has(`${parsed.organization}/${parsed.project}`)) {
+          absent.push(resource.subject);
+          continue;
+        }
         const current = recent.get(resource.subject);
         if (current) {
-          if (selected.size < MAX_BUILDS) selected.set(resource.subject, current);
+          if (!taggedGoal(current.tags)) absent.push(resource.subject);
+          else if (selected.size < MAX_BUILDS) selected.set(resource.subject, current);
           continue;
         }
         missing.push({ subject: resource.subject, parsed });
@@ -105,11 +116,19 @@ export function adoBuildDiscovery({
       for (const { subject, parsed } of rereadWindow(missing)) {
         if (selected.size >= MAX_BUILDS) break;
         const base = `https://dev.azure.com/${encodeURIComponent(parsed.organization)}/${encodeURIComponent(parsed.project)}`;
-        selected.set(subject, await json(
-          fetchImpl,
-          `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`,
-          auth,
-        ));
+        try {
+          const build = await json(
+            fetchImpl,
+            `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`,
+            auth,
+          );
+          const definition = `${parsed.organization}/${parsed.project}/${build.definition?.id}`;
+          if (!taggedGoal(build.tags) || !allowedDefinitions.has(definition)) absent.push(subject);
+          else selected.set(subject, build);
+        } catch (error) {
+          if (error?.status === 404) absent.push(subject);
+          else throw error;
+        }
       }
       for (const [subject, build] of recent) {
         if (selected.size >= MAX_BUILDS) break;
@@ -134,7 +153,7 @@ export function adoBuildDiscovery({
           payload: stable,
         });
       }
-      return observations;
+      return { observations, absent: [...new Set(absent)] };
     },
   };
 }

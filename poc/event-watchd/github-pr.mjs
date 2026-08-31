@@ -35,7 +35,11 @@ async function json(fetchImpl, url, headers, label) {
     headers,
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`${label} returned HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -63,6 +67,7 @@ export function githubPullRequestDiscovery({
   return {
     async scan(known = []) {
       const observations = [];
+      const absent = [];
       const pullsBySubject = new Map();
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
@@ -80,10 +85,22 @@ export function githubPullRequestDiscovery({
       for (const resource of remembered) {
         if (pullsBySubject.has(resource.subject)) continue;
         const parsed = parseSubject(resource.subject);
-        if (!parsed || !allowedRepositories.has(`${parsed.owner}/${parsed.repository}`)) continue;
+        if (!parsed || !allowedRepositories.has(`${parsed.owner}/${parsed.repository}`)) {
+          absent.push(resource.subject);
+          continue;
+        }
         const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
-        const pull = await json(fetchImpl, `${base}/pulls/${parsed.number}`, headers, "GitHub pull request");
-        pullsBySubject.set(resource.subject, pull);
+        try {
+          const pull = await json(fetchImpl, `${base}/pulls/${parsed.number}`, headers, "GitHub pull request");
+          pullsBySubject.set(resource.subject, pull);
+        } catch (error) {
+          if (error?.status === 404) absent.push(resource.subject);
+          else throw error;
+        }
+      }
+      for (const resource of known) {
+        const pull = pullsBySubject.get(resource.subject);
+        if (pull && !supervisionGoal(pull.body)) absent.push(resource.subject);
       }
       const annotated = [...pullsBySubject.entries()]
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.body) }))
@@ -133,7 +150,7 @@ export function githubPullRequestDiscovery({
           },
         });
       }
-      return observations;
+      return { observations, absent: [...new Set(absent)] };
     },
   };
 }

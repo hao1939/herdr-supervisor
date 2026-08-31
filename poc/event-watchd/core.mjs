@@ -166,24 +166,47 @@ export class DiscoveredEventWatcher {
 
   async scan() {
     const found = [];
+    const absent = [];
     for (const [source, adapter] of Object.entries(this.sources)) {
       try {
         const known = Object.values(this.state.resources)
           .filter((resource) => resource.source === source)
           .map((resource) => ({ subject: resource.subject, goalId: resource.goalId }));
-        const values = await adapter.scan(known);
-        if (!Array.isArray(values) || values.length > MAX_SCAN_RESULTS) {
+        const result = await adapter.scan(known);
+        if (!result || typeof result !== "object" || Array.isArray(result)
+          || !Array.isArray(result.observations) || !Array.isArray(result.absent)) {
+          throw new Error(`${source} scan returned an invalid result`);
+        }
+        const values = result.observations;
+        if (values.length > MAX_SCAN_RESULTS) {
           throw new Error(`${source} scan must return at most ${MAX_SCAN_RESULTS} observations`);
+        }
+        if (found.length + values.length > this.maxResources) {
+          throw new Error(`${source} observations exceed the shared ${this.maxResources}-resource limit`);
         }
         const seen = new Set();
         const at = this.now().toISOString();
+        const normalized = [];
         for (const value of values) {
           const item = observation(source, value, at);
           const key = keyFor(item.source, item.subject);
           if (seen.has(key)) throw new Error(`${source} returned duplicate subject ${item.subject}`);
           seen.add(key);
-          found.push(item);
+          normalized.push(item);
         }
+        const knownSubjects = new Set(known.map((resource) => resource.subject));
+        const missing = new Set();
+        for (const value of result.absent) {
+          const subject = requiredText(value, "absent subject");
+          if (!knownSubjects.has(subject)) throw new Error(`${source} returned unknown absent subject ${subject}`);
+          if (missing.has(subject)) throw new Error(`${source} returned duplicate absent subject ${subject}`);
+          if (seen.has(keyFor(source, subject))) {
+            throw new Error(`${source} returned ${subject} as both observed and absent`);
+          }
+          missing.add(subject);
+        }
+        found.push(...normalized);
+        absent.push(...[...missing].map((subject) => keyFor(source, subject)));
         this.reported.delete(`source:${source}`);
       } catch (error) {
         await this.report(`source:${source}`, {
@@ -193,7 +216,7 @@ export class DiscoveredEventWatcher {
         });
       }
     }
-    return found;
+    return { observations: found, absent };
   }
 
   async deliverPending() {
@@ -246,10 +269,15 @@ export class DiscoveredEventWatcher {
 
   async run() {
     await this.ready;
-    const observations = await this.scan();
+    const scan = await this.scan();
     const next = structuredClone(this.state);
     let changed = false;
-    for (const item of observations) {
+    for (const key of scan.absent) {
+      if (!next.resources[key]) continue;
+      delete next.resources[key];
+      changed = true;
+    }
+    for (const item of scan.observations) {
       const key = keyFor(item.source, item.subject);
       const current = next.resources[key];
       if (current?.goalId === item.goalId && current.revision === item.revision) continue;

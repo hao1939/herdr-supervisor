@@ -37,7 +37,7 @@ test("first discovery and every later revision wake the goal without renewal", a
   const watcher = new DiscoveredEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
-      source: { scan: async () => [{ subject: "resource-1", goalId: "g_owner", revision, payload: { revision } }] },
+      source: { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: { revision } }]) },
     },
     deliver: async (goalId, events) => delivered.push({ goalId, events }),
   });
@@ -61,7 +61,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   const directory = await temporary(t, "event-watch-restart-");
   const statePath = join(directory, "state.json");
   const diagnostics = [];
-  const source = { scan: async () => [{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }] };
+  const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }]) };
   const failing = new DiscoveredEventWatcher({
     statePath,
     sources: { source },
@@ -87,7 +87,7 @@ test("restart replaces a pending revision with current provider state before wak
   const directory = await temporary(t, "event-watch-current-revision-");
   const statePath = join(directory, "state.json");
   let revision = "old";
-  const source = { scan: async () => [{ subject: "resource-1", goalId: "g_owner", revision, payload: {} }] };
+  const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: {} }]) };
   const first = new DiscoveredEventWatcher({
     statePath,
     sources: { source },
@@ -108,13 +108,38 @@ test("restart replaces a pending revision with current provider state before wak
   assert.deepEqual(delivered, ["current"]);
 });
 
+test("authoritative absence forgets a resource without delivering its stale pending revision", async (t) => {
+  const directory = await temporary(t, "event-watch-absent-");
+  const statePath = join(directory, "state.json");
+  let present = true;
+  let deliveries = 0;
+  const watcher = new DiscoveredEventWatcher({
+    statePath,
+    sources: { source: { scan: async () => present
+      ? discovery([{ subject: "resource-1", goalId: "g_owner", revision: "old", payload: {} }])
+      : discovery([], ["resource-1"]) } },
+    deliver: async () => {
+      deliveries += 1;
+      throw new Error("worker unavailable");
+    },
+    diagnose: () => {},
+  });
+  await watcher.runOnce();
+  present = false;
+  await watcher.runOnce();
+
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.equal(deliveries, 1);
+  assert.deepEqual(state.resources, {});
+});
+
 test("array-shaped checkpoint resources fail instead of losing observations", async (t) => {
   const directory = await temporary(t, "event-watch-invalid-state-");
   const statePath = join(directory, "state.json");
   await writeFile(statePath, '{"version":1,"resources":[]}\n');
   const watcher = new DiscoveredEventWatcher({
     statePath,
-    sources: { source: { scan: async () => [] } },
+    sources: { source: { scan: async () => discovery() } },
     deliver: async () => {},
   });
   await assert.rejects(watcher.runOnce(), /state is invalid or unsupported/);
@@ -130,7 +155,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
     sources: {
       source: { scan: async () => {
         if (sourceFails) throw new Error("provider unavailable");
-        return [{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }];
+        return discovery([{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }]);
       } },
     },
     deliver: async () => {
@@ -180,7 +205,7 @@ test("the checkpoint stays bounded and prefers pending deliveries", async (t) =>
   ];
   const watcher = new DiscoveredEventWatcher({
     statePath: join(directory, "state.json"),
-    sources: { source: { scan: async () => observations } },
+    sources: { source: { scan: async () => discovery(observations) } },
     deliver: async (goalId) => {
       if (goalId === "g_pending") throw new Error("keep pending");
     },
@@ -200,11 +225,11 @@ test("one scan coalesces several resource changes into one wake per goal", async
   const delivered = [];
   const watcher = new DiscoveredEventWatcher({
     statePath: join(directory, "state.json"),
-    sources: { source: { scan: async () => [
+    sources: { source: { scan: async () => discovery([
       { subject: "one", goalId: "g_same", revision: "one", payload: {} },
       { subject: "two", goalId: "g_same", revision: "one", payload: {} },
       { subject: "other", goalId: "g_other", revision: "one", payload: {} },
-    ] } },
+    ]) } },
     deliver: async (goalId, events) => delivered.push({ goalId, subjects: events.map((event) => event.subject) }),
   });
   await watcher.runOnce();
@@ -243,7 +268,7 @@ test("GitHub discovery reads only annotated pull requests", async () => {
     throw new Error(`unexpected URL ${url}`);
   };
   const source = githubPullRequestDiscovery({ repositories: ["owner/repo"], fetchImpl, token: "token" });
-  const found = await source.scan();
+  const { observations: found } = await source.scan();
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "owner/repo#42");
   assert.equal(found[0].goalId, "g_pr");
@@ -272,10 +297,31 @@ test("GitHub discovery refreshes a remembered pull request outside the recent wi
       throw new Error(`unexpected URL ${url}`);
     },
   });
-  const found = await source.scan([{ subject: "owner/repo#42", goalId: "g_pr" }]);
+  const { observations: found } = await source.scan([{ subject: "owner/repo#42", goalId: "g_pr" }]);
   assert.equal(found.length, 1);
   assert.equal(found[0].goalId, "g_pr");
   assert.ok(urls.some((url) => url.endsWith("/pulls/42")));
+});
+
+test("GitHub discovery reports removed goal metadata as authoritative absence", async () => {
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("/pulls?")) return response([{
+        number: 42,
+        body: "Metadata removed",
+        head: { sha: "abc" },
+        state: "open",
+        draft: false,
+      }]);
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{ subject: "owner/repo#42", goalId: "g_pr" }]);
+
+  assert.deepEqual(found, { observations: [], absent: ["owner/repo#42"] });
 });
 
 test("GitHub discovery does not crowd a remembered pull request out with recent results", async () => {
@@ -307,7 +353,7 @@ test("GitHub discovery does not crowd a remembered pull request out with recent 
     },
   });
 
-  const found = await source.scan([{ subject: "owner/repo#42", goalId: "g_remembered" }]);
+  const { observations: found } = await source.scan([{ subject: "owner/repo#42", goalId: "g_remembered" }]);
 
   assert.equal(found.length, 20);
   assert.ok(found.some((item) => item.subject === "owner/repo#42"));
@@ -330,7 +376,7 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
       { id: 102, tags: [], sourceVersion: "def", status: "completed", result: "succeeded" },
     ] }),
   });
-  const found = await source.scan();
+  const { observations: found } = await source.scan();
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.equal(found[0].goalId, "g_build");
@@ -346,6 +392,7 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
       if (String(url).includes("builds?")) return response({ value: [] });
       return response({
         id: 101,
+        definition: { id: 77 },
         tags: ["herdr-goal=g_build"],
         sourceVersion: "abc",
         status: "completed",
@@ -353,10 +400,53 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
       });
     },
   });
-  const found = await source.scan([{ subject: "org/project/101", goalId: "g_build" }]);
+  const { observations: found } = await source.scan([{ subject: "org/project/101", goalId: "g_build" }]);
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.ok(urls.some((url) => url.includes("/builds/101?")));
+});
+
+test("ADO discovery forgets a retained build without hiding valid recent observations", async () => {
+  const source = adoBuildDiscovery({
+    definitions: ["org/project/77"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("builds?")) return response({ value: [{
+        id: 202,
+        tags: ["herdr-goal=g_recent"],
+        sourceVersion: "recent",
+        status: "inProgress",
+      }] });
+      if (String(url).includes("/builds/101?")) return response({}, false, 404);
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{ subject: "org/project/101", goalId: "g_old" }]);
+
+  assert.equal(found.observations.length, 1);
+  assert.deepEqual(found.absent, ["org/project/101"]);
+});
+
+test("ADO discovery forgets builds outside the configured definition scope", async () => {
+  const source = adoBuildDiscovery({
+    definitions: ["org/project/77"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("builds?")) return response({ value: [] });
+      return response({
+        id: 101,
+        definition: { id: 88 },
+        tags: ["herdr-goal=g_old"],
+        sourceVersion: "old",
+        status: "inProgress",
+      });
+    },
+  });
+
+  const found = await source.scan([{ subject: "org/project/101", goalId: "g_old" }]);
+
+  assert.deepEqual(found, { observations: [], absent: ["org/project/101"] });
 });
 
 test("ADO discovery bounds output without dropping remembered builds", async () => {
@@ -377,6 +467,7 @@ test("ADO discovery bounds output without dropping remembered builds", async () 
       }
       if (text.includes("/builds/999?")) return response({
         id: 999,
+        definition: { id: 1 },
         tags: ["herdr-goal=g_remembered"],
         sourceVersion: "remembered",
         status: "inProgress",
@@ -385,7 +476,7 @@ test("ADO discovery bounds output without dropping remembered builds", async () 
     },
   });
 
-  const found = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
+  const { observations: found } = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
 
   assert.equal(found.length, 500);
   assert.ok(found.some((item) => item.subject === "org/project/999"));
@@ -501,7 +592,9 @@ test("GitHub discovery refreshes every remembered pull request within a few boun
   });
 
   const scans = [];
-  for (let scan = 0; scan < 3; scan += 1) scans.push((await source.scan(known)).length);
+  for (let scan = 0; scan < 3; scan += 1) {
+    scans.push((await source.scan(known)).observations.length);
+  }
 
   assert.deepEqual(scans, [10, 10, 10]);
   assert.deepEqual([...new Set(reads)].sort((left, right) => left - right), known.map((_, index) => index + 1));
@@ -523,6 +616,7 @@ test("ADO discovery bounds remembered rereads per scan and still covers them all
       reads.push(id);
       return response({
         id,
+        definition: { id: 77 },
         tags: [`herdr-goal=g_remembered_${id}`],
         sourceVersion: `sha-${id}`,
         status: "inProgress",
@@ -531,7 +625,9 @@ test("ADO discovery bounds remembered rereads per scan and still covers them all
   });
 
   const scans = [];
-  for (let scan = 0; scan < 3; scan += 1) scans.push((await source.scan(known)).length);
+  for (let scan = 0; scan < 3; scan += 1) {
+    scans.push((await source.scan(known)).observations.length);
+  }
 
   assert.deepEqual(scans, [50, 50, 50]);
   assert.deepEqual([...new Set(reads)].sort((left, right) => left - right), known.map((_, index) => index + 1));
@@ -539,4 +635,8 @@ test("ADO discovery bounds remembered rereads per scan and still covers them all
 
 function response(value, ok = true, status = 200) {
   return { ok, status, json: async () => value };
+}
+
+function discovery(observations = [], absent = []) {
+  return { observations, absent };
 }
