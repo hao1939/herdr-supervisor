@@ -57,6 +57,17 @@ many commits, reviews, CI runs, status changes, and a later merge. Each changed
 revision naturally wakes the same goal. There is no watch ID, renewal, or
 cleanup operation.
 
+The invariant is deliberately smaller than a subscription API:
+
+> Attach the goal ID once when creating each provider resource. Never register
+> that resource with the watcher.
+
+The revision checkpoint is only the daemon's bounded observation cache. It is
+not a registry of what workers currently care about. A worker therefore does
+not have to predict when the last interesting update has happened, repair a
+lost registration, or unregister after a merge, failed run, restart, or goal
+move.
+
 This metadata is not live routing data. It contains only the durable goal ID.
 The daemon must not route using a saved pane or native session from a PR body.
 It loads canonical goal state at delivery time and verifies the current exact
@@ -113,12 +124,12 @@ The worker path is therefore ordinary provider work:
 3. It writes and verifies the goal metadata once on that resource.
 4. It continues useful goal work without calling the watcher.
 
-A rerun that creates a new build ID is a new resource, so it receives the same
-goal tag once. Commits, reviews, statuses, and other revisions of an existing
-resource need no worker action. Moving the goal to another pane or native
-session also needs no metadata update because delivery resolves current
-canonical goal state. Only an intentional move to a different durable goal
-changes ownership metadata.
+A rerun that creates a new build ID is a new resource, so its ordinary creation
+path attaches the same goal tag once. Commits, reviews, statuses, and other
+revisions of an existing resource need no worker action. Moving the goal to
+another pane or native session also needs no metadata update because delivery
+resolves current canonical goal state. Only an intentional move to a different
+durable goal changes ownership metadata.
 
 There is no matching unregister operation. The metadata remains useful across
 every later revision of that resource. Removing metadata merely makes the

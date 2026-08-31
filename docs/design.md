@@ -118,7 +118,7 @@ flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
     C[Selected peer goal changed] --> Q
-    D[Watched PR or build revision changed] --> Q
+    D[Annotated PR or build revision changed] --> Q
     Q --> R[Focused review]
     E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
@@ -249,7 +249,7 @@ decision, optional wait, optional unresolved external change, and optional
 terminal result. It does not copy live worker status; that always comes from
 Herdr.
 
-Polling schedules remain disposable memory. If a watched PR or build changes,
+Polling schedules remain disposable memory. If an annotated PR or build changes,
 only that unresolved fact is saved in `current.json`. It survives restart and
 cannot be cleared by merely sending a prompt or receiving a worker reply. After
 the reread delivery attempt, the supervisor saves the current transcript cursor
@@ -269,7 +269,7 @@ apply is `null`; the model never invents a placeholder identity, revision,
 watch, wait, or deadline merely to fill a field. Code validates real values and
 executes the decision, while `null` carries no semantic claim.
 
-A decision that can change a watch briefly holds its exact external subject:
+A decision that acknowledges an external revision briefly holds its exact subject:
 it drains any in-flight read and prevents another one from starting until the
 state change commits. An unrelated slow provider does not delay it. The final
 state write also compares the exact external revision, so polling cannot race
@@ -310,7 +310,7 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; an external watch may wake the supervisor when a PR or build changes.
+findings; the external observer may wake the supervisor when a PR or build changes.
 The supervisor then judges the refreshed evidence through its normal focused
 review. There is no second review lifecycle, reviewer state machine, attempt
 budget, or goal schema. A separate review goal exists only when review itself
@@ -361,11 +361,11 @@ promise to reconsider, not permission to forget the goal:
   when a peer review proves that condition materially changed, the model
   selects the exact affected waits for early review, and a terminal peer wakes
   all remaining dependents after either worker is relocated;
-- a wait on one exact GitHub PR or ADO build may register a disposable external
-  watch chosen by the model;
+- a wait on a GitHub PR or ADO build relies on its durable goal metadata for an
+  early wake, with the bounded goal review as the safety net;
 - every wait has a bounded recheck;
 - the model chooses an evidence-appropriate safety time; a selected peer effect
-  or external watch still wakes the goal earlier, avoiding repeated short
+  or external update still wakes the goal earlier, avoiding repeated short
   reviews of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
@@ -373,26 +373,35 @@ A human question follows the same rule. It is concrete, asks for the minimum
 input that changes the work, and receives a bounded reconsideration so
 unrelated useful work can continue.
 
-### External watches
+### External updates
 
-External watches run as small deterministic reads inside the existing Pi
-extension process. They share the nearest-deadline timer and the per-goal
-review signal map.
+External updates are discovered from provider metadata, not worker-owned watch
+registrations. When a worker creates a pull request or queues a build, that
+resource carries only its durable goal ID. One shared daemon scans configured
+provider scopes and remembers a bounded latest revision for each annotated
+resource. It resolves the goal's current worker only when a changed revision
+needs delivery.
 
-The watch detects change; it does not interpret it. It computes one compact
-revision identity from provider metadata: GitHub PR head, state, draft and
+The daemon detects change; it does not interpret it. It computes one compact
+revision identity from provider authority: GitHub PR head, state, draft and
 mergeability state, checks, and commit statuses; or Azure DevOps build status,
-ID, result, source version, and finish time. An unchanged identity schedules
-another read without a model turn. A changed identity queues the ordinary
-focused review, where the model asks the same worker to reread provider
-authority and judge it.
+ID, result, source version, and finish time. An unchanged identity costs no
+model turn. A changed identity wakes the worker, which rereads provider
+authority and decides what the change means for its goal.
+
+The metadata is attached once per created resource. Every later revision of
+that resource needs no renewal. A rerun with a new build ID receives the same
+goal metadata through its normal creation path. Goal completion needs no
+unregister operation; later delivery is ignored, and bounded checkpoint
+eviction is ordinary cache cleanup.
+
+The current in-process explicit watcher remains a compatibility path until the
+shared metadata-discovery daemon passes its documented production gates. It is
+not the target lifecycle and must not grow new registration semantics. See
+`docs/proposals/shared-event-watcher.md`.
 
 Deciding what a review comment, failed check, or merged branch means for the
-goal belongs to the worker, not the supervisor and not the watch.
-
-Watch registration is process-local in the first version: after restart, the
-ordinary bounded goal review can register it again. This keeps provider polling
-an optimization rather than another durable task or event system.
+goal belongs to the worker, not the supervisor and not the daemon.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
