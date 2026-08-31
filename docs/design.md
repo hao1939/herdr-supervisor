@@ -178,6 +178,13 @@ In plain language:
 9. Supervision ends only when evidence proves the complete outcome or the human
    explicitly stops it.
 
+When the human contradicts, retracts, or disowns a statement already stored in
+a goal contract, the supervisor updates that same contract before asking its
+worker to continue.
+A transient reconsideration can carry new execution evidence, but it cannot
+override a contradictory `goal.json` or substitute for removing a constraint
+the human did not authorize.
+
 The supervisor is normally asleep. Events improve response time; a single
 nearest-deadline timer ensures missed events or long waits do not lose a goal.
 Its default one-hour interval is a safety net, not a polling cadence; deployments
