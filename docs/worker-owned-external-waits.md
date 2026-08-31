@@ -1,6 +1,6 @@
 # Proposal: Let Workers Own External Waiting
 
-**Status:** Proposed for review and proof of concept.
+**Status:** Live proof passed; ready for the bounded removal described below.
 
 **Date:** 2026-08-31.
 
@@ -268,16 +268,19 @@ change its stable output, and verify that the same Codex turn continues. Stop
 there if the runtime gate fails. Then exercise real GitHub and Azure DevOps
 conditions and the recovery cases below.
 
-The proof should cover:
+The removal gate covers the generic runtime primitive, not every provider
+recipe:
 
-1. a GitHub PR whose checks remain pending for several minutes and then pass;
-2. an Azure DevOps build that moves from running to a terminal result;
-3. a provider failure and credential recovery;
-4. a bounded timeout;
-5. restarting the supervisor while the worker is waiting;
-6. interrupting and exactly resuming the worker session;
-7. detaching and reattaching the Herdr client while the worker waits; and
-8. a PR update that is not a check transition, such as a new review comment.
+1. a controlled wait that changes after several minutes;
+2. a real provider transition;
+3. a bounded timeout;
+4. a full-container restart during the foreground call; and
+5. exact-session resume, authoritative reread, and at most one replacement
+   wait after that interruption.
+
+Azure DevOps commands, review-comment projections, and credential recovery are
+worker and project knowledge. They can be exercised as those workflows need
+them, but they do not justify retaining provider ownership in the supervisor.
 
 The most important feasibility gate is this:
 
@@ -294,9 +297,9 @@ Measure:
 - no lost native Goal after timeout, interruption, or supervisor restart; and
 - no provider-specific state written by the supervisor.
 
-### Live results so far
+### Live results
 
-The first three feasibility gates passed in the MLVM container on 2026-08-31:
+All generic feasibility gates passed in the MLVM container on 2026-08-31:
 
 1. A disposable supervised Codex worker kept one ordinary foreground shell
    call active for 90.073 seconds while checking for an externally created
@@ -315,12 +318,22 @@ The first three feasibility gates passed in the MLVM container on 2026-08-31:
    approximately 45 seconds and nine checks. Codex treated the non-success as
    evidence, continued the same native Goal turn, reread the path, and proved
    clean disposal without asking the human or entering a supervisor wait.
+4. A fourth worker began a fresh 300-second foreground wait at
+   `2026-08-31T09:15:58.044971884Z`. The full Herdr container was recreated at
+   `09:17:02Z`, interrupting that process. The exact supervised goal, worker,
+   pane, Codex session, and native Goal resumed automatically on the merged
+   full-access wrapper without a trust question. The recovered turn reread the
+   signal as absent at `09:17:15.306003013Z`, started one replacement wait,
+   detected the externally created signal at `09:18:55.841801120Z`, and reread
+   it at `09:19:09.689779568Z`. It removed the signal and disposable state and
+   proved both paths and all experiment processes absent. No repository was
+   accessed or changed.
 
-All three workers were accepted through the ordinary focused review after their
-turns settled. These results prove that a real provider wait and an expected
-timeout do not require a supervisor-owned polling path during uninterrupted
-execution. They do not yet prove interruption or restart recovery, so the
-migration remains conditional on those tests.
+The first three workers were accepted through ordinary focused review after
+their turns settled; the fourth produced complete current-session evidence and
+then completed its native Goal. Together, these results prove uninterrupted,
+timeout, and full-restart recovery paths without supervisor-owned provider
+polling.
 
 If the foreground command cannot survive realistic waits, keep the zero-code
 bounded recheck as the default and measure whether its delay and model cost are
@@ -385,13 +398,13 @@ optimization.
 
 ## Recommendation
 
-Proceed with the foreground worker-wait proof. Begin with one plain worker rule
-and existing `gh` and `az` commands. Capture provider recipes in a short skill
-only when they are worth reusing. Add `wait-for-change` only for a repeated gap
-that provider or project tools do not already cover.
+Remove the PR 19 watcher in one compatibility-safe change. Keep one plain
+worker rule and existing `gh`, `az`, or project commands. Capture a provider
+recipe in worker knowledge only when it is worth reusing. Add no generic
+`wait-for-change` executable until repeated live evidence proves ordinary
+foreground commands inadequate.
 
-If the proof succeeds, remove the PR 19 watcher from the supervisor. This gives
-the simplest stable boundary:
+This gives the simplest stable boundary:
 
 ```text
 worker executes and waits
