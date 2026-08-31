@@ -7,7 +7,7 @@ const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
 const MAX_TEXT = 2_000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SCAN_RESULTS = 500;
-const DEFAULT_MAX_RESOURCES = MAX_SCAN_RESULTS;
+const DEFAULT_MAX_RESOURCES = 1024;
 const MAX_EVENTS_PER_DELIVERY = 20;
 
 function requiredText(value, name) {

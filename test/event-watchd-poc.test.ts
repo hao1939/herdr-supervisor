@@ -270,6 +270,29 @@ test("one scan coalesces several resource changes into one wake per goal", async
   ]);
 });
 
+test("the shared checkpoint accepts both built-in provider bounds together", async (t) => {
+  const directory = await temporary(t, "event-watch-provider-bounds-");
+  const observations = (prefix, count) => Array.from({ length: count }, (_, index) => ({
+    subject: `${prefix}-${index}`,
+    goalId: "g_same",
+    revision: "one",
+    payload: {},
+  }));
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      "github-pr": { scan: async () => discovery(observations("pr", 20)) },
+      "ado-build": { scan: async () => discovery(observations("build", 500)) },
+    },
+    deliver: async () => {},
+  });
+
+  await watcher.runOnce();
+
+  const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+  assert.equal(Object.keys(state.resources).length, 520);
+});
+
 test("GitHub discovery reads only annotated pull requests", async () => {
   const urls = [];
   const fetchImpl = async (url) => {

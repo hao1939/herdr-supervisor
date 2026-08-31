@@ -211,8 +211,7 @@ Replacing the current watcher still has several production gates:
 - the final exact-worker check and Herdr prompt are separate requests, so Herdr
   needs a session-addressed or atomic prompt boundary;
 - an in-progress provider scan needs bounded cancellation during shutdown;
-- combined provider capacity and refresh fairness need proof at the supported
-  deployment scale; and
+- provider refresh fairness needs proof at the supported deployment scale; and
 - GitHub discovery needs an authenticated request budget and provider-directed
   backoff before it is enabled continuously.
 
