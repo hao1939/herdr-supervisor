@@ -38,18 +38,26 @@ async function json(response, label) {
   return response.json();
 }
 
+function hasNextPage(response) {
+  const link = response.headers?.get?.("link");
+  // GitHub always advertises rel="next" while more pages exist, so a link
+  // header without it proves the full last page is the complete list.
+  return typeof link === "string" ? /rel="next"/.test(link) : true;
+}
+
 async function pages(fetchImpl, url, headers, field, label, maxPages) {
   const items = [];
   for (let page = 1; page <= maxPages; page += 1) {
     const separator = url.includes("?") ? "&" : "?";
-    const result = await json(await fetchImpl(`${url}${separator}per_page=100&page=${page}`, {
+    const response = await fetchImpl(`${url}${separator}per_page=100&page=${page}`, {
       headers,
       signal: AbortSignal.timeout(30_000),
-    }), label);
+    });
+    const result = await json(response, label);
     const batch = result[field];
     if (!Array.isArray(batch)) throw new Error(`${label} returned an invalid ${field} list`);
     items.push(...batch);
-    if (batch.length < 100) return items;
+    if (batch.length < 100 || !hasNextPage(response)) return items;
   }
   const error = new Error(`${label} exceeded the bounded ${maxPages * 100}-item limit`);
   error.retryAfterMs = CAPACITY_RETRY_MS;

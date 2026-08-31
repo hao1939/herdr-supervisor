@@ -256,8 +256,9 @@ The GitHub PoC applies a coarse adapter budget: authenticated observation is at
 least one minute apart with at most seven distinct PR subjects and at most five
 pages each of checks and statuses. That bounds steady-state daemon polling below
 5,000 requests per hour even when every page is full. Anonymous observation is at least five
-minutes apart, limited to one subject and one page per collection. A larger
-collection fails visibly and backs off rather than silently missing a revision.
+minutes apart, limited to one subject and one page per collection. A collection
+that still advertises another page beyond that bound fails visibly and backs off
+rather than silently missing a revision.
 Multiple destinations for one PR still share a read, and provider retry/reset
 guidance postpones the next source read. A small adapter-wide hourly request
 budget also bounds registrations and manual reads, not only scheduled polls.

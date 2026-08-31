@@ -894,6 +894,40 @@ test("GitHub pagination fails visibly inside its authenticated request budget", 
   assert.equal(calls.filter((url) => url.includes("/status")).length, 5);
 });
 
+test("a full final GitHub page without a next link is a complete observation", async () => {
+  const sourceFor = (link: string) => githubPullRequestSource({
+    token: "test",
+    fetchImpl: async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/pulls/42")) {
+        return githubResponse({
+          head: { sha: "abc123" }, state: "open", draft: false, mergeable: true, mergeable_state: "clean",
+        });
+      }
+      const page = Number(url.searchParams.get("page"));
+      const body = url.pathname.endsWith("/check-runs")
+        ? { check_runs: Array.from({ length: 100 }, (_, id) => ({ id: page * 100 + id, name: `check-${page * 100 + id}`, status: "completed", conclusion: "success" })) }
+        : { statuses: Array.from({ length: 100 }, (_, id) => ({ id: page * 100 + id, context: `status-${page * 100 + id}`, state: "success" })) };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          link: page < 5 ? `<https://api.github.com/x?page=${page + 1}>; rel="next"` : link,
+        },
+      });
+    },
+  });
+
+  const complete = await sourceFor('<https://api.github.com/x?page=4>; rel="prev"').read("owner/repo#42");
+  assert.equal(complete.payload.totalChecks, 500, "a full page without rel=\"next\" is the whole list");
+  assert.equal(complete.payload.totalStatuses, 500);
+
+  await assert.rejects(sourceFor('<https://api.github.com/x?page=6>; rel="next"').read("owner/repo#42"), (error: any) => {
+    assert.match(error.message, /bounded 500-item limit/);
+    return true;
+  }, "an advertised next page beyond the bound still fails visibly");
+});
+
 test("GitHub rate-limit guidance is exposed to the shared scheduler", async () => {
   const source = githubPullRequestSource({
     fetchImpl: async () => new Response("rate limited", {
