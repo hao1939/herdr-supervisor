@@ -211,6 +211,46 @@ test("a failed source read cannot deliver an older pending revision", async () =
   assert.equal(watch.pending.retryAt, now + 1_000);
 });
 
+test("manual poll honors provider retry guidance instead of re-reading during backoff", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-manual-backoff-"));
+  let now = 10_000;
+  let revision = "one";
+  let sourceFails = false;
+  let reads = 0;
+  const source = {
+    read: async () => {
+      reads += 1;
+      if (sourceFails) {
+        const error: Error & { retryAfterMs?: number } = new Error("rate limited");
+        error.retryAfterMs = 9_000;
+        throw error;
+      }
+      return { revision, payload: null };
+    },
+  };
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: { source },
+    deliveries: { test: { deliver: async () => { throw new Error("offline"); } } },
+  });
+  await service.watch({ source: "source", subject: "subject", destination: destination("worker"), intervalMs: 1_000 });
+  assert.equal(reads, 1);
+
+  now += 1_000;
+  sourceFails = true;
+  await service.pollNow();
+  assert.equal(reads, 2, "the first failing poll consumes the read that installs the retry deadline");
+
+  now += 1_000;
+  await service.pollNow();
+  assert.equal(reads, 2, "a second manual poll must not re-read a resource still inside its retry window");
+
+  now += 9_000;
+  await service.pollNow();
+  assert.equal(reads, 3, "a manual poll after the retry window elapses reads again");
+});
+
 test("retrying the same registration preserves its unseen pending change", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-idempotent-"));
   let revision = "one";

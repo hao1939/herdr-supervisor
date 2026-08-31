@@ -396,6 +396,7 @@ export class EventWatchService {
         if (!state.resources[id]) return;
         state.resources[id].lastError = message;
         state.resources[id].nextPollAt = this.now() + retryAfterMs;
+        state.resources[id].backoffUntil = state.resources[id].nextPollAt;
         for (const watch of Object.values(state.watches)) {
           if (watch.resourceId === id && watch.pending) {
             watch.pending.retryAt = state.resources[id].nextPollAt;
@@ -414,6 +415,7 @@ export class EventWatchService {
       current.lastObservedAt = this.now();
       current.nextPollAt = this.now() + current.intervalMs;
       delete current.lastError;
+      delete current.backoffUntil;
       this.reportedDiagnostics.delete(`source:${resource.source}:${resource.subject}`);
       if (!changed) return;
       for (const watch of Object.values(state.watches)) {
@@ -485,13 +487,21 @@ export class EventWatchService {
   async pollNow() {
     await this.stateReady;
     await this.mutate((state) => {
+      const now = this.now();
       for (const watch of Object.values(state.watches)) {
-        if (watch.pending) watch.pending.retryAt = this.now();
+        if (!watch.pending) continue;
+        const resource = state.resources[watch.resourceId];
+        if (resource?.backoffUntil > now) continue;
+        watch.pending.retryAt = now;
       }
     });
-    const ids = Object.keys(this.state.resources);
+    const now = this.now();
+    const ids = Object.entries(this.state.resources)
+      .filter(([, resource]) => !(resource.backoffUntil > now))
+      .map(([id]) => id);
     await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
       this.locked(id, async () => {
+        if (this.state.resources[id]?.backoffUntil > this.now()) return;
         const observed = await this.observe(id);
         if (!observed) await this.deliverResource(id);
       })
