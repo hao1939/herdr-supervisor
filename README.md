@@ -6,8 +6,9 @@ without replacing Herdr or introducing another task system.
 1. You describe an outcome to the supervisor.
 2. The supervisor forms the goal and acceptance criteria, starts one Codex worker
    with a native `/goal` for it, and sleeps.
-3. A meaningful Herdr event wakes the supervisor.
-4. The supervisor reads current evidence and either leaves the worker alone,
+3. A changed external watch wakes its exact worker directly; a meaningful
+   worker event wakes the supervisor.
+4. The supervisor reads the worker's evidence and either leaves it alone,
    continues it, asks you, or accepts the result.
 
 Herdr owns runtime truth. The supervisor owns judgment.
@@ -149,12 +150,15 @@ executor may create a new routing pane, but only for that saved session.
 
 For a settled goal waiting on one exact GitHub pull request or Azure DevOps
 build, the supervisor can observe that resource between model turns. Unchanged
-reads stay quiet. A changed revision wakes the ordinary focused review, and the
-worker rereads the provider before the supervisor decides what the change
-means. When that condition is the worker's only blocker, it reports the wait
-once and yields instead of sleeping or polling. This uses the existing timer
-and review path; it is not another daemon or task system. The normal bounded
-review remains the fallback after restart or a provider failure.
+reads stay quiet. A changed revision wakes the exact worker directly with the
+resource, provider summary, and its previous wait context. That summary stays
+with the pending revision if the worker is busy. The worker rereads the provider
+and handles the change; its later result follows the ordinary focused-review path.
+When that condition is the worker's only blocker, it reports the wait once and
+yields instead of sleeping or polling. This uses the existing timer and worker
+session; it is not another daemon or task system. The normal bounded review is
+the fail-closed fallback after restart, delivery uncertainty, or provider
+failure.
 
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
 (execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is

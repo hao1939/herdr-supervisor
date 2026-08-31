@@ -32,7 +32,7 @@ const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
 const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
-const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "workerSequence"]);
+const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "summary", "workerSequence"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
 // `recover` was written by an earlier v1 implementation. It remains readable
@@ -213,6 +213,9 @@ export function validateGoalState(state) {
     }
     if (!Number.isFinite(Date.parse(state.externalChange.observedAt))) {
       throw new Error("externalChange.observedAt must be an ISO timestamp");
+    }
+    if (state.externalChange.summary !== undefined) {
+      requiredString(state.externalChange.summary, "externalChange.summary");
     }
     if (
       state.externalChange.workerSequence !== undefined
