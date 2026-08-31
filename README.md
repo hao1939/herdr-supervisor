@@ -84,7 +84,7 @@ confirm that the replacement has:
   (find the current name with `docker compose ls`, then reuse it with `-p` or
   `COMPOSE_PROJECT_NAME`);
 - the intended source checkout as its resolved build context;
-- the intended host project mounted at `/app`;
+- the intended project workspace mounted at `/app`;
 - persistent home storage for Herdr and native agent sessions;
 - the configured model credentials or gateway settings;
 - network access to that gateway and any required source-control provider; and
