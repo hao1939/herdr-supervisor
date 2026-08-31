@@ -1,6 +1,6 @@
 import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
 
-export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
+export const DEFAULT_REVIEW_INTERVAL_MS = 60 * 60 * 1000;
 export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
 const ISO_8601_WITH_TIMEZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 

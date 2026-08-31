@@ -67,6 +67,8 @@ worktrees without creating more supervisor goals.
 
 The supervisor is normally asleep. Events improve response time; a single
 nearest-deadline timer ensures missed events or long waits do not lose a goal.
+Its default one-hour interval is a safety net, not a polling cadence; deployments
+can tune it when their event reliability or recovery needs differ.
 
 ## Decisions
 
