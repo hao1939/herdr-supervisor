@@ -105,8 +105,9 @@ flowchart LR
     style F fill:#fce8e6
 ```
 
-Herdr owns panes, processes, and native sessions. The supervisor owns goals,
-evidence, and judgment. Workers own implementation. Each goal keeps three files:
+Herdr owns panes, processes, and native sessions. The supervisor owns goal
+contracts, concise checkpoints, and judgment. Workers own implementation and
+detailed evidence. Each goal keeps three files:
 `goal.json` (the outcome), `current.json` (where execution stands), and
 `journal.jsonl` (audit only).
 
@@ -390,7 +391,8 @@ Provider credentials belong to the environment, not the goal contract. GitHub
 accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
 the runtime environment. Without usable credentials, a watch degrades to
-unauthenticated GitHub limits or fails with a clear Azure DevOps error; it never
+unauthenticated limits for a public GitHub PR. A private GitHub PR or Azure
+DevOps build instead fails with a clear credential error; the watch never
 guesses.
 
 ## Concurrency

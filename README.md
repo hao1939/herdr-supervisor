@@ -59,7 +59,7 @@ state at any time.
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
-| `GITHUB_TOKEN` | — | Optional. Raises GitHub pull-request watch above the 60/hour unauthenticated limit. `GH_TOKEN` also works |
+| `GITHUB_TOKEN` | — | Required for private GitHub PR watches; optional for public PRs to avoid the 60/hour unauthenticated limit. `GH_TOKEN` also works |
 | `AZURE_DEVOPS_EXT_PAT` | — | Required for Azure DevOps build watch (the `az` CLI is not in the image) |
 | `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
 | `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
