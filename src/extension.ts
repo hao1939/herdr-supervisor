@@ -2266,9 +2266,75 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     },
   });
 
+  pi.on("input", (event) => {
+    const automaticReview = reviewTurn.isActive() || activeGlobalReview;
+    if (event.source === "extension" || event.streamingBehavior !== "steer" || !automaticReview) {
+      return { action: "continue" };
+    }
+    const content = event.images?.length
+      ? [{ type: "text" as const, text: event.text }, ...event.images]
+      : event.text;
+    pi.sendUserMessage(content, {
+      deliverAs: "followUp",
+      expandPromptTemplates: true,
+    });
+    return { action: "handled" };
+  });
+
   pi.on("before_agent_start", (event) => {
     agentTurnActive = true;
     return { systemPrompt: supervisorSystemPrompt(event.systemPrompt) };
+  });
+
+  async function settleGlobalReview() {
+    if (!activeGlobalReview) return false;
+    const decisionApplied = globalDecisionApplied;
+    activeGlobalReview = false;
+    globalDecisionApplied = false;
+    if (!decisionApplied && globalMissingDecisionRetries < 1) {
+      globalMissingDecisionRetries += 1;
+      pendingGlobalReview ||= "the previous global review ended without supervisor_global_result";
+    } else if (!decisionApplied) {
+      globalMissingDecisionRetries = 0;
+      globalState.nextReviewAt = new Date(Date.now() + Math.min(globalReviewIntervalMs() ?? DEFAULT_GLOBAL_REVIEW_INTERVAL_MS, 5000)).toISOString();
+      try { await saveGlobalReviewState(globalState); }
+      catch (error) { reportBackgroundFailure("Could not save the global review retry", error); }
+    }
+    return true;
+  }
+
+  async function settleFocusedReview() {
+    const reviewedPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
+    if (!reviewedPane) return false;
+    const decisionApplied = reviewTurn.isClosed();
+    reviewTurn.end();
+    const binding = await bindingForPane(reviewedPane);
+    if (binding) {
+      const runtime = runtimeFor(binding);
+      if (decisionApplied) {
+        runtime.missingDecisionRetries = 0;
+      } else if (runtime.missingDecisionRetries < 1) {
+        runtime.missingDecisionRetries += 1;
+        handleSignal(reviewedPane, {
+          force: true,
+          reason: "the previous review ended without an explicit decision",
+          key: `missing-decision:${binding.goalId}:${runtime.missingDecisionRetries}:${Date.now()}`,
+        });
+      } else {
+        runtime.missingDecisionRetries = 0;
+        if (!runtime.awaitingHuman) scheduleReview(binding);
+      }
+    }
+    return true;
+  }
+
+  pi.on("message_start", async (event) => {
+    if (event.message.role !== "user") return;
+    if (!activeGlobalReview && !reviewTurn.isActive()) return;
+    const settledGlobal = await settleGlobalReview();
+    if (!settledGlobal) await settleFocusedReview();
+    await armReviewTimer();
+    armGlobalReviewTimer();
   });
 
   pi.on("context", (event) => {
@@ -2327,48 +2393,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("agent_settled", async () => {
     agentTurnActive = false;
-    if (activeGlobalReview) {
-      const decisionApplied = globalDecisionApplied;
-      activeGlobalReview = false;
-      globalDecisionApplied = false;
-      if (!decisionApplied && globalMissingDecisionRetries < 1) {
-        globalMissingDecisionRetries += 1;
-        pendingGlobalReview ||= "the previous global review ended without supervisor_global_result";
-      } else if (!decisionApplied) {
-        globalMissingDecisionRetries = 0;
-        globalState.nextReviewAt = new Date(Date.now() + Math.min(globalReviewIntervalMs() ?? DEFAULT_GLOBAL_REVIEW_INTERVAL_MS, 5000)).toISOString();
-        try { await saveGlobalReviewState(globalState); }
-        catch (error) { reportBackgroundFailure("Could not save the global review retry", error); }
-        armGlobalReviewTimer();
-      }
+    if (await settleGlobalReview()) {
       await drainSignals();
       await armReviewTimer();
       armGlobalReviewTimer();
       return;
     }
-    const reviewedPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
-    const decisionApplied = reviewTurn.isClosed();
-    agentTurnActive = false;
-    reviewTurn.end();
-    if (reviewedPane) {
-      const binding = await bindingForPane(reviewedPane);
-      if (binding) {
-        const runtime = runtimeFor(binding);
-        if (decisionApplied) {
-          runtime.missingDecisionRetries = 0;
-        } else if (runtime.missingDecisionRetries < 1) {
-          runtime.missingDecisionRetries += 1;
-          handleSignal(reviewedPane, {
-            force: true,
-            reason: "the previous review ended without an explicit decision",
-            key: `missing-decision:${binding.goalId}:${runtime.missingDecisionRetries}:${Date.now()}`,
-          });
-        } else {
-          runtime.missingDecisionRetries = 0;
-          if (!runtime.awaitingHuman) scheduleReview(binding);
-        }
-      }
-    }
+    await settleFocusedReview();
     await drainSignals();
     await armReviewTimer();
   });
