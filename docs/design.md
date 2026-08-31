@@ -374,7 +374,7 @@ review signal map.
 The watch detects change; it does not interpret it. It computes one compact
 revision identity from provider metadata: GitHub PR head, state, draft and
 mergeability state, checks, and commit statuses; or Azure DevOps build status,
-result, source version, and finish time. An unchanged identity schedules
+ID, result, source version, and finish time. An unchanged identity schedules
 another read without a model turn. A changed identity queues the ordinary
 focused review, where the model asks the same worker to reread provider
 authority and judge it.

@@ -97,7 +97,7 @@ jobs:
           deadline=$((SECONDS + 180))
           while [ "$SECONDS" -lt "$deadline" ]; do
             if docker exec herdr-e2e sh -c \
-              'test -f /app/hello.txt && grep -qi "hello world" /app/hello.txt'; then
+              'test -f /app/hello.txt && grep -qF "hello world" /app/hello.txt'; then
               docker exec herdr-e2e cat /app/hello.txt
               echo "Deliverable matches the acceptance criterion"
               exit 0
