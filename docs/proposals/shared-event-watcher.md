@@ -89,7 +89,7 @@ herdr-goal=<goal-id>
 Each provider stores it in the simplest durable metadata it already supports:
 
 - GitHub pull requests use the existing secondary `## Supervision` description
-  block. The adapter reads only its `Goal` value for routing.
+  block. The adapter reads only its `Goal ID` value for routing.
 - Azure DevOps builds use a build tag such as
   `herdr-goal=g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde`. Azure DevOps
   rejects a colon in the build-tag API path, so the portable spelling uses an
@@ -103,6 +103,12 @@ Attaching metadata is not watcher registration. It is part of creating the
 resource, like linking a work item or naming a source branch. A small creation
 tool may add it automatically from the caller's current goal. Workers that use
 provider CLIs directly follow the same metadata convention.
+
+There is no matching unregister operation. The metadata remains useful across
+every later revision of that resource. Removing metadata merely makes the
+resource undiscoverable; completing a goal makes later delivery irrelevant;
+and evicting an old checkpoint entry is ordinary bounded-cache cleanup. None
+of those cases needs a worker-owned lifecycle.
 
 ## Discovery
 
@@ -190,9 +196,9 @@ It does not persist:
 - task, attempt, review, or workflow state;
 - provider credentials.
 
-Old entries are removed by a simple size and age bound. If an evicted resource
-is rediscovered, it produces one duplicate wake. That is safe and much simpler
-than perfect retention.
+Old entries are removed by a simple size bound. If an evicted resource is
+rediscovered, it produces one duplicate wake. That is safe and much simpler
+than perfect retention or a registration cleanup protocol.
 
 Provider schedules, open connections, and retry timers are disposable. On
 restart the daemon reloads the checkpoint, rescans configured scopes, and
