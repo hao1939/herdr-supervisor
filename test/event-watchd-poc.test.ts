@@ -39,7 +39,7 @@ test("first discovery and every later revision wake the goal without renewal", a
     sources: {
       source: { scan: async () => [{ subject: "resource-1", goalId: "g_owner", revision, payload: { revision } }] },
     },
-    deliver: async (goalId, event) => delivered.push({ goalId, event }),
+    deliver: async (goalId, events) => delivered.push({ goalId, events }),
   });
 
   await watcher.runOnce();
@@ -47,7 +47,7 @@ test("first discovery and every later revision wake the goal without renewal", a
   revision = "two";
   await watcher.runOnce();
 
-  assert.deepEqual(delivered.map((item) => [item.goalId, item.event.revision]), [
+  assert.deepEqual(delivered.map((item) => [item.goalId, item.events[0].revision]), [
     ["g_owner", "one"],
     ["g_owner", "two"],
   ]);
@@ -76,7 +76,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   const recovered = new DiscoveredEventWatcher({
     statePath,
     sources: { source },
-    deliver: async (goalId, event) => delivered.push([goalId, event.revision]),
+    deliver: async (goalId, events) => delivered.push([goalId, events[0].revision]),
   });
   await recovered.runOnce();
   assert.deepEqual(delivered, [["g_owner", "one"]]);
@@ -136,6 +136,25 @@ test("the checkpoint stays bounded and prefers pending deliveries", async (t) =>
   const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
   assert.equal(resources.length, 2);
   assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "pending"]);
+});
+
+test("one scan coalesces several resource changes into one wake per goal", async (t) => {
+  const directory = await temporary(t, "event-watch-coalesce-");
+  const delivered = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => [
+      { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+      { subject: "two", goalId: "g_same", revision: "one", payload: {} },
+      { subject: "other", goalId: "g_other", revision: "one", payload: {} },
+    ] } },
+    deliver: async (goalId, events) => delivered.push({ goalId, subjects: events.map((event) => event.subject) }),
+  });
+  await watcher.runOnce();
+  assert.deepEqual(delivered, [
+    { goalId: "g_same", subjects: ["one", "two"] },
+    { goalId: "g_other", subjects: ["other"] },
+  ]);
 });
 
 test("GitHub discovery reads only annotated pull requests", async () => {
@@ -271,7 +290,7 @@ test("Herdr delivery resolves a goal to its current exact native session", async
     return {};
   };
   const deliver = herdrGoalDelivery({ goalsRoot: root, request });
-  await deliver("g_exact", { source: "github-pr", subject: "owner/repo#42" });
+  await deliver("g_exact", [{ source: "github-pr", subject: "owner/repo#42" }]);
   const prompts = calls.filter(([method]) => method === "agent.prompt").map(([, params]) => params);
   assert.equal(prompts.length, 2);
   assert.equal(prompts[0].target, "w1:p9");
@@ -284,7 +303,7 @@ test("Herdr delivery resolves a goal to its current exact native session", async
 test("Herdr delivery fails closed when canonical goal ownership is missing", async (t) => {
   const root = await temporary(t, "event-watch-missing-goal-");
   const deliver = herdrGoalDelivery({ goalsRoot: root, request: async () => assert.fail("Herdr must not be called") });
-  await assert.rejects(deliver("g_missing", { source: "github-pr", subject: "owner/repo#42" }), /active canonical goal was not found/);
+  await assert.rejects(deliver("g_missing", [{ source: "github-pr", subject: "owner/repo#42" }]), /active canonical goal was not found/);
 });
 
 function response(value, ok = true, status = 200) {

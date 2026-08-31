@@ -51,7 +51,8 @@ export function herdrGoalDelivery({
   request = herdrRequest,
   ...options
 } = {}) {
-  return async (goalId, event) => {
+  return async (goalId, events) => {
+    if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource change");
     const goals = await loadSupervisorGoals(goalsRoot);
     const binding = goals.active.find((goal) => goal.goalId === goalId);
     if (!binding) {
@@ -82,10 +83,11 @@ export function herdrGoalDelivery({
     await request("agent.prompt", {
       target: agent.pane_id,
       text: [
-        `External resource changed for goal ${goalId}: ${event.source} ${event.subject}.`,
+        `External resources changed for goal ${goalId}:`,
+        ...events.map((event) => `- ${event.source} ${event.subject}`),
         "Reread current provider authority, decide what the change means, and continue useful work toward the goal.",
         "This is only a wake hint, not completion proof.",
-      ].join(" "),
+      ].join("\n"),
     }, options);
     return { paneId: agent.pane_id };
   };

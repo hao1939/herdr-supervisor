@@ -148,9 +148,10 @@ also catches a resource that changed while the daemon was stopped. Avoiding
 that one duplicate would require a registration baseline or more recovery
 state, which costs more than the saved model turn.
 
-Every later distinct revision emits another wake. Fast consecutive revisions
-may coalesce to the newest value because the worker always rereads provider
-authority. The watcher is not an audit log.
+Every later distinct revision emits another wake. Changes discovered together
+for one goal are delivered in one bounded message, and fast consecutive
+revisions may coalesce to the newest value because the worker always rereads
+provider authority. The watcher is not an audit log.
 
 ## Delivery and failure
 

@@ -8,6 +8,7 @@ const MAX_TEXT = 2_000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SCAN_RESULTS = 500;
 const DEFAULT_MAX_RESOURCES = 1_024;
+const MAX_EVENTS_PER_DELIVERY = 20;
 
 function requiredText(value, name) {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) {
@@ -192,26 +193,33 @@ export class DiscoveredEventWatcher {
 
   async deliverPending() {
     const delivered = [];
+    const groups = new Map();
     for (const [key, resource] of Object.entries(this.state.resources)) {
       if (!resource.pending) continue;
-      const pending = structuredClone(resource.pending);
+      const items = groups.get(resource.pending.goalId) || [];
+      items.push({ key, resource, pending: structuredClone(resource.pending) });
+      groups.set(resource.pending.goalId, items);
+    }
+    for (const [goalId, items] of groups) {
+      const batch = items.slice(0, MAX_EVENTS_PER_DELIVERY);
       try {
-        await this.deliver(pending.goalId, {
+        await this.deliver(goalId, batch.map(({ resource, pending }) => ({
           source: resource.source,
           subject: resource.subject,
           revision: pending.revision,
           payload: pending.payload,
           observedAt: resource.observedAt,
-        });
-        delivered.push([key, pending.goalId, pending.revision]);
-        this.reported.delete(`delivery:${key}`);
+        })));
+        for (const { key, pending } of batch) {
+          delivered.push([key, pending.goalId, pending.revision]);
+        }
+        this.reported.delete(`delivery:${goalId}`);
       } catch (error) {
-        this.report(`delivery:${key}`, {
+        const subjects = batch.map(({ resource }) => `${resource.source} ${resource.subject}`).join(", ");
+        this.report(`delivery:${goalId}`, {
           kind: "delivery",
-          source: resource.source,
-          subject: resource.subject,
-          goalId: pending.goalId,
-          message: `could not wake ${pending.goalId} for ${resource.source} ${resource.subject}: ${error instanceof Error ? error.message : error}`,
+          goalId,
+          message: `could not wake ${goalId} for ${subjects}: ${error instanceof Error ? error.message : error}`,
         });
       }
     }
