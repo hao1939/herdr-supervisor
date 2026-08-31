@@ -294,6 +294,29 @@ Measure:
 - no lost native Goal after timeout, interruption, or supervisor restart; and
 - no provider-specific state written by the supervisor.
 
+### Live results so far
+
+The first two feasibility gates passed in the MLVM container on 2026-08-31:
+
+1. A disposable supervised Codex worker kept one ordinary foreground shell
+   call active for 90.073 seconds while checking for an externally created
+   directory every five seconds. It detected the change on check 19, returned
+   about three seconds after the signal, and continued the same native Goal
+   turn automatically. The exact goal, pane, worker, and native session were
+   unchanged; no supervisor review or external watch ran while it waited.
+2. A second worker read GitHub Actions run `33372309721` at attempt 1, then
+   kept one foreground `curl` loop active while an external actor reran that
+   exact run. It observed attempt 2 start, waited until it completed
+   successfully, continued the same native Goal turn, and performed a fresh
+   authoritative provider read. No repository file, detached process,
+   supervisor watch, or second worker was involved.
+
+Both workers were accepted through the ordinary focused review after their
+turns settled. These results prove that a real provider wait does not require a
+supervisor-owned polling path for normal uninterrupted execution. They do not
+yet prove timeout, interruption, or restart recovery, so the migration remains
+conditional on those tests.
+
 If the foreground command cannot survive realistic waits, keep the zero-code
 bounded recheck as the default and measure whether its delay and model cost are
 a real problem. Only then evaluate a worker-runtime helper that wakes the exact
