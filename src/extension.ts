@@ -7,6 +7,7 @@ import {
   loadSupervisorGoals,
   installSupervisorGoal,
   recordExternalChange,
+  recordExternalWake,
   recordDecision,
   refineSupervisorGoal,
   refreshWorkerLocation,
@@ -170,6 +171,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let observerInterrupted = false;
   let workerEventSequence = 0;
   const pendingHumanFollowUps = new Set<string>();
+  const directExternalWakes = new Set<string>();
+  const uncertainDirectExternalWakes = new Map<string, string>();
   const reviewTurn = new ReviewTurnFence();
   let goalCache: undefined | {
     active: Map<string, GoalBinding>;
@@ -180,8 +183,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   function externalRereadInFlight(binding) {
     return Boolean(
       binding.externalChange
-      && Number.isInteger(binding.externalChange.workerSequence)
-      && binding.lastDecision?.decision === "steer",
+      && Number.isInteger(binding.externalChange.workerSequence),
     );
   }
 
@@ -378,7 +380,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     };
   }
 
-  async function deliverWorkerInstruction(binding, instruction) {
+  async function deliverWorkerInstruction(binding, instruction, { closeReview = true } = {}) {
     let deliveryError;
     let boundary;
     let boundaryError;
@@ -387,7 +389,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       deliveryError = error;
     }
-    reviewTurn.close(binding.paneId);
+    if (closeReview) reviewTurn.close(binding.paneId);
     try {
       boundary = await capturePostDeliveryBoundary(binding);
     } catch (error) {
@@ -561,6 +563,172 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       if (!recoveryMayHaveMutated) throw markRecoveryPreflightError(error);
       throw error;
+    }
+  }
+
+  function directExternalWakeInstruction(change) {
+    const detail = change.summary ? ` The watcher observed: ${change.summary}` : "";
+    return `The watched ${change.source} ${change.subject} changed at revision ${change.revision}.${detail}\n\nThis is only a wake hint. Reread the current authoritative provider state, decide what it means for the same goal, and continue the work.`;
+  }
+
+  async function deferDirectExternalWake(binding, label, error?) {
+    scheduleReview(binding, Math.min(reviewIntervalMs(), 5000));
+    if (error) reportBackgroundFailure(label, error);
+    await armReviewTimer();
+  }
+
+  async function directlyWakeExternalChange(goalId: string) {
+    if (directExternalWakes.has(goalId)) return "deferred" as const;
+    directExternalWakes.add(goalId);
+    try {
+      const goals = await activeBindings();
+      let binding = goals.active.find((item) => item.goalId === goalId);
+      if (!binding?.externalChange || externalRereadInFlight(binding)) return "absent" as const;
+      const uncertainRevision = uncertainDirectExternalWakes.get(goalId);
+      if (uncertainRevision === binding.externalChange.revision) return "needs-review" as const;
+      if (uncertainRevision) uncertainDirectExternalWakes.delete(goalId);
+      if (agentTurnActive || pendingHumanFollowUps.size || reviewTurn.isBusy() || activeGlobalReview) {
+        return "deferred" as const;
+      }
+      if (mode() !== "live") {
+        await deferDirectExternalWake(binding, `Direct external wake for ${binding.goalId} is disabled in ${mode()} mode`);
+        return "needs-review" as const;
+      }
+
+      let snapshot = await client.snapshot();
+      let agent = findAgent(snapshot, binding.paneId);
+      let pane = findPane(snapshot, binding.paneId);
+      if (agent?.agent_status === "working") return "deferred" as const;
+
+      const mismatch = identityMismatch(binding, agent, pane);
+      if (mismatch && agent) {
+        await deferDirectExternalWake(
+          binding,
+          `Could not directly wake ${binding.goalId}`,
+          new Error(`worker identity does not match: ${mismatch}`),
+        );
+        return "needs-review" as const;
+      }
+
+      if (!agent) {
+        if (!canRecoverAgentSession(binding.agentSession)) {
+          await deferDirectExternalWake(
+            binding,
+            `Could not directly wake ${binding.goalId}`,
+            new Error(mismatch || "the exact worker session is unavailable"),
+          );
+          return "needs-review" as const;
+        }
+        try {
+          binding = await recoverWorkerRouting(binding, snapshot);
+          snapshot = await client.snapshot();
+          binding = await adoptExactSession(binding, snapshot) || binding;
+          agent = findAgent(snapshot, binding.paneId);
+          pane = findPane(snapshot, binding.paneId);
+        } catch (error) {
+          await deferDirectExternalWake(binding, `Could not recover ${binding.goalId} for its external wake`, error);
+          return "needs-review" as const;
+        }
+      }
+
+      const recoveredMismatch = identityMismatch(binding, agent, pane);
+      const canResumeStopped = !agent && pane?.terminal_id === binding.terminalId;
+      if (recoveredMismatch && !canResumeStopped) {
+        await deferDirectExternalWake(
+          binding,
+          `Could not directly wake ${binding.goalId}`,
+          new Error(`worker identity does not match: ${recoveredMismatch}`),
+        );
+        return "needs-review" as const;
+      }
+
+      try {
+        if (canResumeStopped) {
+          const request = recoveryRequest(binding, snapshot);
+          request.name = workerNameForGoal(binding.goalId);
+          request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
+          const resumedAgent = await client.startAndWaitAgent(request, 31_000);
+          const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
+          if (resumedMismatch) throw new Error(`resumed worker identity does not match: ${resumedMismatch}`);
+          binding = await refreshObservedLocation(binding, resumedAgent);
+          agent = resumedAgent;
+        } else if (
+          agent
+          && binding.agentSession.agent === "codex"
+          && ["idle", "done"].includes(agent.agent_status)
+        ) {
+          await client.promptAgent(binding.paneId, "/goal resume", {
+            until: ["working"],
+            timeout_ms: 5000,
+          });
+          snapshot = await client.snapshot();
+          const resumedAgent = findAgent(snapshot, binding.paneId);
+          const resumedMismatch = identityMismatch(
+            binding,
+            resumedAgent,
+            findPane(snapshot, binding.paneId),
+          );
+          if (resumedMismatch) throw new Error(`resumed worker identity does not match: ${resumedMismatch}`);
+          if (resumedAgent.agent_status !== "working") throw new Error("the native Goal did not remain active");
+          binding = await refreshObservedLocation(binding, resumedAgent);
+          agent = resumedAgent;
+        }
+      } catch (error) {
+        await deferDirectExternalWake(binding, `Could not resume ${binding.goalId} for its external wake`, error);
+        return "needs-review" as const;
+      }
+
+      const latest = (await activeBindings()).active.find((item) => item.goalId === goalId);
+      if (!latest?.externalChange || externalRereadInFlight(latest)) return "absent" as const;
+      binding = latest;
+      const instruction = directExternalWakeInstruction(binding.externalChange);
+      const delivery = await deliverWorkerInstruction(binding, instruction, { closeReview: false });
+      const boundary = delivery.boundaryError ? unavailableRereadBoundary() : delivery.boundary;
+      const progress = delivery.deliveryError
+        ? "The direct external-change wake may have been delivered; fresh worker evidence is required before another attempt."
+        : delivery.boundaryError
+          ? "The worker received the external-change wake, but its post-delivery evidence boundary is unavailable."
+          : `The worker was directly woken to reread ${binding.externalChange.source} ${binding.externalChange.subject}.`;
+      let checkpoint;
+      try {
+        checkpoint = await recordExternalWake(binding, {
+          revision: binding.externalChange.revision,
+          progress,
+          action: instruction,
+          observationCursor: boundary?.observationCursor,
+          workerSequence: boundary?.workerSequence ?? runtimeFor(binding).lastReviewStateChangeSeq,
+        });
+      } catch (error) {
+        uncertainDirectExternalWakes.set(goalId, binding.externalChange.revision);
+        await deferDirectExternalWake(binding, `Could not save the direct wake for ${binding.goalId}`, error);
+        return "needs-review" as const;
+      }
+      cacheCheckpoint(binding, checkpoint.state);
+      uncertainDirectExternalWakes.delete(goalId);
+      if (checkpoint.auditError) {
+        reportBackgroundFailure(`Could not audit the direct wake for ${binding.goalId}`, checkpoint.auditError);
+      }
+      runtimeFor(binding).externalRereadCandidateRevision = undefined;
+      scheduleReview(binding);
+      await armReviewTimer();
+      if (delivery.deliveryError || delivery.boundaryError) {
+        reportBackgroundFailure(
+          `Direct external wake for ${binding.goalId} needs review`,
+          delivery.boundaryError || delivery.deliveryError,
+        );
+      }
+      return "delivered" as const;
+    } finally {
+      directExternalWakes.delete(goalId);
+    }
+  }
+
+  async function directlyWakePendingExternalChanges() {
+    const goals = await activeBindings();
+    for (const binding of goals.active) {
+      if (binding.externalChange && !externalRereadInFlight(binding)) {
+        await directlyWakeExternalChange(binding.goalId);
+      }
     }
   }
 
@@ -755,15 +923,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           source: watch.source,
           subject: watch.subject,
           revision: observation.observedRevision,
+          summary: observation.summary,
           observedAt,
         });
         watch.revision = observation.observedRevision;
         cacheCheckpoint(binding, state);
-        handleSignal(binding.paneId, {
-          force: true,
-          reason: `${observation.summary}. This external change is only a wake hint; have the same worker reread authoritative state before deciding what it means.`,
-          key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
-        });
+        await directlyWakeExternalChange(binding.goalId);
       }
       });
     }
@@ -775,6 +940,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     for (const binding of due) scheduleReview(binding);
     try {
       for (const binding of due) {
+        if (binding.externalChange && !externalRereadInFlight(binding)) {
+          const wake = await directlyWakeExternalChange(binding.goalId);
+          if (wake !== "needs-review") continue;
+        }
         handleSignal(binding.paneId, {
           force: true,
           reason: "review deadline elapsed",
@@ -835,6 +1004,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function handleWorkerEvent(paneId: string) {
+    const binding = await bindingForPane(paneId);
+    if (
+      binding?.externalChange
+      && !externalRereadInFlight(binding)
+      && await directlyWakeExternalChange(binding.goalId) !== "absent"
+    ) return;
     handleSignal(paneId);
   }
 
@@ -843,6 +1018,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     for (const stored of goals.active) {
       const binding = await refreshObservedLocation(stored, findAgent(snapshot, stored.paneId));
       if (runtimeFor(binding).awaitingHuman) continue;
+      if (
+        binding.externalChange
+        && !externalRereadInFlight(binding)
+        && await directlyWakeExternalChange(binding.goalId) !== "absent"
+      ) continue;
       const decision = shouldWake(
         binding,
         findAgent(snapshot, binding.paneId),
@@ -2446,12 +2626,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.on("agent_settled", async () => {
     agentTurnActive = false;
     if (await settleGlobalReview()) {
+      await directlyWakePendingExternalChanges();
       await drainSignals();
       await armReviewTimer();
       armGlobalReviewTimer();
       return;
     }
     await settleFocusedReview();
+    await directlyWakePendingExternalChanges();
     await drainSignals();
     await armReviewTimer();
   });
@@ -2465,6 +2647,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     pendingSignals.clear();
     pendingStarts.clear();
     pendingHumanFollowUps.clear();
+    directExternalWakes.clear();
+    uncertainDirectExternalWakes.clear();
     runtimeGoals.clear();
     goalCache = undefined;
     agentTurnActive = false;

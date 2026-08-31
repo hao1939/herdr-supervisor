@@ -57,6 +57,41 @@ export async function recordExternalChange(binding, change, root?, now?) {
   }, root, now);
 }
 
+export async function recordExternalWake(binding, input, root?, now = () => new Date().toISOString()) {
+  const at = now();
+  const state = await updateGoalState(binding.goalId, (current) => {
+    if (current.externalChange?.revision !== input.revision) {
+      throw new Error("the watched external resource changed before its wake was recorded");
+    }
+    if (!Number.isInteger(input.workerSequence) || input.workerSequence < 0) {
+      throw new Error("an external wake requires the observed worker sequence");
+    }
+    current.externalChange.workerSequence = input.workerSequence;
+    current.progress = input.progress;
+    if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);
+    delete current.reviewAt;
+    delete current.wait;
+    return current;
+  }, root, () => at);
+  let auditError;
+  try {
+    await appendAudit({
+      v: 1,
+      id: `audit_${randomUUID()}`,
+      at,
+      type: "external_wake_delivered",
+      goalId: binding.goalId,
+      goalRevision: state.revision,
+      summary: input.progress,
+      action: input.action,
+      evidence: [],
+    }, root);
+  } catch (error) {
+    auditError = error;
+  }
+  return { state, auditError };
+}
+
 export async function loadSupervisorGoals(root?) {
   const records = await listGoalRecords(root);
   return {

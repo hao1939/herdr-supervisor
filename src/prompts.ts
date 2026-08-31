@@ -22,8 +22,8 @@ const externalWatchPolicy = [
   "External watches",
   "When one exact GitHub PR or ADO build can resume the goal, add external_watch to supervisor_leave.",
   "Choose its exact source and subject semantically; never infer it with keyword routing.",
-  "An external-watch change is only a wake hint. Have the same worker reread the authoritative PR or build before deciding whether to continue, wait again, or finish.",
-  "When the review trigger says an external watch changed, steer that same worker to reread authority; do not renew the external wait before the worker has interpreted the change.",
+  "An external-watch change is only a wake hint. Code sends it directly to the same worker, which rereads the authoritative PR or build before deciding what it means.",
+  "Review the worker's fresh result after it settles; do not steer merely to relay a watcher event, and do not renew the external wait before the worker has interpreted the change.",
 ].join(" ");
 
 export const workerInitializationPrompt =

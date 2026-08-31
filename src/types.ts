@@ -57,6 +57,7 @@ export type PendingExternalChange = {
   source: string;
   subject: string;
   revision: string;
+  summary?: string;
   observedAt: string;
   workerSequence?: number;
 };

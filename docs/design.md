@@ -111,14 +111,15 @@ detailed evidence. Each goal keeps three files:
 `goal.json` (the outcome), `current.json` (where execution stands), and
 `journal.jsonl` (audit only).
 
-### What wakes the supervisor
+### What wakes work and review
 
 ```mermaid
 flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
     C[Selected peer goal changed] --> Q
-    D[Watched PR or build revision changed] --> Q
+    D[Watched PR or build revision changed] --> W[Exact owning worker]
+    W -->|fresh result| Q
     Q --> R[Focused review]
     E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
@@ -243,19 +244,25 @@ terminal result. It does not copy live worker status; that always comes from
 Herdr.
 
 Polling schedules remain disposable memory. If a watched PR or build changes,
-only that unresolved fact is saved in `current.json`. It survives restart and
-cannot be cleared by merely sending a prompt or receiving a worker reply. After
-the reread delivery attempt, the supervisor saves the current transcript cursor
-or terminal fingerprint. A later native final response, or a later settled
-Herdr transition with a changed fixed terminal fingerprint, establishes only a
-fresh result candidate. The model decides whether that result actually proves
-the authoritative reread and acknowledges the exact pending revision in its
-ordinary `leave`, `steer`, `ask_human`, or `accept` decision. Code then clears
-the matching revision atomically with that decision. This keeps semantic
-judgment in the model while code rejects stale revisions and old output. If the
-post-delivery observation itself fails, the supervisor saves a fail-closed
-boundary that cannot produce a candidate; a later bounded review may steer the
-same worker again and replace it with a real boundary.
+the unresolved revision and its compact summary are saved in `current.json`
+before delivery. Code then wakes the exact owning worker directly; it does not
+spend a supervisor model turn relaying the event. A busy worker keeps working,
+and repeated changes coalesce to the newest saved revision before the wake is
+delivered. A stopped supported session is resumed exactly; an identity mismatch
+fails closed without prompting anyone.
+
+The unresolved change survives restart and cannot be cleared by merely sending
+a prompt or receiving a worker reply. After the direct reread delivery attempt,
+code saves the current transcript cursor or terminal fingerprint. A later native
+final response, or a later settled Herdr transition with a changed fixed
+terminal fingerprint, establishes only a fresh result candidate and wakes the
+supervisor. The model decides whether that result actually proves the
+authoritative reread and acknowledges the exact pending revision in its ordinary
+`leave`, `steer`, `ask_human`, or `accept` decision. Code then clears the matching
+revision atomically with that decision. This keeps semantic judgment in the
+model while code rejects stale revisions and old output. If the post-delivery
+observation itself fails, code saves a fail-closed boundary that cannot produce
+a candidate; a later bounded review may retry safely.
 
 Tool arguments keep the same boundary explicit. An optional value that does not
 apply is `null`; the model never invents a placeholder identity, revision,
@@ -303,9 +310,10 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; an external watch may wake the supervisor when a PR or build changes.
-The supervisor then judges the refreshed evidence through its normal focused
-review. There is no second review lifecycle, reviewer state machine, attempt
+findings; an external watch wakes that worker directly when a PR or build
+changes. The worker's resulting event then wakes the supervisor, which judges
+the refreshed evidence through its normal focused review. There is no second
+review lifecycle, reviewer state machine, attempt
 budget, or goal schema. A separate review goal exists only when review itself
 is the human's distinct durable outcome, such as an ongoing project-wide review
 program—not merely because one implementation reached a review step.
@@ -376,9 +384,17 @@ The watch detects change; it does not interpret it. It computes one compact
 revision identity from provider metadata: GitHub PR head, state, draft and
 mergeability state, checks, and commit statuses; or Azure DevOps build status,
 ID, result, source version, and finish time. An unchanged identity schedules
-another read without a model turn. A changed identity queues the ordinary
-focused review, where the model asks the same worker to reread provider
-authority and judge it.
+another read without a model turn. A changed identity is persisted and sent as
+a small wake hint to the exact owning worker. The hint names the source,
+subject, observed revision, and compact summary, and tells the worker to reread
+provider authority. It does not include an interpretation.
+
+If the worker is busy, the hint remains pending and later revisions replace the
+older revision. When the worker settles, code delivers only the newest hint. If
+the exact native session is stopped, code resumes it before delivery. If exact
+identity cannot be proved, no prompt is sent and an ordinary bounded supervisor
+review is scheduled. After a successful wake, the worker's fresh result—not the
+watch itself—starts the focused supervisor review.
 
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor and not the watch.
@@ -402,6 +418,8 @@ decision at a time.
 
 - Each worker has at most one pending in-memory review signal.
 - Repeated signals coalesce because the review rereads authoritative state.
+- Repeated external revisions coalesce separately to the newest durable change
+  before the exact worker is woken.
 - Pending workers retain first-observed order.
 - One review fence owns preparation, observation, decision, and settlement for
   the focused pane.
