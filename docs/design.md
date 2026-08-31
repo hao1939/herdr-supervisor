@@ -302,7 +302,7 @@ completion.
 A pull request or pipeline run is one workstream inside the goal, not the end
 of it. A worker that opens a pull request must not stop and wait for it. It
 moves to the next useful thing in the same goal: another change, a test,
-preparation for the next step, or independent verification.
+preparation for the next step, or verifying its own earlier work.
 
 The worker never blocks, sleeps, or polls for an external condition. Blocking
 holds a worker that could be making progress, and it makes a waiting worker

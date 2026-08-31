@@ -14,7 +14,7 @@ import {
 import { sameAgentSession } from "./identity.ts";
 import type { GoalBinding } from "./types.ts";
 
-export const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
+const DEFAULT_ACCEPTANCE = "The stated objective is fully achieved with convincing evidence.";
 
 function assertWorkerAvailable(active, worker, exceptGoalId?) {
   const candidates = active.filter((binding) => binding.goalId !== exceptGoalId);

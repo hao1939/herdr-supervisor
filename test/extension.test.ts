@@ -2779,7 +2779,9 @@ test("a slow failing provider stays single-flight while the bounded review still
   await pi.events.get("agent_settled")();
   await waitFor(() => fetches === 1);
 
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  // The deadline review fires at 1000 ms. Wait past it with enough margin that
+  // CI scheduling jitter cannot make the following waitFor time out.
+  await new Promise((resolve) => setTimeout(resolve, 1400));
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 2);
   assert.equal(fetches, 1, "a worker deadline must not start a second provider read");
 

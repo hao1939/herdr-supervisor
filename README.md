@@ -59,8 +59,11 @@ state at any time.
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
-| `GITHUB_TOKEN` | — | Optional. Raises GitHub pull-request watch above the 60/hour unauthenticated limit |
+| `GITHUB_TOKEN` | — | Optional. Raises GitHub pull-request watch above the 60/hour unauthenticated limit. `GH_TOKEN` also works |
 | `AZURE_DEVOPS_EXT_PAT` | — | Required for Azure DevOps build watch (the `az` CLI is not in the image) |
+| `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
+| `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
+| `HERDR_SUPERVISOR_EXTERNAL_WATCH_MS` | `300000` | Interval for PR and build observations |
 
 Codex runs sandboxed with its normal approval prompts by default. Set
 `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1` to pass `--dangerously-bypass-approvals-and-sandbox`
@@ -193,6 +196,7 @@ npm test         # node:test suite
 - [Research landscape](docs/research.md)
 - [Deferred multi-worker exploration](docs/multi-agent-design.md)
 - [Proof-of-concept validation record](docs/poc-design.md)
+- [Code review, 2026-08-29](docs/review-2026-08-29.md) — historical snapshot
 
 ## Design rule
 

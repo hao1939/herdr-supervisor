@@ -14,7 +14,7 @@ export function terminalOutputCursor(text: string) {
   };
 }
 
-export function defaultCodexSessionsRoot(env = process.env) {
+function defaultCodexSessionsRoot(env = process.env) {
   const codexRoot = env.CODEX_HOME || join(homedir(), ".codex");
   return join(codexRoot, "sessions");
 }
