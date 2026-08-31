@@ -10,6 +10,11 @@ function parseRepository(value) {
   return { owner: match[1], repository: match[2] };
 }
 
+function parseSubject(value) {
+  const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(value);
+  return match ? { owner: match[1], repository: match[2], number: Number(match[3]) } : undefined;
+}
+
 export function supervisionGoal(body) {
   const lines = String(body || "").split(/\r?\n/);
   const start = lines.findIndex((line) => line.trim() === "## Supervision");
@@ -45,6 +50,7 @@ export function githubPullRequestDiscovery({
     throw new Error("GitHub discovery requires at least one repository");
   }
   const scopes = repositories.map(parseRepository);
+  const allowedRepositories = new Set(repositories);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -52,8 +58,9 @@ export function githubPullRequestDiscovery({
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
   return {
-    async scan() {
+    async scan(known = []) {
       const observations = [];
+      const pullsBySubject = new Map();
       for (const { owner, repository } of scopes) {
         const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
         const pulls = await json(
@@ -63,50 +70,61 @@ export function githubPullRequestDiscovery({
           "GitHub pull request discovery",
         );
         if (!Array.isArray(pulls)) throw new Error("GitHub pull request discovery returned an invalid list");
-        const annotated = pulls
-          .map((pull) => ({ pull, goalId: supervisionGoal(pull.body) }))
-          .filter((item) => item.goalId)
-          .slice(0, MAX_ANNOTATED_PULLS);
-        for (const { pull, goalId } of annotated) {
-          const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
-          const [checksResult, statusesResult] = await Promise.all([
-            json(fetchImpl, `${commit}/check-runs?filter=latest&per_page=100`, headers, "GitHub checks"),
-            json(fetchImpl, `${commit}/status?per_page=100`, headers, "GitHub statuses"),
-          ]);
-          const checks = (checksResult.check_runs || []).map((check) => ({
-            id: check.id,
-            name: check.name,
-            status: check.status,
-            conclusion: check.conclusion,
-          })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-          const statuses = (statusesResult.statuses || []).map((status) => ({
-            id: status.id,
-            context: status.context,
-            state: status.state,
-          })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-          const stable = {
-            head: pull.head.sha,
-            state: pull.state,
-            draft: Boolean(pull.draft),
-            updatedAt: pull.updated_at,
-            checks,
-            statuses,
-          };
-          observations.push({
-            subject: `${owner}/${repository}#${pull.number}`,
-            goalId,
-            revision: hash(stable),
-            payload: {
-              head: stable.head,
-              state: stable.state,
-              draft: stable.draft,
-              updatedAt: stable.updatedAt,
-              checks: checks.slice(0, MAX_EVIDENCE_ITEMS),
-              statuses: statuses.slice(0, MAX_EVIDENCE_ITEMS),
-              truncated: checks.length > MAX_EVIDENCE_ITEMS || statuses.length > MAX_EVIDENCE_ITEMS,
-            },
-          });
-        }
+        for (const pull of pulls) pullsBySubject.set(`${owner}/${repository}#${pull.number}`, pull);
+      }
+      for (const resource of known.slice(0, MAX_ANNOTATED_PULLS)) {
+        if (pullsBySubject.has(resource.subject)) continue;
+        const parsed = parseSubject(resource.subject);
+        if (!parsed || !allowedRepositories.has(`${parsed.owner}/${parsed.repository}`)) continue;
+        const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
+        const pull = await json(fetchImpl, `${base}/pulls/${parsed.number}`, headers, "GitHub pull request");
+        pullsBySubject.set(resource.subject, pull);
+      }
+      const annotated = [...pullsBySubject.entries()]
+        .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.body) }))
+        .filter((item) => item.goalId)
+        .slice(0, MAX_ANNOTATED_PULLS);
+      for (const { subject, pull, goalId } of annotated) {
+        const parsed = parseSubject(subject);
+        const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
+        const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
+        const [checksResult, statusesResult] = await Promise.all([
+          json(fetchImpl, `${commit}/check-runs?filter=latest&per_page=100`, headers, "GitHub checks"),
+          json(fetchImpl, `${commit}/status?per_page=100`, headers, "GitHub statuses"),
+        ]);
+        const checks = (checksResult.check_runs || []).map((check) => ({
+          id: check.id,
+          name: check.name,
+          status: check.status,
+          conclusion: check.conclusion,
+        })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+        const statuses = (statusesResult.statuses || []).map((status) => ({
+          id: status.id,
+          context: status.context,
+          state: status.state,
+        })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+        const stable = {
+          head: pull.head.sha,
+          state: pull.state,
+          draft: Boolean(pull.draft),
+          updatedAt: pull.updated_at,
+          checks,
+          statuses,
+        };
+        observations.push({
+          subject,
+          goalId,
+          revision: hash(stable),
+          payload: {
+            head: stable.head,
+            state: stable.state,
+            draft: stable.draft,
+            updatedAt: stable.updatedAt,
+            checks: checks.slice(0, MAX_EVIDENCE_ITEMS),
+            statuses: statuses.slice(0, MAX_EVIDENCE_ITEMS),
+            truncated: checks.length > MAX_EVIDENCE_ITEMS || statuses.length > MAX_EVIDENCE_ITEMS,
+          },
+        });
       }
       return observations;
     },

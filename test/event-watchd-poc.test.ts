@@ -174,9 +174,37 @@ test("GitHub discovery reads only annotated pull requests", async () => {
   assert.equal(urls.some((url) => url.includes("/commits/def/")), false);
 });
 
+test("GitHub discovery refreshes a remembered pull request outside the recent window", async () => {
+  const urls = [];
+  const pull = {
+    number: 42,
+    body: "## Supervision\n- Goal ID: g_pr",
+    head: { sha: "abc" },
+    state: "open",
+    draft: false,
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("/pulls?")) return response([]);
+      if (String(url).endsWith("/pulls/42")) return response(pull);
+      if (String(url).includes("check-runs")) return response({ check_runs: [] });
+      if (String(url).includes("/status?")) return response({ statuses: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+  const found = await source.scan([{ subject: "owner/repo#42", goalId: "g_pr" }]);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].goalId, "g_pr");
+  assert.ok(urls.some((url) => url.endsWith("/pulls/42")));
+});
+
 test("ADO discovery uses the durable build tag and current build revision", async () => {
   const source = adoBuildDiscovery({
-    projects: ["org/project"],
+    definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async () => response({ value: [
       {
@@ -195,6 +223,29 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.equal(found[0].goalId, "g_build");
+});
+
+test("ADO discovery refreshes a remembered build outside the recent definition window", async () => {
+  const urls = [];
+  const source = adoBuildDiscovery({
+    definitions: ["org/project/77"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      if (String(url).includes("builds?")) return response({ value: [] });
+      return response({
+        id: 101,
+        tags: ["herdr-goal=g_build"],
+        sourceVersion: "abc",
+        status: "completed",
+        result: "succeeded",
+      });
+    },
+  });
+  const found = await source.scan([{ subject: "org/project/101", goalId: "g_build" }]);
+  assert.equal(found.length, 1);
+  assert.equal(found[0].subject, "org/project/101");
+  assert.ok(urls.some((url) => url.includes("/builds/101?")));
 });
 
 test("Herdr delivery resolves a goal to its current exact native session", async (t) => {

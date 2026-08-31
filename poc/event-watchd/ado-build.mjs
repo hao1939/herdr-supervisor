@@ -6,10 +6,15 @@ const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const GOAL_TAG = /^herdr-goal=(g_[a-zA-Z0-9_-]+)$/;
 const execFileAsync = promisify(execFile);
 
-function parseProject(value) {
-  const match = /^([^/]+)\/([^/]+)$/.exec(value);
-  if (!match) throw new Error(`ADO project must look like organization/project: ${value}`);
-  return { organization: match[1], project: match[2] };
+function parseDefinition(value) {
+  const match = /^([^/]+)\/([^/]+)\/([1-9]\d*)$/.exec(value);
+  if (!match) throw new Error(`ADO definition must look like organization/project/definition-id: ${value}`);
+  return { organization: match[1], project: match[2], definitionId: Number(match[3]) };
+}
+
+function parseSubject(value) {
+  const match = /^([^/]+)\/([^/]+)\/([1-9]\d*)$/.exec(value);
+  return match ? { organization: match[1], project: match[2], buildId: Number(match[3]) } : undefined;
 }
 
 export function taggedGoal(tags) {
@@ -57,45 +62,56 @@ function hash(value) {
 }
 
 export function adoBuildDiscovery({
-  projects,
+  definitions,
   fetchImpl = fetch,
   authorization,
   getAuthorization = ambientAdoAuthorization,
 } = {}) {
-  if (!Array.isArray(projects) || !projects.length) {
-    throw new Error("ADO discovery requires at least one project");
+  if (!Array.isArray(definitions) || !definitions.length) {
+    throw new Error("ADO discovery requires at least one pipeline definition");
   }
-  const scopes = projects.map(parseProject);
+  const scopes = definitions.map(parseDefinition);
+  const allowedProjects = new Set(scopes.map((scope) => `${scope.organization}/${scope.project}`));
   return {
-    async scan() {
+    async scan(known = []) {
       const auth = authorization || await getAuthorization();
-      const observations = [];
-      for (const { organization, project } of scopes) {
+      const builds = new Map();
+      for (const { organization, project, definitionId } of scopes) {
         const base = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`;
         const result = await json(
           fetchImpl,
-          `${base}/_apis/build/builds?queryOrder=lastModifiedDescending&$top=100&api-version=7.1`,
+          `${base}/_apis/build/builds?definitions=${definitionId}&queryOrder=queueTimeDescending&$top=100&api-version=7.1`,
           auth,
         );
         if (!Array.isArray(result.value)) throw new Error("Azure DevOps build discovery returned an invalid list");
-        for (const build of result.value) {
-          const goalId = taggedGoal(build.tags);
-          if (!goalId) continue;
-          const stable = {
-            id: build.id,
-            sourceVersion: build.sourceVersion,
-            status: build.status,
-            result: build.result || null,
-            finishTime: build.finishTime || null,
-            lastChangedDate: build.lastChangedDate || null,
-          };
-          observations.push({
-            subject: `${organization}/${project}/${build.id}`,
-            goalId,
-            revision: hash(stable),
-            payload: stable,
-          });
-        }
+        for (const build of result.value) builds.set(`${organization}/${project}/${build.id}`, build);
+      }
+      for (const resource of known) {
+        if (builds.has(resource.subject)) continue;
+        const parsed = parseSubject(resource.subject);
+        if (!parsed || !allowedProjects.has(`${parsed.organization}/${parsed.project}`)) continue;
+        const base = `https://dev.azure.com/${encodeURIComponent(parsed.organization)}/${encodeURIComponent(parsed.project)}`;
+        const build = await json(fetchImpl, `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`, auth);
+        builds.set(resource.subject, build);
+      }
+      const observations = [];
+      for (const [subject, build] of builds) {
+        const goalId = taggedGoal(build.tags);
+        if (!goalId) continue;
+        const stable = {
+          id: build.id,
+          sourceVersion: build.sourceVersion,
+          status: build.status,
+          result: build.result || null,
+          finishTime: build.finishTime || null,
+          lastChangedDate: build.lastChangedDate || null,
+        };
+        observations.push({
+          subject,
+          goalId,
+          revision: hash(stable),
+          payload: stable,
+        });
       }
       return observations;
     },

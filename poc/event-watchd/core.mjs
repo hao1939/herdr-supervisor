@@ -162,7 +162,10 @@ export class DiscoveredEventWatcher {
     const found = [];
     for (const [source, adapter] of Object.entries(this.sources)) {
       try {
-        const values = await adapter.scan();
+        const known = Object.values(this.state.resources)
+          .filter((resource) => resource.source === source)
+          .map((resource) => ({ subject: resource.subject, goalId: resource.goalId }));
+        const values = await adapter.scan(known);
         if (!Array.isArray(values) || values.length > MAX_SCAN_RESULTS) {
           throw new Error(`${source} scan must return at most ${MAX_SCAN_RESULTS} observations`);
         }

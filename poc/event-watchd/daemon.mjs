@@ -12,12 +12,12 @@ function list(name) {
 }
 
 const githubRepositories = list("HERDR_WATCH_GITHUB_REPOSITORIES");
-const adoProjects = list("HERDR_WATCH_ADO_PROJECTS");
+const adoDefinitions = list("HERDR_WATCH_ADO_DEFINITIONS");
 const sources = {};
 if (githubRepositories.length) sources["github-pr"] = githubPullRequestDiscovery({ repositories: githubRepositories });
-if (adoProjects.length) sources["ado-build"] = adoBuildDiscovery({ projects: adoProjects });
+if (adoDefinitions.length) sources["ado-build"] = adoBuildDiscovery({ definitions: adoDefinitions });
 if (!Object.keys(sources).length) {
-  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_PROJECTS");
+  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS");
 }
 
 const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "herdr-supervisor");

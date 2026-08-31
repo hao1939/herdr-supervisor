@@ -107,14 +107,18 @@ provider CLIs directly follow the same metadata convention.
 ## Discovery
 
 The daemon has environment-level provider scopes, such as a GitHub repository
-or an Azure DevOps project. These scopes are deployment configuration, not
-per-worker watches.
+or an Azure DevOps pipeline definition. These scopes are deployment
+configuration, not per-worker watches. Definition scope matters in a large ADO
+project because unrelated long-running builds can fill a project-wide recent
+page and hide a newly queued build.
 
-Each adapter periodically lists a bounded window of recently updated
-resources in its scope and returns only resources with a valid goal ID. The
-window includes recently closed or completed resources so the final transition
-is observed. If an old resource changes later, its provider update time makes
-it recent again and it is rediscovered.
+Each adapter periodically lists a bounded window of recent resources in its
+scope and returns only resources with a valid goal ID. It also rereads exact
+resources already present in the bounded revision checkpoint. This second read
+keeps later updates visible after a resource leaves the recent window; it does
+not create a separate subscription record. Recently closed or completed
+resources stay in the discovery window long enough to observe their final
+transition.
 
 Adapters own provider syntax and pagination. The core sees only normalized
 observations:
