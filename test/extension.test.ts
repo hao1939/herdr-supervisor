@@ -1029,6 +1029,16 @@ test("a command-shaped human follow-up is relayed unchanged and releases its rev
     pane_id: null,
   });
   assert.equal(directTurn.isError, false);
+  await pi.tools.get("supervisor_reconsider").execute("event-during-follow-up", {
+    pane_ids: [worker.paneId],
+    reason: "another worker event arrived with the human follow-up",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pi.messages.length, 2, "background review waits for the direct human turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /another worker event arrived with the human follow-up/);
   pi.events.get("session_shutdown")();
 });
 
