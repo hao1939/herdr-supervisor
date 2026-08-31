@@ -32,7 +32,11 @@ if (command === "watch") {
 } else if (command === "unwatch") {
   result = await request({ action: "unwatch", watchId: args[0] });
 } else if (command === "list") {
-  result = await request({ action: "list" });
+  result = await request({
+    action: "list",
+    cursor: args[0] || undefined,
+    limit: args[1] ? Number(args[1]) : undefined,
+  });
 } else if (command === "poll") {
   result = await request({ action: "poll" });
 } else {

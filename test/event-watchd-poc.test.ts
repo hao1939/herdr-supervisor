@@ -168,6 +168,48 @@ test("source retry guidance postpones both observation and pending delivery", as
   assert.equal(watch.pending.retryAt, now + 9_000);
 });
 
+test("a failed source read cannot deliver an older pending revision", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-stale-retry-"));
+  let now = 10_000;
+  let revision = "one";
+  let sourceFails = false;
+  let deliveryFails = true;
+  const attempts: string[] = [];
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: {
+      source: {
+        read: async () => {
+          if (sourceFails) throw new Error("provider unavailable");
+          return { revision, payload: null };
+        },
+      },
+    },
+    deliveries: {
+      test: {
+        deliver: async (_target: any, event: any) => {
+          attempts.push(event.revision);
+          if (deliveryFails) throw new Error("worker unavailable");
+        },
+      },
+    },
+  });
+  await service.watch({ source: "source", subject: "subject", destination: destination("worker"), intervalMs: 1_000 });
+  revision = "two";
+  await service.pollNow();
+
+  now += 1_000;
+  deliveryFails = false;
+  sourceFails = true;
+  await service.pollNow();
+
+  assert.deepEqual(attempts, ["two"], "the stale pending revision is not delivered after authority fails");
+  const watch: any = Object.values((await service.status()).watches)[0];
+  assert.equal(watch.pending.revision, "two");
+  assert.equal(watch.pending.retryAt, now + 1_000);
+});
+
 test("retrying the same registration preserves its unseen pending change", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-idempotent-"));
   let revision = "one";
@@ -235,6 +277,67 @@ test("a later registration cannot hide a change from an existing watch", async (
   assert.equal((Object.values(state.watches)[0] as any).destination.target.name, "new");
 });
 
+test("source capacity is atomic across concurrent subjects", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-capacity-"));
+  let reads = 0;
+  let release!: () => void;
+  const bothReading = new Promise<void>((resolve) => { release = resolve; });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: {
+        maxResources: 1,
+        read: async (subject: string) => {
+          reads += 1;
+          if (reads === 2) release();
+          await bothReading;
+          return { revision: subject, payload: null };
+        },
+      },
+    },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+
+  const results = await Promise.allSettled([
+    service.watch({ source: "source", subject: "one", destination: destination("one"), intervalMs: 1_000 }),
+    service.watch({ source: "source", subject: "two", destination: destination("two"), intervalMs: 1_000 }),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(Object.keys((await service.status()).resources).length, 1);
+});
+
+test("list returns bounded pages without opaque destination data", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-list-"));
+  const subject = "s".repeat(1_500);
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision: "one", payload: null }) } },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  for (let index = 0; index < 25; index += 1) {
+    await service.watch({
+      source: "source",
+      subject,
+      destination: { adapter: "test", target: { name: `worker-${index}`, opaque: "x".repeat(10_000) } },
+      intervalMs: 1_000,
+    });
+  }
+
+  const first = await service.list();
+  assert.equal(first.totalWatches, 25);
+  assert.equal(first.watches.length, 20);
+  assert.ok(first.nextCursor);
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) < 64 * 1024);
+  assert.equal(JSON.stringify(first).includes("opaque"), false);
+  assert.equal(first.watches[0].subject.length, 500);
+  assert.equal(first.watches[0].subjectTruncated, true);
+
+  const second = await service.list({ cursor: first.nextCursor });
+  assert.equal(second.watches.length, 5);
+  assert.equal(second.nextCursor, null);
+});
+
 test("a slower second watch cannot postpone an existing fast resource", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-interval-"));
   let now = 10_000;
@@ -294,6 +397,33 @@ test("a failed daemon startup releases its socket and process lock", async () =>
       sources: {},
       deliveries: {},
     }),
+  });
+  await replacement.start();
+  await replacement.stop();
+});
+
+test("daemon shutdown closes an idle client before releasing ownership", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-shutdown-"));
+  const socketPath = join(directory, "watch.sock");
+  const server = new EventWatchServer({
+    socketPath,
+    service: new EventWatchService({ statePath: join(directory, "state.json"), sources: {}, deliveries: {} }),
+  });
+  await server.start();
+  const idle = net.createConnection(socketPath);
+  await new Promise<void>((resolve, reject) => {
+    idle.once("connect", resolve);
+    idle.once("error", reject);
+  });
+  await Promise.race([
+    server.stop(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("daemon shutdown timed out")), 1_000)),
+  ]);
+  assert.equal(idle.destroyed, true);
+
+  const replacement = new EventWatchServer({
+    socketPath,
+    service: new EventWatchService({ statePath: join(directory, "replacement.json"), sources: {}, deliveries: {} }),
   });
   await replacement.start();
   await replacement.stop();

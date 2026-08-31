@@ -44,6 +44,7 @@ export class EventWatchServer {
   constructor({ service, socketPath }) {
     this.service = service;
     this.socketPath = socketPath;
+    this.sockets = new Set();
   }
 
   async start() {
@@ -80,6 +81,8 @@ export class EventWatchServer {
   }
 
   accept(socket) {
+    this.sockets.add(socket);
+    socket.once("close", () => this.sockets.delete(socket));
     let buffer = "";
     let requests = Promise.resolve();
     socket.on("error", () => {});
@@ -106,7 +109,7 @@ export class EventWatchServer {
       if (request.action === "watch") result = await this.service.watch(request);
       else if (request.action === "read") result = await this.service.readCurrent(request);
       else if (request.action === "unwatch") result = await this.service.unwatch(request.watchId);
-      else if (request.action === "list") result = await this.service.status();
+      else if (request.action === "list") result = await this.service.list(request);
       else if (request.action === "poll") result = await this.service.pollNow();
       else if (request.action === "diagnostics") result = await this.service.setDiagnostics(request.destination);
       else throw new Error(`unsupported action ${request.action}`);
@@ -118,7 +121,11 @@ export class EventWatchServer {
 
   async stop() {
     this.service.stop();
-    if (this.server?.listening) await new Promise((resolve) => this.server.close(resolve));
+    if (this.server?.listening) {
+      const closed = new Promise((resolve) => this.server.close(resolve));
+      for (const socket of this.sockets) socket.destroy();
+      await closed;
+    }
     this.server = undefined;
     await unlink(this.socketPath).catch((error) => {
       if (error?.code !== "ENOENT") throw error;

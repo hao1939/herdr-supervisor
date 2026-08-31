@@ -195,6 +195,11 @@ credentials into every worker process. `read` never returns the cached event;
 it calls the source adapter again. Provider write actions and repository-local
 commands remain worker-owned and are not executed by the daemon.
 
+The local `list` operation is a diagnostic summary, not a state dump. It returns
+at most 20 watches at a time with an opaque continuation cursor, omits delivery
+targets and event payloads, and bounds displayed subjects and errors. This keeps
+the response inside the socket frame even at the daemon's watch limit.
+
 The worktree provisioner may ensure that the CLI is available in a new worker
 environment, but it is a one-shot worktree hook and must not become the owner of
 a long-running service.

@@ -7,6 +7,9 @@ const MAX_TEXT = 2_000;
 const MAX_TARGET_BYTES = 16 * 1024;
 const MAX_WATCHES = 1_024;
 const MAX_CONCURRENT_READS = 4;
+const DEFAULT_LIST_LIMIT = 20;
+const MAX_LIST_LIMIT = 20;
+const MAX_LIST_TEXT = 500;
 const MIN_INTERVAL_MS = 1_000;
 const MAX_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
@@ -30,6 +33,19 @@ function interval(value) {
     throw new Error(`intervalMs must be between ${MIN_INTERVAL_MS} and ${MAX_INTERVAL_MS}`);
   }
   return value;
+}
+
+function listLimit(value) {
+  if (value === undefined) return DEFAULT_LIST_LIMIT;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_LIST_LIMIT) {
+    throw new Error(`limit must be between 1 and ${MAX_LIST_LIMIT}`);
+  }
+  return value;
+}
+
+function summaryText(value) {
+  if (typeof value !== "string") return undefined;
+  return value.slice(0, MAX_LIST_TEXT);
 }
 
 function hash(value) {
@@ -283,6 +299,13 @@ export class EventWatchService {
         if (!state.watches[identity] && Object.keys(state.watches).length >= MAX_WATCHES) {
           throw new Error("event watcher watch limit reached");
         }
+        if (!state.resources[id] && sourceCapacity !== undefined) {
+          const committedResources = Object.values(state.resources)
+            .filter((resource) => resource.source === source).length;
+          if (committedResources >= sourceCapacity) {
+            throw new Error(`source ${source} reached its ${sourceCapacity}-resource capacity`);
+          }
+        }
         const previous = state.resources[id];
         if (previous && previous.revision !== observation.revision) {
           for (const existing of Object.values(state.watches)) {
@@ -347,6 +370,11 @@ export class EventWatchService {
         if (!state.resources[id]) return;
         state.resources[id].lastError = message;
         state.resources[id].nextPollAt = this.now() + retryAfterMs;
+        for (const watch of Object.values(state.watches)) {
+          if (watch.resourceId === id && watch.pending) {
+            watch.pending.retryAt = state.resources[id].nextPollAt;
+          }
+        }
       });
       await this.report(`source:${resource.source}:${resource.subject}`, message);
       return false;
@@ -449,6 +477,46 @@ export class EventWatchService {
     await this.stateReady;
     await this.mutations;
     return structuredClone(this.state);
+  }
+
+  async list(input = {}) {
+    await this.stateReady;
+    await this.mutations;
+    const limit = listLimit(input.limit);
+    const cursor = input.cursor === undefined ? undefined : text(input.cursor, "cursor");
+    const entries = Object.entries(this.state.watches)
+      .sort(([left], [right]) => left.localeCompare(right));
+    const start = cursor === undefined
+      ? 0
+      : entries.findIndex(([id]) => id > cursor);
+    const page = (start < 0 ? [] : entries.slice(start, start + limit));
+    const watches = page.map(([id, watch]) => {
+      const resource = this.state.resources[watch.resourceId];
+      const subject = summaryText(resource.subject);
+      return {
+        watchId: id,
+        source: resource.source,
+        subject,
+        subjectTruncated: subject.length !== resource.subject.length,
+        intervalMs: watch.intervalMs,
+        revision: resource.revision,
+        nextPollAt: resource.nextPollAt,
+        pending: watch.pending ? {
+          revision: watch.pending.revision,
+          observedAt: watch.pending.observedAt,
+          retryAt: watch.pending.retryAt,
+        } : null,
+        error: summaryText(watch.lastError || resource.lastError) || null,
+      };
+    });
+    const consumed = start < 0 ? entries.length : start + page.length;
+    return {
+      totalWatches: entries.length,
+      totalResources: Object.keys(this.state.resources).length,
+      diagnosticsConfigured: Boolean(this.state.diagnostics),
+      watches,
+      nextCursor: consumed < entries.length && page.length ? page.at(-1)[0] : null,
+    };
   }
 
   schedule() {
