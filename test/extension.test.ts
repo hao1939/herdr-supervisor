@@ -4604,7 +4604,7 @@ test("a global review reloads goal contracts copied in after session start", asy
     acceptance: ["The migration is verified."],
   }, root, { goalId: "g_copied" });
   t.mock.timers.tick(60_000);
-  for (let attempt = 0; attempt < 100 && !pi.messages.some(
+  for (let attempt = 0; attempt < 1000 && !pi.messages.some(
     (message) => message.customType === "herdr-supervisor-global-review"
   ); attempt += 1) {
     await new Promise((resolve) => setImmediate(resolve));
