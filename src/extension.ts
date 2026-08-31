@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
@@ -90,6 +90,7 @@ const supervisorTools = [
 ];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
+const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 5 * 60 * 1000;
 type SupervisorMode = "observe" | "dry-run" | "live";
 
@@ -168,6 +169,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let reconnectDelay = 250;
   let observerInterrupted = false;
   let workerEventSequence = 0;
+  const pendingHumanFollowUps = new Set<string>();
   const reviewTurn = new ReviewTurnFence();
   let goalCache: undefined | {
     active: Map<string, GoalBinding>;
@@ -807,8 +809,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     void drainSignals().catch((error) => reportBackgroundFailure("Could not process a worker event", error));
   }
 
-  function queueSignal(paneId: string, signal: ReviewSignal) {
-    if (!pendingSignals.has(paneId) || signal.force) pendingSignals.set(paneId, signal);
+  function queueSignal(paneId: string, signal?: ReviewSignal) {
+    if (!pendingSignals.has(paneId) || signal?.force) pendingSignals.set(paneId, signal);
   }
 
   async function wakeDependentWaiters(peer, reason: string) {
@@ -851,10 +853,24 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function drainSignals() {
-    if (shuttingDown || reviewPumpRunning || agentTurnActive || reviewTurn.isActive() || activeGlobalReview) return;
+    if (
+      shuttingDown
+      || reviewPumpRunning
+      || agentTurnActive
+      || pendingHumanFollowUps.size
+      || reviewTurn.isActive()
+      || activeGlobalReview
+    ) return;
     reviewPumpRunning = true;
     try {
-      while (!shuttingDown && !reviewTurn.isActive() && !activeGlobalReview && pendingSignals.size) {
+      while (
+        !shuttingDown
+        && !agentTurnActive
+        && !pendingHumanFollowUps.size
+        && !reviewTurn.isActive()
+        && !activeGlobalReview
+        && pendingSignals.size
+      ) {
         const next = pendingSignals.entries().next().value as [string, ReviewSignal | undefined];
         const [paneId, signal] = next;
         pendingSignals.delete(paneId);
@@ -876,7 +892,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           error,
         ));
       }
-      if (!shuttingDown && !reviewTurn.isActive() && !activeGlobalReview && !pendingSignals.size && pendingGlobalReview) {
+      if (
+        !shuttingDown
+        && !agentTurnActive
+        && !reviewTurn.isActive()
+        && !activeGlobalReview
+        && !pendingSignals.size
+        && pendingGlobalReview
+      ) {
         const reason = pendingGlobalReview;
         pendingGlobalReview = undefined;
         await handleGlobalReview(reason);
@@ -891,6 +914,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   async function handleGlobalReview(reason: string) {
     const [storedGoals, snapshot] = await Promise.all([loadSupervisorGoals(), client.snapshot()]);
+    if (pendingHumanFollowUps.size || agentTurnActive) {
+      pendingGlobalReview ||= reason;
+      return;
+    }
     const bindings = storedGoals.active.map((binding): ActiveGoal => ({
       ...binding,
       ...runtimeFor(binding),
@@ -997,6 +1024,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
     const missingDecisionRetry = signal?.key.startsWith("missing-decision:");
     if (!decision.wake || (runtime.lastNoticeKey === decision.key && !missingDecisionRetry)) return;
+    if (pendingHumanFollowUps.size || agentTurnActive) {
+      queueSignal(paneId, signal);
+      return;
+    }
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
     runtime.pendingObservationHasMessages = undefined;
@@ -2266,9 +2297,94 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     },
   });
 
+  pi.on("input", (event) => {
+    const automaticReview = reviewTurn.isBusy() || activeGlobalReview || reviewPumpRunning;
+    if (
+      event.source === "extension"
+      || !automaticReview
+      || !["steer", "followUp"].includes(event.streamingBehavior || "")
+    ) {
+      return { action: "continue" };
+    }
+    const content = event.images?.length
+      ? [{ type: "text" as const, text: event.text }, ...event.images]
+      : event.text;
+    const deliveryId = randomUUID();
+    pendingHumanFollowUps.add(deliveryId);
+    try {
+      pi.sendMessage({
+        customType: humanFollowUpMessageType,
+        content,
+        display: true,
+        details: { deliveryId },
+      }, {
+        triggerTurn: true,
+        deliverAs: "followUp",
+      });
+    } catch (error) {
+      pendingHumanFollowUps.delete(deliveryId);
+      throw error;
+    }
+    return { action: "handled" };
+  });
+
   pi.on("before_agent_start", (event) => {
     agentTurnActive = true;
     return { systemPrompt: supervisorSystemPrompt(event.systemPrompt) };
+  });
+
+  async function settleGlobalReview() {
+    if (!activeGlobalReview) return false;
+    const decisionApplied = globalDecisionApplied;
+    activeGlobalReview = false;
+    globalDecisionApplied = false;
+    if (!decisionApplied && globalMissingDecisionRetries < 1) {
+      globalMissingDecisionRetries += 1;
+      pendingGlobalReview ||= "the previous global review ended without supervisor_global_result";
+    } else if (!decisionApplied) {
+      globalMissingDecisionRetries = 0;
+      globalState.nextReviewAt = new Date(Date.now() + Math.min(globalReviewIntervalMs() ?? DEFAULT_GLOBAL_REVIEW_INTERVAL_MS, 5000)).toISOString();
+      try { await saveGlobalReviewState(globalState); }
+      catch (error) { reportBackgroundFailure("Could not save the global review retry", error); }
+    }
+    return true;
+  }
+
+  async function settleFocusedReview() {
+    const reviewedPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
+    const decisionApplied = reviewTurn.isClosed();
+    reviewTurn.end();
+    if (!reviewedPane) return false;
+    const binding = await bindingForPane(reviewedPane);
+    if (binding) {
+      const runtime = runtimeFor(binding);
+      if (decisionApplied) {
+        runtime.missingDecisionRetries = 0;
+      } else if (runtime.missingDecisionRetries < 1) {
+        runtime.missingDecisionRetries += 1;
+        queueSignal(reviewedPane, {
+          force: true,
+          reason: "the previous review ended without an explicit decision",
+          key: `missing-decision:${binding.goalId}:${runtime.missingDecisionRetries}:${Date.now()}`,
+        });
+      } else {
+        runtime.missingDecisionRetries = 0;
+        if (!runtime.awaitingHuman) scheduleReview(binding);
+      }
+    }
+    return true;
+  }
+
+  pi.on("message_start", async (event) => {
+    if (event.message.role !== "custom" || event.message.customType !== humanFollowUpMessageType) return;
+    const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
+    if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
+    agentTurnActive = true;
+    if (!activeGlobalReview && !reviewTurn.isBusy() && !reviewTurn.isClosed()) return;
+    const settledGlobal = await settleGlobalReview();
+    if (!settledGlobal) await settleFocusedReview();
+    await armReviewTimer();
+    armGlobalReviewTimer();
   });
 
   pi.on("context", (event) => {
@@ -2288,7 +2404,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           insideOldReview = index !== latestReview;
           return index === latestReview;
         }
-        if (insideOldReview && message.role === "user") insideOldReview = false;
+        const humanMessage = message.role === "user"
+          || (message.role === "custom" && message.customType === humanFollowUpMessageType);
+        if (insideOldReview && humanMessage) insideOldReview = false;
         return !insideOldReview;
       }),
     };
@@ -2327,48 +2445,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("agent_settled", async () => {
     agentTurnActive = false;
-    if (activeGlobalReview) {
-      const decisionApplied = globalDecisionApplied;
-      activeGlobalReview = false;
-      globalDecisionApplied = false;
-      if (!decisionApplied && globalMissingDecisionRetries < 1) {
-        globalMissingDecisionRetries += 1;
-        pendingGlobalReview ||= "the previous global review ended without supervisor_global_result";
-      } else if (!decisionApplied) {
-        globalMissingDecisionRetries = 0;
-        globalState.nextReviewAt = new Date(Date.now() + Math.min(globalReviewIntervalMs() ?? DEFAULT_GLOBAL_REVIEW_INTERVAL_MS, 5000)).toISOString();
-        try { await saveGlobalReviewState(globalState); }
-        catch (error) { reportBackgroundFailure("Could not save the global review retry", error); }
-        armGlobalReviewTimer();
-      }
+    if (await settleGlobalReview()) {
       await drainSignals();
       await armReviewTimer();
       armGlobalReviewTimer();
       return;
     }
-    const reviewedPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
-    const decisionApplied = reviewTurn.isClosed();
-    agentTurnActive = false;
-    reviewTurn.end();
-    if (reviewedPane) {
-      const binding = await bindingForPane(reviewedPane);
-      if (binding) {
-        const runtime = runtimeFor(binding);
-        if (decisionApplied) {
-          runtime.missingDecisionRetries = 0;
-        } else if (runtime.missingDecisionRetries < 1) {
-          runtime.missingDecisionRetries += 1;
-          handleSignal(reviewedPane, {
-            force: true,
-            reason: "the previous review ended without an explicit decision",
-            key: `missing-decision:${binding.goalId}:${runtime.missingDecisionRetries}:${Date.now()}`,
-          });
-        } else {
-          runtime.missingDecisionRetries = 0;
-          if (!runtime.awaitingHuman) scheduleReview(binding);
-        }
-      }
-    }
+    await settleFocusedReview();
     await drainSignals();
     await armReviewTimer();
   });
@@ -2381,6 +2464,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (globalReviewTimer) clearTimeout(globalReviewTimer);
     pendingSignals.clear();
     pendingStarts.clear();
+    pendingHumanFollowUps.clear();
     runtimeGoals.clear();
     goalCache = undefined;
     agentTurnActive = false;
