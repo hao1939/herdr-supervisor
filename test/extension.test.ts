@@ -924,6 +924,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   const secondRelayed = pi.customMessages.at(-1);
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const messagesBeforeSettlement = pi.messages.length;
   const decision = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "The reviewed worker finished one useful turn.",
@@ -945,6 +946,8 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   assert.equal(unrelatedSteering.isError, true);
   assert.match(unrelatedSteering.content[0].text, /decision is already applied/);
 
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.messages.length, messagesBeforeSettlement, "the missing-decision retry waits for the human follow-up");
   await pi.events.get("message_start")({
     type: "message_start",
     message: { role: "custom", ...relayed.message, timestamp: Date.now() },

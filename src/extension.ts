@@ -853,10 +853,23 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function drainSignals() {
-    if (shuttingDown || reviewPumpRunning || agentTurnActive || reviewTurn.isActive() || activeGlobalReview) return;
+    if (
+      shuttingDown
+      || reviewPumpRunning
+      || agentTurnActive
+      || pendingHumanFollowUps.size
+      || reviewTurn.isActive()
+      || activeGlobalReview
+    ) return;
     reviewPumpRunning = true;
     try {
-      while (!shuttingDown && !reviewTurn.isActive() && !activeGlobalReview && pendingSignals.size) {
+      while (
+        !shuttingDown
+        && !pendingHumanFollowUps.size
+        && !reviewTurn.isActive()
+        && !activeGlobalReview
+        && pendingSignals.size
+      ) {
         const next = pendingSignals.entries().next().value as [string, ReviewSignal | undefined];
         const [paneId, signal] = next;
         pendingSignals.delete(paneId);
