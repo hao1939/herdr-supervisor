@@ -86,86 +86,78 @@ worktrees without creating more supervisor goals.
 
 ## Architecture
 
+Three diagrams, each answering one question.
+
+### Who owns what
+
+```mermaid
+flowchart LR
+    U[Human] <--> S[Pi supervisor]
+    S <-->|socket| H[Herdr]
+    H --> W[Codex workers]
+    S --> F[(Goal files)]
+
+    style U fill:#e8f0fe
+    style S fill:#fff4e5
+    style H fill:#e6f4ea
+    style W fill:#e6f4ea
+    style F fill:#fce8e6
+```
+
+Herdr owns panes, processes, and native sessions. The supervisor owns goals,
+evidence, and judgment. Workers own implementation. Each goal keeps three files:
+`goal.json` (the outcome), `current.json` (where execution stands), and
+`journal.jsonl` (audit only).
+
+### What wakes the supervisor
+
+```mermaid
+flowchart LR
+    A[Worker state changed] --> Q[Review signal]
+    B[Review deadline] --> Q
+    C[Peer goal changed] --> Q
+    D[Watched PR or build] --> Q
+    E[Hourly global check] --> Q
+    Q --> R[Focused review]
+```
+
+The supervisor sleeps otherwise. It never polls a worker.
+
+### One review, one decision
+
 ```mermaid
 flowchart TD
-    subgraph Human["Human interface"]
-        U[Human]
-        UI[Herdr console]
-        S[Pi supervisor]
-        U <--> UI
-        UI <--> S
-    end
+    R[Focused review] --> O["Read the exact worker once<br/>plus its goal and checkpoint"]
+    O --> D{One decision}
+    D -->|leave| L[Worker continues<br/>or waits on a condition]
+    D -->|steer| V{Worker still the same?}
+    D -->|ask human| U[Human decides]
+    D -->|accept| A[Goal complete]
 
-    subgraph Runtime["Runtime owned by Herdr"]
-        H[Herdr server<br/>panes · terminals · processes · events]
-        W[Codex workers<br/>one session per goal]
-        N[Native Codex Goal<br/>work → verify → continue]
-        H <--> W
-        W <--> N
-    end
+    V -->|running| P[Prompt it]
+    V -->|process stopped| RS[Resume the exact<br/>native session]
+    V -->|identity changed| X[Fail closed]
 
-    subgraph State["Durable supervisor state"]
-        G[(goal.json<br/>desired outcome)]
-        C[(current.json<br/>binding · progress · wait)]
-        J[(journal.jsonl<br/>audit history)]
-    end
-
-    S <-->|socket requests and events| H
-    S -->|create or refine| G
-    S -->|start and bind worker| C
-    S -->|deliver native goal| W
-
-    H -->|worker state changed| Q[Pending review signal]
-    T[Bounded deadline] --> Q
-    P[Peer goal changed] --> Q
-    E[GitHub or ADO watcher] -->|revision changed| Q
-
-    Q --> R[Focused review]
-    R --> O[Read exact worker once]
-    G --> O
-    C --> O
-    W -->|bounded Codex evidence| O
-
-    O --> D{Supervisor chooses one action}
-
-    D -->|leave| L[Worker continues or waits]
-    L --> T
-    L -->|exact external wait| E
-    E <-->|small provider reads| X[GitHub / Azure DevOps]
-
-    D -->|steer| V{Exact worker identity available?}
-    V -->|yes| W
-    V -->|process stopped| RS[Resume exact native session]
-    V -->|pane disappeared| RP[Create or reuse routing pane]
-    RP --> RS
-    RS --> W
-    V -->|identity changed or ambiguous| F[Fail closed]
-
-    D -->|ask human| U
-    D -->|accept| A[Goal completed]
-
-    D --> C
-    D --> J
-
-    GR[Hourly global review] -->|compact view of all goals| S
-    GR -->|schedule affected goals only| Q
+    L -.-> W[(current.json)]
+    P -.-> W
+    RS -.-> W
+    A -.-> W
 ```
+
+Every decision writes the checkpoint and an audit entry. A steer never
+substitutes a different worker — if identity cannot be confirmed, it fails
+closed and asks the human.
 
 In plain language:
 
 - You talk to one supervisor.
-- The supervisor turns each durable outcome into a goal and starts one Codex
-  worker for it. Multiple workers can work in parallel.
-- Workers use their native Codex Goal loop and do not need constant supervisor
-  prompting.
-- The supervisor normally sleeps. Worker events, deadlines, peer changes, or
-  watched PR/build changes wake it.
-- It reads one bounded piece of evidence and makes exactly one decision: leave,
-  steer, ask you, or accept.
-- If a worker pane disappears, the supervisor may restore the exact saved Codex
-  session. It never silently substitutes another worker.
-- `goal.json` says what must be achieved; `current.json` says where execution
-  currently stands; `journal.jsonl` is only an audit trail.
+- It turns each durable outcome into a goal and starts one Codex worker for it.
+  Multiple workers run in parallel.
+- Workers use their native Codex Goal loop and do not need constant prompting.
+- The supervisor normally sleeps until something meaningful happens.
+- It reads one bounded piece of evidence and makes exactly one decision.
+- If a worker pane disappears, it restores the exact saved session. It never
+  silently substitutes another worker.
 
 ## Normal flow
 
