@@ -292,6 +292,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
+  assert.match(deliveredPrompts[0].prompt, /While it is pending, continue any safe useful work/);
+  assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
+  assert.match(deliveredPrompts[0].prompt, /Keep independent useful paths moving while a pull request, pipeline, or another path is pending/);
   assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
   assert.match(deliveredPrompts[0].prompt, /run the required tests/);
   assert.match(deliveredPrompts[0].prompt, /evidence matches the current candidate revision/);
@@ -718,6 +722,8 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
+  assert.match(prompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
   assert.match(prompts[0].prompt, /review the exact final diff/);
   assert.match(prompts[0].prompt, /run the required tests/);
   assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
@@ -3363,7 +3369,9 @@ test("a slow failing provider stays single-flight while the bounded review still
   await pi.events.get("agent_settled")();
   await waitFor(() => fetches === 1);
 
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  // The deadline review fires at 1000 ms. Wait past it with enough margin that
+  // CI scheduling jitter cannot make the following waitFor time out.
+  await new Promise((resolve) => setTimeout(resolve, 1400));
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length === 2);
   assert.equal(fetches, 1, "a worker deadline must not start a second provider read");
 

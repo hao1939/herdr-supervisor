@@ -12,7 +12,8 @@ const workerExecutionBoundary = [
   "Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "When one external or peer condition is the only remaining blocker, report that exact condition once and let the native Goal become blocked. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
+  "A pending pull request, pipeline run, or peer condition is one workstream inside the goal, not the end of it. While it is pending, continue any safe useful work in the same goal — another change, a test, preparation, or verifying your own earlier work.",
+  "When you have genuinely exhausted the safe work you can do now, report the exact remaining condition once and yield. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
 ].join(" ");
@@ -57,7 +58,7 @@ export function nativeGoalPrompt(binding: GoalTrace, workerName: string) {
     `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
     "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
     workerExecutionBoundary,
-    "Work proactively from current evidence. Keep independent useful paths moving when one path waits. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
+    "Work proactively from current evidence. Keep independent useful paths moving while a pull request, pipeline, or another path is pending. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
     pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
   ].join(" ");
@@ -145,7 +146,7 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
       "If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there.",
       "If another goal is shown as waiting on this goal and current evidence materially changes its condition, call supervisor_reconsider for exactly that goal before the decision tool. An ordinary recorded decision is not itself a reason to wake every dependent.",
       "If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work, alternative proof, or preparation.",
-      "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If an external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
+      "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If a peer or external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
       "Leave it waiting again only when that fresh evidence shows nothing useful can move and supplies the next exact boundary.",
       "If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling.",
       "Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.",

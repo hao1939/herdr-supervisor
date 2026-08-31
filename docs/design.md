@@ -84,6 +84,85 @@ A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.
 
+## Architecture
+
+Three diagrams, each answering one question.
+
+### Who owns what
+
+```mermaid
+flowchart LR
+    U[Human] <--> S[Pi supervisor]
+    S <-->|socket| H[Herdr]
+    H --> W[Codex workers]
+    S -->|write| F[(Goal files)]
+    F -.->|read goal contract| W
+
+    style U fill:#e8f0fe
+    style S fill:#fff4e5
+    style H fill:#e6f4ea
+    style W fill:#e6f4ea
+    style F fill:#fce8e6
+```
+
+Herdr owns panes, processes, and native sessions. The supervisor owns goal
+contracts, concise checkpoints, and judgment. Workers own implementation and
+detailed evidence. Each goal keeps three files:
+`goal.json` (the outcome), `current.json` (where execution stands), and
+`journal.jsonl` (audit only).
+
+### What wakes the supervisor
+
+```mermaid
+flowchart LR
+    A[Worker state changed] --> Q[Review signal]
+    B[Review deadline] --> Q
+    C[Selected peer goal changed] --> Q
+    D[Watched PR or build revision changed] --> Q
+    Q --> R[Focused review]
+    E[Bounded global check] --> G[Compact global review]
+    G -. selected goals .-> Q
+```
+
+The supervisor sleeps otherwise. It never polls a worker.
+
+### One review, one decision
+
+```mermaid
+flowchart TD
+    R[Focused review] --> O["Read the exact worker once<br/>plus its goal and checkpoint"]
+    O --> D{One decision}
+    D -->|leave| L[Worker continues<br/>or waits on a condition]
+    D -->|steer| V{Worker still the same?}
+    D -->|ask human| U[Human decides]
+    D -->|accept| A[Goal complete]
+
+    V -->|running| P[Prompt it]
+    V -->|process stopped| RS[Resume the exact<br/>native session]
+    V -->|identity changed| X[Fail closed]
+
+    L -.-> W[(current.json)]
+    P -.-> W
+    RS -.-> W
+    A -.-> W
+```
+
+Every decision commits the checkpoint, then appends a best-effort audit entry.
+An audit failure is visible but never rolls back the authoritative checkpoint.
+A steer never substitutes a different worker — if identity cannot be
+confirmed, it fails closed and asks the human.
+
+In plain language:
+
+- You talk to one supervisor.
+- It turns each durable outcome into a goal and starts one Codex worker for it.
+  Multiple workers run in parallel.
+- Workers use their native Codex Goal loop and do not need constant prompting.
+- The supervisor normally sleeps until something meaningful happens.
+- It reads one bounded piece of evidence and makes exactly one decision.
+- If a worker pane disappears, it restores the exact saved session. It never
+  silently substitutes another worker.
+
 ## Normal flow
 
 1. The human describes an outcome.
@@ -248,6 +327,25 @@ prompt it merely because one turn ended. A final response, pull request, test
 run, report, cleared backlog, or raised threshold is evidence, not automatic
 completion.
 
+### A pending review is a thread, not a barrier
+
+A pull request or pipeline run is one workstream inside the goal, not the end
+of it. While one is pending, the worker continues any safe useful work in the
+same goal: another change, a test, preparation for the next step, or verifying
+its own earlier work.
+
+The worker never sleeps or polls for an external condition. When it has
+genuinely exhausted the safe work it can do now, it reports the exact remaining
+condition once and yields. An idle worker costs nothing.
+
+When the pull request or build later changes, the watch or the bounded review
+wakes that exact session. The worker rereads the current provider state,
+handles what changed — review comments, a failed check, a merge conflict — and
+continues. A merged pull request is only complete when it also satisfies the
+goal's acceptance criteria.
+
+### Wait rules
+
 Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
@@ -268,17 +366,34 @@ A human question follows the same rule. It is concrete, asks for the minimum
 input that changes the work, and receives a bounded reconsideration so
 unrelated useful work can continue.
 
+### External watches
+
 External watches run as small deterministic reads inside the existing Pi
 extension process. They share the nearest-deadline timer and the per-goal
-review signal map. An unchanged revision schedules another read without a
-model turn. A changed revision queues the ordinary focused review, where the
-model asks the same worker to reread provider authority before judging it.
-When that external condition is the worker's only remaining blocker, the
-worker reports it once and lets its native Goal block. It does not sleep or
-poll; the watch or bounded review resumes the same session.
+review signal map.
+
+The watch detects change; it does not interpret it. It computes one compact
+revision identity from provider metadata: GitHub PR head, state, draft and
+mergeability state, checks, and commit statuses; or Azure DevOps build status,
+ID, result, source version, and finish time. An unchanged identity schedules
+another read without a model turn. A changed identity queues the ordinary
+focused review, where the model asks the same worker to reread provider
+authority and judge it.
+
+Deciding what a review comment, failed check, or merged branch means for the
+goal belongs to the worker, not the supervisor and not the watch.
+
 Watch registration is process-local in the first version: after restart, the
 ordinary bounded goal review can register it again. This keeps provider polling
 an optimization rather than another durable task or event system.
+
+Provider credentials belong to the environment, not the goal contract. GitHub
+accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
+`AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
+the runtime environment. Without usable credentials, a watch degrades to
+unauthenticated limits for a public GitHub PR. A private GitHub PR or Azure
+DevOps build instead fails with a clear credential error; the watch never
+guesses.
 
 ## Concurrency
 
@@ -314,6 +429,27 @@ This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.
 
 ## Failure behavior
+
+Every failure resolves to one of three outcomes: retry safely, fail closed, or
+surface to the human. Nothing is silently dropped, and no failure path creates
+duplicate work.
+
+```mermaid
+flowchart TD
+    F[Something failed] --> K{What kind?}
+
+    K -->|lost Herdr subscription| RC[Reconnect with backoff<br/>then reread state]
+    K -->|missed event| DL[Nearest review deadline<br/>covers it]
+    K -->|supervisor restarted| RL[Reload every goal from<br/>contract and checkpoint]
+    K -->|worker process stopped| RS[Resume the exact<br/>native session]
+    K -->|worker identity changed| FC[Fail closed<br/>no prompt sent]
+    K -->|review made no decision| BR[One immediate retry<br/>then the next bounded review]
+    K -->|pre-action checkpoint failed| PW[No action applied<br/>decision remains retryable]
+    K -->|post-delivery checkpoint failed| CB[Action already closed<br/>state reloaded]
+    K -->|audit write failed| AV[Visible warning<br/>authoritative state unchanged]
+
+    FC --> H[Ask the human]
+```
 
 - Subscription loss reconnects with bounded backoff, then rereads Herdr state.
 - A missed event is covered by the nearest review deadline.

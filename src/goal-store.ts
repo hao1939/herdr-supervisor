@@ -6,7 +6,7 @@ import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
 export const STATE_VERSION = 1;
-export const AUDIT_VERSION = 1;
+const AUDIT_VERSION = 1;
 const MAX_CONTRACT_BYTES = 128 * 1024;
 const MAX_STATE_BYTES = 256 * 1024;
 const MAX_AUDIT_ENTRY_BYTES = 64 * 1024;
@@ -224,7 +224,7 @@ export function validateGoalState(state) {
   return state;
 }
 
-export function createGoalState({ goalId = newGoalId(), at = new Date().toISOString(), worker }) {
+function createGoalState({ goalId = newGoalId(), at = new Date().toISOString(), worker }) {
   return validateGoalState({
     version: STATE_VERSION,
     goalId,

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-export const EXTERNAL_WATCH_SOURCES = ["github-pr", "ado-build"] as const;
+const EXTERNAL_WATCH_SOURCES = ["github-pr", "ado-build"] as const;
 export type ExternalWatchSource = typeof EXTERNAL_WATCH_SOURCES[number];
 
 export type ExternalWatch = {
@@ -241,7 +241,7 @@ export function adoBuildSource({
   };
 }
 
-export function defaultExternalSources(): Record<ExternalWatchSource, ExternalSource> {
+function defaultExternalSources(): Record<ExternalWatchSource, ExternalSource> {
   return {
     "github-pr": githubPullRequestSource(),
     "ado-build": adoBuildSource(),

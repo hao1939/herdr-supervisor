@@ -13,7 +13,7 @@ jobs:
   e2e:
     if: github.repository == 'hao1939/herdr-supervisor'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -60,27 +60,6 @@ jobs:
 
           echo "Pi supervisor is running"
 
-      - name: Verify supervisor tools registered
-        run: |
-          # Ask the supervisor to show its status — this exercises the
-          # extension's session_start handler and supervisor_status tool
-          docker exec herdr-e2e \
-            herdr agent prompt w0:p0 "Use supervisor_status to show current supervised workers."
-
-          # Wait for the supervisor to finish its turn
-          docker exec herdr-e2e \
-            herdr agent wait w0:p0 --until idle --timeout 60000
-
-          # Read the response — should mention "No supervised workers"
-          output=$(docker exec herdr-e2e herdr agent read w0:p0 --lines 20 2>&1)
-          echo "$output"
-
-          if echo "$output" | grep -qi "supervised\|No supervised\|supervising 0"; then
-            echo "Supervisor tools are registered and responding"
-          else
-            echo "::warning::Could not confirm supervisor tool response"
-          fi
-
       - name: Create a test goal
         run: |
           # Ask the supervisor to create a trivial goal
@@ -103,34 +82,52 @@ jobs:
             exit 1
           fi
 
-      - name: Wait for worker progress
-        run: |
-          # Give the worker up to 2 minutes to make progress
-          for i in $(seq 1 12); do
-            sleep 10
-            status=$(docker exec herdr-e2e herdr agent list 2>&1)
-            echo "Check $i: $status"
+          goal_states=$(docker exec herdr-e2e \
+            find /home/node/.local/state/herdr-supervisor/goals \
+              -mindepth 2 -maxdepth 2 -name current.json -type f)
+          goal_count=$(echo "$goal_states" | sed '/^$/d' | wc -l)
+          if [ "$goal_count" -ne 1 ]; then
+            echo "::error::Expected one canonical goal checkpoint, found $goal_count"
+            exit 1
+          fi
+          echo "GOAL_STATE_PATH=$goal_states" >> "$GITHUB_ENV"
 
-            # If the worker has settled (idle/blocked/done), check the file
-            if docker exec herdr-e2e test -f /app/hello.txt 2>/dev/null; then
-              echo "Worker created hello.txt"
+      - name: Wait for worker to produce the deliverable
+        run: |
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if docker exec herdr-e2e sh -c \
+              'test -f /app/hello.txt && grep -qF "hello world" /app/hello.txt'; then
               docker exec herdr-e2e cat /app/hello.txt
-              break
+              echo "Deliverable matches the acceptance criterion"
+              exit 0
             fi
+            sleep 5
           done
 
-      - name: Verify goal state
+          echo "::error::Worker did not produce hello.txt containing 'hello world' within 3 minutes"
+          docker exec herdr-e2e sh -c 'test ! -e /app/hello.txt || cat /app/hello.txt' || true
+          exit 1
+
+      - name: Wait for the supervisor to accept the goal
         run: |
-          # Check supervisor goal state
-          docker exec herdr-e2e \
-            herdr agent prompt w0:p0 "Use supervisor_status to show all supervised workers."
+          # Observe the authoritative checkpoint. Terminal scrollback is not
+          # proof because it can contain output from an earlier prompt.
+          deadline=$((SECONDS + 180))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if docker exec herdr-e2e node -e '
+              const state = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+              process.exit(state.terminal?.state === "accepted" ? 0 : 1);
+            ' "$GOAL_STATE_PATH"; then
+              echo "Supervisor recorded canonical goal acceptance"
+              exit 0
+            fi
+            sleep 5
+          done
 
-          docker exec herdr-e2e \
-            herdr agent wait w0:p0 --until idle --timeout 60000
-
-          docker exec herdr-e2e herdr agent read w0:p0 --lines 30
-
-          echo "E2E test completed"
+          echo "::error::Supervisor never accepted the goal within 3 minutes of the deliverable appearing"
+          docker exec herdr-e2e cat "$GOAL_STATE_PATH" || true
+          exit 1
 
       - name: Collect logs on failure
         if: failure()

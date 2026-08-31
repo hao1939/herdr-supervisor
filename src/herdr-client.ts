@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-export function defaultSocketPath(env = process.env) {
+function defaultSocketPath(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
 }
 

@@ -127,10 +127,13 @@ test("promptAgent waits beyond the default transport timeout for an atomic wait"
   });
   try {
     const client = new HerdrClient({ socketPath: fake.socketPath, timeoutMs: 20 });
-    await client.promptAgent("w1:p2", "/goal resume", {
+    // The 35 ms response exceeds the 20 ms transport timeout. A wait-aware
+    // prompt must extend its own deadline instead of timing out.
+    const result = await client.promptAgent("w1:p2", "/goal resume", {
       until: ["working"],
       timeout_ms: 30,
     });
+    assert.equal(result.type, "agent_wait_matched");
   } finally {
     await fake.close();
   }
