@@ -310,6 +310,25 @@ test("native session discovery tolerates a brief missing-agent transition", asyn
   assert.equal(reads, 2);
 });
 
+test("native session discovery stops at its original deadline", async (t) => {
+  const client = new HerdrClient();
+  let now = 1_000;
+  let lookupTimeout;
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(client, "getAgent", async (_paneId, timeoutMs) => {
+    lookupTimeout = timeoutMs;
+    now += timeoutMs;
+    throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+  });
+
+  await assert.rejects(
+    client.waitForAgentSession("w1:p2", 1_000),
+    /did not report a native session/,
+  );
+  assert.equal(lookupTimeout, 1_000);
+  assert.equal(now, 2_000);
+});
+
 test("native session discovery immediately rejects unrelated agent lookup errors", async (t) => {
   const client = new HerdrClient();
   const error = new Error("Herdr agent.get connection closed");
