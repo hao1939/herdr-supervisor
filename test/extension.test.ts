@@ -1177,6 +1177,51 @@ test("failed human follow-up delivery cannot block later reviews", async (t) => 
   pi.events.get("session_shutdown")();
 });
 
+test("a worker event cannot start an unfenced review inside the human follow-up turn", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  pi.events.get("input")({
+    type: "input",
+    text: "Answer me before the next review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(pi.messages.length, 2);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 2, "no automatic review may run inside the human follow-up turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /previous review ended without an explicit decision/);
+  pi.events.get("session_shutdown")();
+});
+
 test("settling a direct human decision clears its review fence", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

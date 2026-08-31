@@ -298,8 +298,9 @@ decision at a time.
   gets the next direct turn before more background reviews. The supervisor does
   not confuse extension-generated steering with that human follow-up and does
   not run the background review pump while an authenticated human follow-up is
-  pending. It adds no durable message queue; after a process failure the human
-  may simply resend the request.
+  pending or while its turn owns Pi, so no automatic review begins only to lose
+  its fence to that turn. It adds no durable message queue; after a process
+  failure the human may simply resend the request.
 - A low-frequency compact global review sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
   work and may schedule ordinary focused reviews only for goals that have a
