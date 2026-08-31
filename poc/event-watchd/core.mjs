@@ -501,6 +501,8 @@ export class EventWatchService {
       .map(([id]) => id);
     await concurrent(ids, MAX_CONCURRENT_READS, (id) =>
       this.locked(id, async () => {
+        // Time can advance while this task waits for the per-resource lock, so
+        // recheck backoff here rather than trusting the filter snapshot above.
         if (this.state.resources[id]?.backoffUntil > this.now()) return;
         const observed = await this.observe(id);
         if (!observed) await this.deliverResource(id);
