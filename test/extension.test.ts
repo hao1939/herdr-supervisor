@@ -31,11 +31,15 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
   const tools = new Map();
   const events = new Map();
   const messages = [];
+  const customMessages = [];
+  const userMessages = [];
   return {
     commands,
     tools,
     events,
     messages,
+    customMessages,
+    userMessages,
     registerFlag() {},
     getFlag(name) {
       if (name === "supervisor-mode") return "live";
@@ -46,7 +50,11 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) { events.set(name, handler); },
-    sendMessage(message) { messages.push(message); },
+    sendMessage(message, options) {
+      messages.push(message);
+      customMessages.push({ message, options });
+    },
+    sendUserMessage(content, options) { userMessages.push({ content, options }); },
     setActiveTools() {},
   };
 }
@@ -91,6 +99,28 @@ test("optional supervisor tool fields accept null without placeholder values", (
   assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
   assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
 
+  const startGoal = Compile(pi.tools.get("supervisor_start_goal").parameters);
+  assert.equal(startGoal.Check({
+    goal_id: "g_saved",
+    goal: null,
+    context: null,
+    acceptance: null,
+    constraints: null,
+    placement: { mode: "new", label: "saved" },
+    working_directory: "/app",
+    direction: null,
+  }), true);
+  assert.equal(startGoal.Check({
+    goal_id: null,
+    goal: "Complete one new goal.",
+    context: null,
+    acceptance: ["The result is verified."],
+    constraints: null,
+    placement: { mode: "new", label: "new" },
+    working_directory: "/app",
+    direction: null,
+  }), true);
+
   assert.equal(Compile(pi.tools.get("supervisor_steer").parameters).Check({
     pane_id: worker.paneId,
     message: "Continue the same goal.",
@@ -130,6 +160,11 @@ test("pull request traceability never publishes a path-backed session locator", 
   assert.match(trace, /- Pane: "w1:p9"/);
   assert.doesNotMatch(trace, /Codex session:/);
   assert.doesNotMatch(trace, /\/private\/home/);
+  assert.match(trace, /Write the description in plain language/);
+  assert.match(trace, /what was wrong and what changes for the user/);
+  assert.ok(trace.indexOf("Write the description") < trace.indexOf("## Supervision"));
+  assert.match(trace, /Append this traceability block after the meaningful explanation/);
+  assert.match(trace, /supervision metadata secondary/);
 });
 
 test("terminal cursors do not change when an observation includes more older lines", () => {
@@ -257,6 +292,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
+  assert.match(deliveredPrompts[0].prompt, /run the required tests/);
+  assert.match(deliveredPrompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(deliveredPrompts[0].prompt, /## Supervision/);
   assert.match(deliveredPrompts[0].prompt, /Write progress and final results in plain language/);
   assert.equal(deliveredPrompts[0].bindingExists, true);
@@ -271,6 +309,171 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
   assert.deepEqual(goals.active[0].constraints, ["Make changes only in an isolated worktree."]);
+  pi.events.get("session_shutdown")();
+});
+
+test("an unstarted saved goal starts by exact ID without restating its contract", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-saved-start-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const managed = {
+    pane_id: "w1:p3",
+    terminal_id: "term_saved",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t3",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_saved" },
+  };
+  let startRequest;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [{ ...managed, name: startRequest?.name }],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, workspace_id: "w1", tab_id: managed.tab_id },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => ({
+    root_pane: { pane_id: managed.pane_id },
+  }));
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    startRequest = request;
+    return managed;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_status").execute("prime-cache", {
+    pane_id: null,
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  await installSupervisorGoal({
+    objective: "Prove one saved portable goal can start.",
+    context: ["The saved contract is authoritative."],
+    acceptance: ["The exact saved goal ID owns the worker."],
+    constraints: ["Do not create a sibling goal."],
+  }, root, { goalId: "g_saved" });
+  const ambiguous = await pi.tools.get("supervisor_start_goal").execute("ambiguous", {
+    goal_id: "g_saved",
+    goal: "Do not replace the saved contract.",
+    placement: { mode: "new", label: "saved-goal" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  const result = await pi.tools.get("supervisor_start_goal").execute("saved", {
+    goal_id: "g_saved",
+    goal: null,
+    context: null,
+    acceptance: null,
+    constraints: null,
+    placement: { mode: "new", label: "saved-goal" },
+    working_directory: "/app",
+    direction: null,
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(ambiguous.isError, true);
+  assert.match(ambiguous.content[0].text, /either goal_id.*or contract fields/);
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /g_saved/);
+  assert.equal(startRequest.name, goalWorkerName("g_saved"));
+  assert.match(prompts.at(-1), /g_saved\/goal\.json/);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.active.map(({ goalId }) => goalId), ["g_saved"]);
+  assert.deepEqual(goals.active[0].acceptance, ["The exact saved goal ID owns the worker."]);
+  assert.equal(goals.unstarted.length, 0);
+  assert.equal(goals.completed.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("a new goal never adopts a legacy-named worker without an existing contract", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-new-goal-legacy-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const foreign = {
+    pane_id: "w1:p9",
+    terminal_id: "term_foreign",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_foreign" },
+  };
+  const createdAgent = {
+    pane_id: "w1:p3",
+    terminal_id: "term_created",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t3",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_created" },
+  };
+  let created = false;
+  let starts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    const [installed] = (await loadSupervisorGoals(root)).unstarted;
+    const foreignAgent = {
+      ...foreign,
+      name: installed ? legacyGoalWorkerName(installed.goalId) : "foreign-worker",
+    };
+    return {
+      agents: [foreignAgent, ...(created ? [{ ...createdAgent, name: installed ? goalWorkerName(installed.goalId) : "created-worker" }] : [])],
+      panes: [
+        { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+        { pane_id: foreign.pane_id, terminal_id: foreign.terminal_id, workspace_id: "w1", tab_id: foreign.tab_id },
+        ...(created ? [{ pane_id: createdAgent.pane_id, terminal_id: createdAgent.terminal_id, workspace_id: "w1", tab_id: createdAgent.tab_id }] : []),
+      ],
+    };
+  });
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    created = true;
+    return { root_pane: { pane_id: createdAgent.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    starts += 1;
+    assert.equal(request.paneId, createdAgent.pane_id);
+    return createdAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async (paneId) => {
+    assert.equal(paneId, createdAgent.pane_id);
+    return createdAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("new", {
+    goal: "Complete one new diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+    placement: { mode: "new", label: "new-diagnostic" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, false);
+  assert.equal(created, true);
+  assert.equal(starts, 1);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value), ["session_created"]);
   pi.events.get("session_shutdown")();
 });
 
@@ -515,6 +718,9 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
+  assert.match(prompts[0].prompt, /review the exact final diff/);
+  assert.match(prompts[0].prompt, /run the required tests/);
+  assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
   assert.match(prompts[0].prompt, /Keep the native Goal active/);
   assert.match(prompts[0].prompt, /## Supervision/);
   assert.match(prompts[0].prompt, /copy the current objective from the canonical goal\.json/);
@@ -675,6 +881,381 @@ test("one transient human fact queues separate focused reviews without rewriting
   pi.events.get("session_shutdown")();
 });
 
+test("human input during an automatic review becomes the next Pi follow-up", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+
+  const queued = pi.events.get("input")({
+    type: "input",
+    text: "Start the saved goal after this review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  });
+  assert.deepEqual(queued, { action: "handled" });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(relayed.message.customType, "herdr-supervisor-human-follow-up");
+  assert.equal(relayed.message.content, "Start the saved goal after this review.");
+  assert.deepEqual(relayed.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Then show me its progress.",
+    source: "rpc",
+    streamingBehavior: "followUp",
+  }), { action: "handled" });
+  const secondRelayed = pi.customMessages.at(-1);
+
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const messagesBeforeSettlement = pi.messages.length;
+  const decision = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The reviewed worker finished one useful turn.",
+  });
+  assert.equal(decision.isError, false);
+  const stillFenced = await pi.tools.get("supervisor_status").execute("before-follow-up", {
+    pane_id: null,
+  });
+  assert.equal(stillFenced.isError, true);
+  assert.match(stillFenced.content[0].text, /decision is already applied/);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "user", content: [{ type: "text", text: "Start the saved goal after this review." }] },
+  });
+  const unrelatedSteering = await pi.tools.get("supervisor_status").execute("unrelated-steering", {
+    pane_id: null,
+  });
+  assert.equal(unrelatedSteering.isError, true);
+  assert.match(unrelatedSteering.content[0].text, /decision is already applied/);
+
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.messages.length, messagesBeforeSettlement, "the missing-decision retry waits for the human follow-up");
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
+    pane_id: null,
+  });
+  assert.equal(directTurn.isError, false);
+  assert.doesNotMatch(directTurn.content[0].text, /decision is already applied/);
+
+  const directDecision = await pi.tools.get("supervisor_leave").execute("direct-leave", {
+    pane_id: worker.paneId,
+    progress: "The worker remains healthy while answering the human follow-up.",
+  });
+  assert.equal(directDecision.isError, false);
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...secondRelayed.message, timestamp: Date.now() },
+  });
+  const secondDirectTurn = await pi.tools.get("supervisor_status").execute("second-follow-up", {
+    pane_id: null,
+  });
+  assert.equal(secondDirectTurn.isError, false);
+  assert.doesNotMatch(secondDirectTurn.content[0].text, /decision is already applied/);
+
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "The internally relayed follow-up.",
+    source: "extension",
+    streamingBehavior: "followUp",
+  }), { action: "continue" });
+  assert.equal(pi.userMessages.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("a command-shaped human follow-up is relayed unchanged and releases its review", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "/review src/index.ts",
+    source: "rpc",
+    streamingBehavior: "followUp",
+  }), { action: "handled" });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(relayed.message.customType, "herdr-supervisor-human-follow-up");
+  assert.equal(relayed.message.content, "/review src/index.ts");
+  assert.deepEqual(relayed.options, { triggerTurn: true, deliverAs: "followUp" });
+
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The reviewed worker finished one useful turn.",
+  });
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
+    pane_id: null,
+  });
+  assert.equal(directTurn.isError, false);
+  await pi.tools.get("supervisor_reconsider").execute("event-during-follow-up", {
+    pane_ids: [worker.paneId],
+    reason: "another worker event arrived with the human follow-up",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pi.messages.length, 2, "background review waits for the direct human turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /another worker event arrived with the human follow-up/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a missing-decision retry waits until the human follow-up settles", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  pi.events.get("input")({
+    type: "input",
+    text: "Handle my request before retrying the review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(pi.messages.length, 2);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pi.messages.length, 2, "the retry must not preempt the human follow-up");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /previous review ended without an explicit decision/);
+  pi.events.get("session_shutdown")();
+});
+
+test("human input aborts and requeues an in-flight review preparation", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let releaseSnapshot;
+  const blockedSnapshot = new Promise((resolve) => { releaseSnapshot = resolve; });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => blockedSnapshot);
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "fresh worker evidence is available",
+  });
+  const preparing = pi.events.get("agent_settled")();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Handle this human request first.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  }), { action: "handled" });
+  const relayed = pi.customMessages.at(-1);
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  releaseSnapshot(snapshot({ agent_status: "working" }));
+  await preparing;
+  assert.equal(pi.messages.length, 1, "preparation must not emit a review over the human turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /fresh worker evidence is available/);
+  pi.events.get("session_shutdown")();
+});
+
+test("failed human follow-up delivery cannot block later reviews", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "first review",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  const sendMessage = pi.sendMessage;
+  pi.sendMessage = () => { throw new Error("delivery failed"); };
+  assert.throws(() => pi.events.get("input")({
+    type: "input",
+    text: "Do not strand supervision.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  }), /delivery failed/);
+  pi.sendMessage = sendMessage;
+
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker remains healthy.",
+  });
+  await pi.events.get("agent_settled")();
+  await pi.tools.get("supervisor_reconsider").execute("next-review", {
+    pane_ids: [worker.paneId],
+    reason: "review after failed delivery",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /review after failed delivery/);
+  pi.events.get("session_shutdown")();
+});
+
+test("a worker event cannot start an unfenced review inside the human follow-up turn", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker finished one turn.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  pi.events.get("input")({
+    type: "input",
+    text: "Answer me before the next review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  });
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(pi.messages.length, 2);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 2, "no automatic review may run inside the human follow-up turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.match(pi.messages[2].content, /previous review ended without an explicit decision/);
+  pi.events.get("session_shutdown")();
+});
+
+test("settling a direct human decision clears its review fence", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const decision = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively pursuing the goal.",
+  });
+  assert.equal(decision.isError, false);
+
+  const fenced = await pi.tools.get("supervisor_status").execute("before-settlement", {
+    pane_id: null,
+  });
+  assert.equal(fenced.isError, true);
+  assert.match(fenced.content[0].text, /decision is already applied/);
+
+  await pi.events.get("agent_settled")();
+  const nextTurn = await pi.tools.get("supervisor_status").execute("after-settlement", {
+    pane_id: null,
+  });
+  assert.equal(nextTurn.isError, false);
+  assert.doesNotMatch(nextTurn.content[0].text, /decision is already applied/);
+  pi.events.get("session_shutdown")();
+});
+
 test("reconsideration rejects an unknown worker without scheduling work", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -793,6 +1374,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
+  assert.match(result.systemPrompt, /Express required CI, live validation, or independent review as ordinary acceptance criteria/);
+  assert.match(result.systemPrompt, /Do not create a second goal merely to represent a review phase/);
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
@@ -847,6 +1430,7 @@ test("a worker requires an explicit absolute working directory", async (t) => {
   assert.equal(relative.isError, true);
   assert.match(relative.content[0].text, /absolute path/);
   assert.equal(snapshots, 0);
+  assert.equal((await loadSupervisorGoals(root)).unstarted.length, 0);
   pi.events.get("session_shutdown")();
 });
 
@@ -3430,7 +4014,11 @@ test("only the current automated review remains in model context", () => {
       { role: "assistant", content: "old tool call" },
       { role: "toolResult", content: "old large observation" },
       { role: "assistant", content: "old review result" },
-      { role: "user", content: "Also prefer plain language." },
+      {
+        role: "custom",
+        customType: "herdr-supervisor-human-follow-up",
+        content: "Also prefer plain language.",
+      },
       { role: "assistant", content: "Understood." },
       { role: "custom", customType: "herdr-supervisor-review", content: "current goal" },
       { role: "assistant", content: "current tool call" },
@@ -4298,6 +4886,58 @@ test("a due global review routes explicit reconsideration through ordinary focus
   pi.events.get("session_shutdown")();
 });
 
+test("an authenticated human follow-up settles a global review before its retry", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ globalReviewMs: "600000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.equal(pi.messages[0].customType, "herdr-supervisor-global-review");
+
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Answer this before retrying the global review.",
+    source: "interactive",
+    streamingBehavior: "steer",
+  }), { action: "handled" });
+  const relayed = pi.customMessages.at(-1);
+  const stillActive = await pi.tools.get("supervisor_global_result").execute("before-follow-up", {
+    summary: "This invalid result must not settle the review.",
+    findings: [],
+    reconsider: [{ goal_id: "g_missing", reason: "invalid reference" }],
+  });
+  assert.equal(stillActive.isError, true);
+  assert.match(stillActive.content[0].text, /not found/);
+
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
+  });
+  const settled = await pi.tools.get("supervisor_global_result").execute("after-follow-up", {
+    summary: "The old review should already be settled.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(settled.isError, true);
+  assert.match(settled.content[0].text, /No global supervision review is active/);
+  assert.equal(pi.messages.length, 2, "the retry must wait behind the human turn");
+
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 3);
+  assert.equal(pi.messages[2].customType, "herdr-supervisor-global-review");
+  assert.match(pi.messages[2].content, /previous global review ended without supervisor_global_result/);
+  pi.events.get("session_shutdown")();
+});
+
 test("a reported global finding does not force a focused review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -4405,7 +5045,7 @@ test("a global review reloads goal contracts copied in after session start", asy
     acceptance: ["The migration is verified."],
   }, root, { goalId: "g_copied" });
   t.mock.timers.tick(60_000);
-  for (let attempt = 0; attempt < 100 && !pi.messages.some(
+  for (let attempt = 0; attempt < 1000 && !pi.messages.some(
     (message) => message.customType === "herdr-supervisor-global-review"
   ); attempt += 1) {
     await new Promise((resolve) => setImmediate(resolve));

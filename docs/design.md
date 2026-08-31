@@ -227,6 +227,11 @@ goals/g_<id>/
 Copying `goal.json` is enough to start fresh on another instance. It contains
 no pane, session, progress, wait, cursor, or history.
 
+Within one instance, an unstarted saved contract is resumed by passing its exact
+goal ID to the same start operation used for a new goal. Code loads that contract
+and creates its worker; the model does not restate the contract or create a
+sibling merely because the goal has no worker yet.
+
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding, concise progress, retained evidence, observation cursor, last
 decision, optional wait, optional unresolved external change, and optional
@@ -289,6 +294,27 @@ state, and bounded new evidence are sufficient after restart.
 
 Only the focused worker's evidence can prove its goal complete. Peer status can
 help coordination but cannot satisfy another worker's acceptance criteria.
+
+Review uses the same rule as every other proof. If a change requires CI, live
+validation, or an independent review, that requirement belongs in the goal's
+ordinary acceptance criteria and its result is evidence tied to the exact
+candidate revision. The worker owns making the change ready and resolving
+findings; an external watch may wake the supervisor when a PR or build changes.
+The supervisor then judges the refreshed evidence through its normal focused
+review. There is no second review lifecycle, reviewer state machine, attempt
+budget, or goal schema. A separate review goal exists only when review itself
+is the human's distinct durable outcome, such as an ongoing project-wide review
+program—not merely because one implementation reached a review step.
+
+The lightweight GitHub watch notices head, state, mergeability, checks, and
+commit-status changes. A review comment or approval by itself may therefore wait
+for the ordinary bounded review, where the worker rereads the current PR. That
+fallback preserves correctness without making the watcher another review system.
+
+Pull-request descriptions use plain language and put the meaningful change
+first: what was wrong, what changes for the user, the scope, current proof, and
+remaining limitations. Supervision identity remains a small secondary block;
+metadata never competes with the explanation or substitutes for evidence.
 
 ## Progress and waits
 
@@ -373,6 +399,15 @@ decision at a time.
   the focused pane.
 - The fence allows one successful observation and one decision in a turn.
 - Events arriving during a review remain pending for a later turn.
+- Human input arriving during an automatic review uses Pi's built-in follow-up
+  delivery with an opaque delivery ID and without rewriting or expanding the
+  request. The current review makes its one decision, then the human request
+  gets the next direct turn before more background reviews. The supervisor does
+  not confuse extension-generated steering with that human follow-up and does
+  not run the background review pump while an authenticated human follow-up is
+  pending or while its turn owns Pi, so no automatic review begins only to lose
+  its fence to that turn. It adds no durable message queue; after a process
+  failure the human may simply resend the request.
 - A low-frequency compact global review sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
   work and may schedule ordinary focused reviews only for goals that have a

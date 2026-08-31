@@ -489,6 +489,8 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /goal contract itself is obsolete, contradictory, or impractical/);
   assert.match(message, /ask the human one concrete question/);
   assert.match(message, /final worker message, PR, run, report, or completed review cycle as evidence/);
+  assert.match(message, /review as evidence for this goal, not as a separate supervisor lifecycle/);
+  assert.match(message, /current-revision proof and unresolved-finding disposition/);
   assert.match(message, /whole objective and every acceptance criterion at the same declared scope and time horizon/);
   assert.match(message, /criteria quietly narrow a broader or ongoing objective to one milestone/);
   assert.match(message, /standing improvement loop/);
