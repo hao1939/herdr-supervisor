@@ -74,6 +74,28 @@ Detaching from the Herdr client does not stop the server, supervisor, or workers
 Reattach with `docker compose exec herdr herdr`. Compose restarts the service
 after an unexpected failure; an explicit operator stop remains stopped.
 
+### Before recreating the container
+
+Container replacement is safe only when its external contract is preserved.
+Check the resolved Compose configuration with `docker compose config`, then
+confirm that the replacement has:
+
+- the same Compose project name and volume namespace as the running instance
+  (find the current name with `docker compose ls`, then reuse it with `-p` or
+  `COMPOSE_PROJECT_NAME`);
+- the intended source checkout as its resolved build context;
+- the intended project workspace mounted at `/app`;
+- persistent home storage for Herdr and native agent sessions;
+- the configured model credentials or gateway settings;
+- network access to that gateway and any required source-control provider; and
+- the same supervisor mode and full-access choice.
+
+After replacement, open Herdr, run `/supervised`, and verify one existing goal's
+exact pane and native session before trusting unattended work. Provider login
+is scoped to the environment where the worker runs; logging in on a different
+host or container does not refresh it. Keep machine-specific endpoints, tokens,
+and Compose overrides outside this repository.
+
 ## Local use (without container)
 
 If you have Herdr and Pi installed locally, you can load the extension directly.
@@ -152,7 +174,7 @@ change; the metadata only makes the originating supervised work easy to trace.
 - **Codex only.** Worker startup, message-level observation, and exact-session
   recovery are Codex-specific. Other Herdr CLIs fall back to terminal scraping.
 - **One agent per goal.** Multi-agent execution (relay, reviewer pair) is
-  designed but not implemented. See `docs/poc-design.md`.
+  designed but not implemented. See `docs/multi-agent-design.md`.
 
 ## Development
 
@@ -167,6 +189,7 @@ npm test         # node:test suite
 - [Changelog](CHANGELOG.md)
 - [Current design](docs/design.md)
 - [Research landscape](docs/research.md)
+- [Deferred multi-worker exploration](docs/multi-agent-design.md)
 - [Proof-of-concept validation record](docs/poc-design.md)
 
 ## Design rule
@@ -175,6 +198,12 @@ Herdr owns runtime truth. The supervisor owns judgment about whether a
 registered worker is still moving toward its stated goal. It must not copy
 Herdr's lifecycle into a parallel queue, task graph, or status database.
 
-Before adding code, ask whether the model can handle the situation, whether it
-was reliably woken, and whether it received enough current evidence. Add a
-mechanism only for a reusable missing primitive.
+Implement only the small deterministic foundation shared by most goals. Keep
+uncommon recovery and workflow choices in model guidance until repeated live
+evidence proves a generic code primitive is necessary.
+
+For each new feature or failure, first ask whether the agent can handle it with
+current primitives, whether an event or bounded check will wake the agent, and
+whether it has enough knowledge and context. If so, teach the behavior rather
+than coding another mechanism. Add code only for a proven missing primitive or
+a recurring problem with clear general benefit.

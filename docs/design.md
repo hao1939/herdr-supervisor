@@ -14,21 +14,55 @@ The core rule is:
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
 
-Before adding a mechanism, apply this feature test in order:
+## Scope discipline
 
-1. Can the worker or supervisor model handle the situation with its existing
-   facts and tools? If so, improve the goal, prompt, or documented knowledge.
-2. If it could handle the situation, was it reliably woken? If not, connect the
-   condition to the existing event subscription or nearest-deadline safety net.
-3. If it was woken, did it receive enough current evidence to decide? If not,
-   add the smallest deterministic observation needed for the model to judge.
-4. Add code only when a reusable observation or action primitive is genuinely
-   missing. Do not encode one workflow's semantic answer in branches, queues,
-   retry state, or another lifecycle.
+The Supervisor implements the small foundation that every goal needs and lets
+the model handle situational judgment. The practical heuristic is **solidify
+the common 20%; teach the model the remaining 80%**. This is not a feature
+quota. It is a test for whether a behavior belongs in code.
 
-Live repetition is evidence for promoting knowledge into code; a single rare
-rough edge is not. Eventual correct progress is preferred to perfect recovery
-that materially enlarges the system.
+The minimal core lets an agent:
+
+- **observe** current worker and external facts;
+- **decide** what those facts mean for the goal;
+- **act** through small validated effects;
+- **remember** the portable goal and latest local checkpoint; and
+- **wake** on meaningful events or a bounded health check.
+
+For every new request or failure, ask in order:
+
+1. Can the agent handle it with those existing primitives?
+2. Will the agent reliably be triggered to handle it?
+3. Does the agent receive enough durable knowledge and current context to
+   choose well?
+
+If all three answers are yes, add no runtime feature. Improve the goal context,
+prompt, or operational documentation when useful, then let the agent do the
+work. If an answer is no, fix the smallest missing foundation: capability,
+trigger, or knowledge. Promote a behavior into code only when it recurs, is
+unsafe or materially unreliable as judgment, wastes meaningful resources, or
+has another clear general benefit.
+
+Put behavior in code only when it is:
+
+- common to many goals rather than one observed incident;
+- deterministic identity, persistence, scheduling, or effect execution;
+- unsafe or unreliable to reproduce through ordinary model judgment; and
+- small enough to state as an invariant and prove with focused tests.
+
+Keep behavior in prompts, operational guidance, or the goal's own context when
+the model can inspect current facts and choose a safe action. One missing pane,
+one provider quirk, or imperfect reconstruction after restart does not justify
+a new recovery subsystem. Prefer a visible failure and a fresh model decision;
+some repeated work or model cost is acceptable when the final result remains
+correct.
+
+The foundation is therefore limited to portable goal contracts, exact worker
+identity, atomic current checkpoints, event wakeups with bounded health checks,
+validated effects, and clear current evidence. Provider integrations are
+optional observation adapters, not new workflow engines. A larger mechanism
+needs repeated live evidence that these primitives and ordinary agent reasoning
+cannot handle the problem cleanly.
 
 ## Mental model
 
