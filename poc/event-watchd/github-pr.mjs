@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 
 const UNAUTHENTICATED_INTERVAL_MS = 5 * 60 * 1_000;
 const AUTHENTICATED_INTERVAL_MS = 60 * 1_000;
+const AUTHENTICATED_RESOURCES = 7;
+const AUTHENTICATED_PAGES = 5;
+const UNAUTHENTICATED_PAGES = 1;
+const CAPACITY_RETRY_MS = 60 * 60 * 1_000;
+const AUTHENTICATED_REQUESTS_PER_HOUR = 4_500;
+const UNAUTHENTICATED_REQUESTS_PER_HOUR = 50;
 const PAYLOAD_ITEMS = 25;
 const LABEL_LENGTH = 200;
 
@@ -29,9 +35,9 @@ async function json(response, label) {
   return response.json();
 }
 
-async function pages(fetchImpl, url, headers, field, label) {
+async function pages(fetchImpl, url, headers, field, label, maxPages) {
   const items = [];
-  for (let page = 1; page <= 20; page += 1) {
+  for (let page = 1; page <= maxPages; page += 1) {
     const separator = url.includes("?") ? "&" : "?";
     const result = await json(await fetchImpl(`${url}${separator}per_page=100&page=${page}`, {
       headers,
@@ -42,30 +48,55 @@ async function pages(fetchImpl, url, headers, field, label) {
     items.push(...batch);
     if (batch.length < 100) return items;
   }
-  throw new Error(`${label} exceeded the bounded 2,000-item limit`);
+  const error = new Error(`${label} exceeded the bounded ${maxPages * 100}-item limit`);
+  error.retryAfterMs = CAPACITY_RETRY_MS;
+  throw error;
 }
 
-export function githubPullRequestSource({ fetchImpl = fetch, token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN } = {}) {
+function requestBudget(fetchImpl, limit, now) {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error("GitHub request limit must be a positive integer");
+  const timestamps = [];
+  return async (input, init) => {
+    const cutoff = now() - CAPACITY_RETRY_MS;
+    while (timestamps[0] <= cutoff) timestamps.shift();
+    if (timestamps.length >= limit) {
+      const error = new Error(`GitHub source reached its ${limit}-request hourly budget`);
+      error.retryAfterMs = Math.max(1_000, timestamps[0] + CAPACITY_RETRY_MS - now());
+      throw error;
+    }
+    timestamps.push(now());
+    return fetchImpl(input, init);
+  };
+}
+
+export function githubPullRequestSource({
+  fetchImpl = fetch,
+  token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
+  requestLimit = token ? AUTHENTICATED_REQUESTS_PER_HOUR : UNAUTHENTICATED_REQUESTS_PER_HOUR,
+  now = () => Date.now(),
+} = {}) {
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "event-watchd-poc",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+  const maxPages = token ? AUTHENTICATED_PAGES : UNAUTHENTICATED_PAGES;
+  const budgetedFetch = requestBudget(fetchImpl, requestLimit, now);
   return {
     minimumIntervalMs: token ? AUTHENTICATED_INTERVAL_MS : UNAUTHENTICATED_INTERVAL_MS,
-    maxResources: token ? 10 : 1,
+    maxResources: token ? AUTHENTICATED_RESOURCES : 1,
     async read(subject) {
       const { owner, repository, number } = parse(subject);
       const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
-      const pull = await json(await fetchImpl(`${base}/pulls/${number}`, {
+      const pull = await json(await budgetedFetch(`${base}/pulls/${number}`, {
         headers,
         signal: AbortSignal.timeout(30_000),
       }), "GitHub pull request");
       const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
       const [checks, statuses] = await Promise.all([
-        pages(fetchImpl, `${commit}/check-runs?filter=latest`, headers, "check_runs", "GitHub checks"),
-        pages(fetchImpl, `${commit}/status`, headers, "statuses", "GitHub statuses"),
+        pages(budgetedFetch, `${commit}/check-runs?filter=latest`, headers, "check_runs", "GitHub checks", maxPages),
+        pages(budgetedFetch, `${commit}/status`, headers, "statuses", "GitHub statuses", maxPages),
       ]);
       const stableChecks = checks.map((check) => ({
         id: check.id,

@@ -513,6 +513,37 @@ test("GitHub observations page through checks with a hard upper bound", async ()
   assert.equal(calls.filter((url) => url.includes("/check-runs")).length, 2);
 });
 
+test("GitHub pagination fails visibly inside its authenticated request budget", async () => {
+  const calls: string[] = [];
+  const source = githubPullRequestSource({
+    token: "test",
+    fetchImpl: async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      calls.push(url.toString());
+      if (url.pathname.endsWith("/pulls/42")) {
+        return githubResponse({
+          head: { sha: "abc123" }, state: "open", draft: false, mergeable: true, mergeable_state: "clean",
+        });
+      }
+      if (url.pathname.endsWith("/check-runs")) {
+        return githubResponse({ check_runs: Array.from({ length: 100 }, (_, id) => ({ id, name: `check-${id}`, status: "completed", conclusion: "success" })) });
+      }
+      if (url.pathname.endsWith("/status")) {
+        return githubResponse({ statuses: Array.from({ length: 100 }, (_, id) => ({ id, context: `status-${id}`, state: "success" })) });
+      }
+      return githubResponse({}, 404);
+    },
+  });
+
+  await assert.rejects(source.read("owner/repo#42"), (error: any) => {
+    assert.match(error.message, /bounded 500-item limit/);
+    assert.equal(error.retryAfterMs, 60 * 60 * 1_000);
+    return true;
+  });
+  assert.equal(calls.filter((url) => url.includes("/check-runs")).length, 5);
+  assert.equal(calls.filter((url) => url.includes("/status")).length, 5);
+});
+
 test("GitHub rate-limit guidance is exposed to the shared scheduler", async () => {
   const source = githubPullRequestSource({
     fetchImpl: async () => new Response("rate limited", {
@@ -525,6 +556,34 @@ test("GitHub rate-limit guidance is exposed to the shared scheduler", async () =
     assert.equal(error.retryAfterMs, 7_000);
     return true;
   });
+});
+
+test("GitHub source bounds actual requests across reads", async () => {
+  let requests = 0;
+  const source = githubPullRequestSource({
+    token: "test",
+    requestLimit: 2,
+    now: () => 10_000,
+    fetchImpl: async (input: string | URL | Request) => {
+      requests += 1;
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/pulls/42")) {
+        return githubResponse({
+          head: { sha: "abc123" }, state: "open", draft: false, mergeable: true, mergeable_state: "clean",
+        });
+      }
+      return url.pathname.endsWith("/check-runs")
+        ? githubResponse({ check_runs: [] })
+        : githubResponse({ statuses: [] });
+    },
+  });
+
+  await assert.rejects(source.read("owner/repo#42"), (error: any) => {
+    assert.match(error.message, /2-request hourly budget/);
+    assert.equal(error.retryAfterMs, 60 * 60 * 1_000);
+    return true;
+  });
+  assert.equal(requests, 2);
 });
 
 test("ADO observations change only with compact authoritative build state", async () => {

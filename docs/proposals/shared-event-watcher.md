@@ -18,6 +18,13 @@ involved only when observation, credentials, worker identity, or delivery fail.
 The watcher is a reusable local service. Herdr is one delivery adapter, not the
 watcher's identity or workflow model.
 
+The current container is one trusted execution domain: the supervisor and all
+workers run as the same Unix user and can already access the same workspace,
+provider login, and process environment. The local socket prevents access from
+other Unix users; it does not pretend to isolate mutually hostile workers. A
+deployment that runs untrusted workers must separate their OS identities and
+credentials before adding an authenticated broker boundary.
+
 ```text
 worker -> event-watch CLI -> event-watchd -> GitHub or ADO
    ^                             |
@@ -242,12 +249,17 @@ Implement only:
 7. focused tests and one MLVM end-to-end experiment.
 
 The GitHub PoC applies a coarse adapter budget: authenticated observation is at
-least one minute apart with at most ten distinct PR subjects; anonymous
-observation is at least five minutes apart and limited to one subject. Multiple
-destinations for one PR still share a read, and provider retry/reset guidance
-postpones the next source read. This avoids pretending that each watch owns the
-provider quota. Webhooks remain the better transport when lower latency or
-larger scale is required.
+least one minute apart with at most seven distinct PR subjects and at most five
+pages each of checks and statuses. That bounds steady-state daemon polling below
+5,000 requests per hour even when every page is full. Anonymous observation is at least five
+minutes apart, limited to one subject and one page per collection. A larger
+collection fails visibly and backs off rather than silently missing a revision.
+Multiple destinations for one PR still share a read, and provider retry/reset
+guidance postpones the next source read. A small adapter-wide hourly request
+budget also bounds registrations and manual reads, not only scheduled polls.
+It is disposable across daemon restart; GitHub's authoritative rate headers
+remain the backstop after a restart. Webhooks remain the better transport when
+lower latency or larger scale is required.
 
 The ADO adapter observes one exact build identity in the form
 `organization/project/build-id`. It derives revisions only from the build ID,
