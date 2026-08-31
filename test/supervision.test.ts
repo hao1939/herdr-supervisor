@@ -508,7 +508,8 @@ test("every supervisor turn receives the null protocol for optional tool fields"
 test("a human correction updates durable authority before execution", () => {
   const prompt = supervisorSystemPrompt("Base prompt.");
   assert.match(prompt, /contradicts, retracts, or disowns a statement already stored in a goal contract/);
-  assert.match(prompt, /update every affected existing contract before reconsidering execution/);
+  assert.match(prompt, /update that existing contract before reconsidering that goal's execution/);
+  assert.match(prompt, /same rule separately to every affected goal/);
   assert.match(prompt, /cannot override a contradictory goal\.json/);
 });
 
