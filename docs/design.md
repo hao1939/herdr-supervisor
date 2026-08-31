@@ -371,11 +371,13 @@ External watches run as small deterministic reads inside the existing Pi
 extension process. They share the nearest-deadline timer and the per-goal
 review signal map.
 
-The watch detects change; it does not interpret it. It compares one revision
-identity — a pull request head or a build result — and nothing more. An
-unchanged revision schedules another read without a model turn. A changed
-revision queues the ordinary focused review, where the model asks the same
-worker to reread provider authority and judge it.
+The watch detects change; it does not interpret it. It computes one compact
+revision identity from provider metadata: GitHub PR head, state, draft and
+mergeability state, checks, and commit statuses; or Azure DevOps build status,
+result, source version, and finish time. An unchanged identity schedules
+another read without a model turn. A changed identity queues the ordinary
+focused review, where the model asks the same worker to reread provider
+authority and judge it.
 
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor and not the watch.
@@ -440,7 +442,8 @@ flowchart TD
     K -->|worker process stopped| RS[Resume the exact<br/>native session]
     K -->|worker identity changed| FC[Fail closed<br/>no prompt sent]
     K -->|review made no decision| BR[One immediate retry<br/>then the next bounded review]
-    K -->|checkpoint write failed| CB[Action already closed<br/>state reloaded]
+    K -->|pre-action checkpoint failed| PW[No action applied<br/>decision remains retryable]
+    K -->|post-delivery checkpoint failed| CB[Action already closed<br/>state reloaded]
     K -->|audit write failed| AV[Visible warning<br/>authoritative state unchanged]
 
     FC --> H[Ask the human]
