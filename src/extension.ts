@@ -142,7 +142,12 @@ function exactSessionAgent(snapshot, session) {
   return matches[0];
 }
 
-export default function herdrSupervisor(pi: ExtensionAPI) {
+type SupervisorServices = {
+  loadGoals?: typeof loadSupervisorGoals;
+};
+
+export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
+  const readGoals = services.loadGoals || loadSupervisorGoals;
   let stopSubscription: undefined | (() => void);
   let reconnectTimer: undefined | ReturnType<typeof setTimeout>;
   let reviewTimer: undefined | ReturnType<typeof setTimeout>;
@@ -195,7 +200,7 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
   }
 
   async function reloadGoals() {
-    const goals = await loadSupervisorGoals();
+    const goals = await readGoals();
     goalCache = {
       active: new Map(goals.active.map((binding) => [binding.goalId, binding])),
       unstarted: goals.unstarted,
@@ -473,7 +478,10 @@ export default function herdrSupervisor(pi: ExtensionAPI) {
     cacheBinding(refreshed);
     if (previous.paneId !== refreshed.paneId) {
       try { await reloadGoals(); }
-      catch (error) { reportBackgroundFailure("Could not refresh relocated worker cache", error); }
+      catch (error) {
+        goalCache = undefined;
+        reportBackgroundFailure("Could not refresh relocated worker cache", error);
+      }
     }
     const current = goalCache?.active.get(refreshed.goalId) || refreshed;
     return { ...current, ...runtimeFor(current) };
