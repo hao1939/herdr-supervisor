@@ -186,6 +186,14 @@ A revision includes only fields whose changes may matter to a worker. Examples:
 - PR head, state, draft state, mergeability, reviews, checks, and statuses;
 - build source version, status, result, and finish time.
 
+The PoC GitHub adapter derives its revision from the listed pull-request
+metadata, which already moves when a review is submitted or dismissed, plus the
+head commit's checks and statuses. It does not read mergeability, because that
+field is absent from the list response and would cost one extra request per
+selected pull request. A mergeability recomputation that changes nothing else,
+such as a new base-branch conflict, therefore waits for the bounded goal review
+until that request budget is settled.
+
 On first discovery, the daemon records the revision and emits one wake. This
 may produce a harmless extra review when a resource was just created, but it
 also catches a resource that changed while the daemon was stopped. Avoiding
