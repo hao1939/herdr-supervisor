@@ -337,6 +337,17 @@ The hardened revision was then repeated on MLVM in two real Goal states:
   revision resumed that exact Goal, revalidated the same session, delivered the
   hint, and was consumed.
 
+The ADO adapter was then exercised through the same shared daemon. The first
+authenticated read exposed and fixed a real boundary error: current Entra
+tokens can exceed an unrelated 2 KB text limit. A realistic bounded credential
+limit now covers that case without persisting or printing the token. A one-shot
+watch then recorded build `178954287` as `inProgress` while its destination
+worker continued separate useful work. When the build became `completed`, the
+daemon delivered directly into that same active native Codex session, consumed
+the watch, and the worker made one fresh `event-watch read`. The supervisor was
+not on the successful path, and the failed build result was treated only as
+authoritative transport evidence, not as success for the worker's goal.
+
 The first registration attempt also proved an important deployment boundary:
 the container did not automatically inherit the host's GitHub credential. The
 watch was not created and the error stayed visible. Restarting the environment
