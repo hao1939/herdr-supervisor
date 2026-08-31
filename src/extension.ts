@@ -464,16 +464,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   async function reconcileWorkerLabels(goals) {
     if (mode() !== "live") return;
     const snapshot = await client.snapshot();
-    for (const binding of goals.active) {
+    await Promise.all(goals.active.map(async (binding) => {
       if (identityMismatch(
         binding,
         findAgent(snapshot, binding.paneId),
         findPane(snapshot, binding.paneId),
-      )) continue;
+      )) return;
       // Display metadata is best effort. A naming failure cannot block or
       // compete with supervision of the goal itself.
       await applyWorkerLabel(binding);
-    }
+    }));
   }
 
 
@@ -2103,11 +2103,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
     const storedGoals = await reloadGoals();
-    try {
-      await reconcileWorkerLabels(storedGoals);
-    } catch (error) {
-      reportBackgroundFailure("Could not refresh worker display names", error);
-    }
     const goals = await activeBindings();
     for (const binding of goals.active) {
       const runtime = runtimeFor(binding);
@@ -2131,6 +2126,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       armGlobalReviewTimer();
     }
     ctx.ui.setStatus("herdr-supervisor", goals.active.length ? `supervising ${goals.active.length}` : undefined);
+    void reconcileWorkerLabels(storedGoals).catch((error) => {
+      reportBackgroundFailure("Could not refresh worker display names", error);
+    });
   });
 
   pi.on("agent_settled", async () => {

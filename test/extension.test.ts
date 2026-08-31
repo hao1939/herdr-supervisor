@@ -1906,6 +1906,7 @@ test("restart refreshes active worker names without treating completed goals as 
   const pi = fakePi();
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => renamed.length === 1);
 
   assert.deepEqual(renamed, [{ paneId: activeWorker.paneId, label: "Keep validating the current release." }]);
   const goals = await loadSupervisorGoals(root);
@@ -1926,7 +1927,7 @@ test("a display snapshot failure cannot disable supervision startup", async (t) 
   let subscriptions = 0;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => {
     snapshots += 1;
-    if (snapshots === 1) throw new Error("temporary display read failure");
+    if (snapshots === 2) throw new Error("temporary display read failure");
     return snapshot({ agent_status: "working", state_change_seq: 2 });
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => {
@@ -1937,6 +1938,7 @@ test("a display snapshot failure cannot disable supervision startup", async (t) 
   const pi = fakePi();
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
 
   assert.equal(subscriptions, 1);
   assert.ok(snapshots > 1);
