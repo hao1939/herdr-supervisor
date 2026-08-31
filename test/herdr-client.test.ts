@@ -229,6 +229,15 @@ test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) =
   assert.equal(reads, 2);
 });
 
+test("startAndWaitAgent immediately rejects unrelated agent lookup errors", async (t) => {
+  const client = new HerdrClient();
+  const error = new Error("Herdr agent.get connection closed");
+  t.mock.method(client, "startAgent", async () => ({ type: "agent_started" }));
+  t.mock.method(client, "getAgent", async () => { throw error; });
+
+  await assert.rejects(client.startAndWaitAgent({ paneId: "w1:p2" }), error);
+});
+
 test("startAndWaitAgent shares one deterministic launch and readiness deadline", async (t) => {
   const client = new HerdrClient();
   let now = 1_000;
@@ -264,6 +273,14 @@ test("native session discovery tolerates a brief missing-agent transition", asyn
   const agent = await client.waitForAgentSession("w1:p2", 1_000);
   assert.equal(agent.agent_session.value, "session-1");
   assert.equal(reads, 2);
+});
+
+test("native session discovery immediately rejects unrelated agent lookup errors", async (t) => {
+  const client = new HerdrClient();
+  const error = new Error("Herdr agent.get connection closed");
+  t.mock.method(client, "getAgent", async () => { throw error; });
+
+  await assert.rejects(client.waitForAgentSession("w1:p2"), error);
 });
 
 test("subscription returns immediately and forwards events", async () => {
