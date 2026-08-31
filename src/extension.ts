@@ -6,7 +6,9 @@ import { HerdrClient } from "./herdr-client.ts";
 import {
   loadSupervisorGoals,
   installSupervisorGoal,
+  prepareExternalWake,
   recordExternalChange,
+  recordExternalWake,
   recordDecision,
   refineSupervisorGoal,
   refreshWorkerLocation,
@@ -183,8 +185,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   function externalRereadInFlight(binding) {
     return Boolean(
       binding.externalChange
-      && Number.isInteger(binding.externalChange.workerSequence)
-      && binding.lastDecision?.decision === "steer",
+      && Number.isInteger(binding.externalChange.workerSequence),
     );
   }
 
@@ -411,6 +412,95 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const change = binding.externalChange;
     if (!change || resolvedExternalChangeRevision === change.revision) return message.trim();
     return `The watched ${change.source} ${change.subject} changed. Reread its current authoritative state before deciding what it means, then continue the same goal.\n\n${message.trim()}`;
+  }
+
+  function externalWakeInstruction(binding, summary: string) {
+    const change = binding.externalChange!;
+    const previousWait = binding.wait?.condition
+      ? `\nYou were waiting for: ${binding.wait.condition}`
+      : "";
+    return `A watched resource for your current goal changed.\n`
+      + `Resource: ${change.source} ${change.subject}\n`
+      + `Watcher summary: ${summary}${previousWait}\n\n`
+      + "This notification is only a change signal, not authoritative evidence. "
+      + "Reread the resource from its provider, handle everything that changed, and continue the same goal.";
+  }
+
+  async function wakeWorkerForExternalChange(binding, summary: string) {
+    let snapshot = await client.snapshot();
+    const relocated = await adoptExactSession(binding, snapshot);
+    if (relocated) binding = relocated;
+    let agent = findAgent(snapshot, binding.paneId);
+    let pane = findPane(snapshot, binding.paneId);
+    let mismatch = identityMismatch(binding, agent, pane);
+    if (mismatch) throw new Error(mismatch);
+    if (agent.agent_status === "working") {
+      throw new Error("the exact worker became busy before direct delivery");
+    }
+    const instruction = externalWakeInstruction(binding, summary);
+
+    const prepared = await prepareExternalWake(binding, {
+      revision: binding.externalChange!.revision,
+      progress: `Preparing to notify the worker that ${binding.externalChange!.source} ${binding.externalChange!.subject} changed.`,
+    });
+    cacheCheckpoint(binding, prepared);
+    binding = goalCache?.active.get(binding.goalId) || binding;
+    stopExternalWatch(binding);
+
+    if (
+      binding.agentSession.agent === "codex"
+      && ["idle", "done"].includes(agent.agent_status)
+    ) {
+      await client.promptAgent(binding.paneId, "/goal resume", {
+        until: ["working"],
+        timeout_ms: 5000,
+      });
+      snapshot = await client.snapshot();
+      agent = findAgent(snapshot, binding.paneId);
+      pane = findPane(snapshot, binding.paneId);
+      mismatch = identityMismatch(binding, agent, pane);
+      if (mismatch) throw new Error(`native Goal resumed with the wrong worker: ${mismatch}`);
+      if (agent.agent_status !== "working") {
+        throw new Error("native Goal settled before the external update could be delivered");
+      }
+    }
+
+    let deliveryError;
+    try {
+      await client.promptAgent(binding.paneId, instruction);
+    } catch (error) {
+      deliveryError = error;
+    }
+
+    let boundary;
+    let boundaryError;
+    try {
+      boundary = await capturePostDeliveryBoundary(binding);
+    } catch (error) {
+      boundaryError = error;
+      boundary = unavailableRereadBoundary();
+    }
+    const progress = deliveryError || boundaryError
+      ? `A change in ${binding.externalChange!.source} ${binding.externalChange!.subject} triggered a direct worker notification, but delivery evidence is incomplete.`
+      : `The watcher directly notified the worker that ${binding.externalChange!.source} ${binding.externalChange!.subject} changed.`;
+    const result = await recordExternalWake(binding, {
+      revision: binding.externalChange!.revision,
+      progress,
+      action: instruction,
+      observationCursor: boundary.observationCursor,
+      workerSequence: boundary.workerSequence,
+    });
+    cacheCheckpoint(binding, result.state);
+    runtimeFor(binding).externalRereadCandidateRevision = undefined;
+    scheduleReview(binding);
+    if (result.auditError) {
+      reportBackgroundFailure("Could not audit the direct external wake", result.auditError);
+    }
+    if (deliveryError || boundaryError) {
+      const detail = [deliveryError?.message, boundaryError?.message].filter(Boolean).join("; ");
+      throw new Error(`direct worker notification could not be confirmed: ${detail}`);
+    }
+    return binding;
   }
 
   async function saveSteerCheckpoint(
@@ -764,7 +854,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         cacheCheckpoint(binding, state);
         handleSignal(binding.paneId, {
           force: true,
-          reason: `${observation.summary}. This external change is only a wake hint; have the same worker reread authoritative state before deciding what it means.`,
+          reason: observation.summary!,
           key: `external:${watch.source}:${watch.subject}:${watch.revision}`,
         });
       }
@@ -979,6 +1069,39 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       : currentDecision;
     const change = binding.externalChange;
     const rereadWorking = externalRereadInFlight(binding) && agent?.agent_status === "working";
+    if (
+      change
+      && !externalRereadInFlight(binding)
+      && !mismatch
+      && mode() === "live"
+    ) {
+      if (agent?.agent_status === "working") {
+        scheduleReview(binding);
+        return;
+      }
+      try {
+        await wakeWorkerForExternalChange(
+          binding,
+          signal?.key.startsWith("external:") ? signal.reason : `${change.source} ${change.subject} changed`,
+        );
+        return;
+      } catch (error) {
+        reportBackgroundFailure(`Could not directly wake ${paneId}`, error);
+        const latest = await bindingForPane(paneId).catch(() => undefined);
+        const latestSnapshot = await client.snapshot().catch(() => undefined);
+        const latestAgent = latestSnapshot && latest ? findAgent(latestSnapshot, latest.paneId) : undefined;
+        if (latest && latestAgent?.agent_status === "working") {
+          scheduleReview(latest);
+          return;
+        }
+        queueSignal(paneId, {
+          force: true,
+          reason: `Direct external-change delivery could not be confirmed: ${error.message}. Recover the exact worker and preserve the pending authoritative reread.`,
+          key: `external-delivery-failed:${change.source}:${change.subject}:${change.revision}`,
+        });
+        return;
+      }
+    }
     const decision = change && !rereadWorking && !mismatch && !signal?.key.startsWith("external:")
       ? {
           wake: true,
@@ -1669,7 +1792,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns; the external event is only a wake hint and the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a peer review can select a materially affected wait and a watched external change wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. For one exact GitHub PR or ADO build, external_watch lets small in-process code observe revision changes without model turns and directly notify the exact worker; the notification is only a change signal, so the worker must reread authority. Use review_at for an evidence-appropriate exact safety check; a peer review can select a materially affected wait and a watched external change wakes earlier, so do not repeatedly schedule short reviews of unchanged state. Use null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),

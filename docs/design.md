@@ -111,20 +111,23 @@ detailed evidence. Each goal keeps three files:
 `goal.json` (the outcome), `current.json` (where execution stands), and
 `journal.jsonl` (audit only).
 
-### What wakes the supervisor
+### What wakes work and review
 
 ```mermaid
 flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
     C[Selected peer goal changed] --> Q
-    D[Watched PR or build revision changed] --> Q
+    D[Watched PR or build revision changed] -->|direct notification| W[Exact worker]
+    W -->|later state change| A
     Q --> R[Focused review]
     E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
 ```
 
-The supervisor sleeps otherwise. It never polls a worker.
+The supervisor sleeps otherwise. It never polls a worker. The external watcher
+does not ask the supervisor to relay a routine update; it wakes the exact worker
+that owns the goal. That worker's later result enters the normal review path.
 
 ### One review, one decision
 
@@ -244,11 +247,14 @@ Herdr.
 
 Polling schedules remain disposable memory. If a watched PR or build changes,
 only that unresolved fact is saved in `current.json`. It survives restart and
-cannot be cleared by merely sending a prompt or receiving a worker reply. After
-the reread delivery attempt, the supervisor saves the current transcript cursor
-or terminal fingerprint. A later native final response, or a later settled
-Herdr transition with a changed fixed terminal fingerprint, establishes only a
-fresh result candidate. The model decides whether that result actually proves
+cannot be cleared by merely sending a prompt or receiving a worker reply.
+Before direct delivery, the runtime saves a fail-closed attempted boundary and
+clears the old wait in the same write. A crash can therefore lose a notification
+but cannot send it twice. After the delivery attempt, the runtime replaces that
+marker with the current transcript cursor or terminal fingerprint. A later
+native final response, or a later settled Herdr transition with a changed fixed
+terminal fingerprint, establishes only a fresh result candidate. The model
+decides whether that result actually proves
 the authoritative reread and acknowledges the exact pending revision in its
 ordinary `leave`, `steer`, `ask_human`, or `accept` decision. Code then clears
 the matching revision atomically with that decision. This keeps semantic
@@ -303,9 +309,9 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; an external watch may wake the supervisor when a PR or build changes.
-The supervisor then judges the refreshed evidence through its normal focused
-review. There is no second review lifecycle, reviewer state machine, attempt
+findings. An external watch directly notifies that worker when a PR or build
+changes. The supervisor judges the worker's later result through its normal
+focused review. There is no second review lifecycle, reviewer state machine, attempt
 budget, or goal schema. A separate review goal exists only when review itself
 is the human's distinct durable outcome, such as an ongoing project-wide review
 program—not merely because one implementation reached a review step.
@@ -369,16 +375,23 @@ unrelated useful work can continue.
 ### External watches
 
 External watches run as small deterministic reads inside the existing Pi
-extension process. They share the nearest-deadline timer and the per-goal
-review signal map.
+extension process. They share the nearest-deadline timer.
 
 The watch detects change; it does not interpret it. It computes one compact
 revision identity from provider metadata: GitHub PR head, state, draft and
 mergeability state, checks, and commit statuses; or Azure DevOps build status,
 ID, result, source version, and finish time. An unchanged identity schedules
-another read without a model turn. A changed identity queues the ordinary
-focused review, where the model asks the same worker to reread provider
-authority and judge it.
+another read without a model turn. A changed identity sends the exact worker a
+small notification containing the resource, the provider summary, and the
+condition it was waiting for. The worker rereads provider authority and judges
+the change. When the worker settles, its ordinary Herdr event asks the
+supervisor to review the result.
+
+The direct notification is a mechanical runtime action, not a fifth supervisor
+decision. A fail-closed attempted boundary is checkpointed before any prompt;
+successful delivery then records the exact post-delivery boundary. If delivery
+or identity cannot be confirmed, the unresolved change remains durable and the
+supervisor handles recovery through the normal fail-closed review path.
 
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor and not the watch.

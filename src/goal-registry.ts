@@ -57,6 +57,52 @@ export async function recordExternalChange(binding, change, root?, now?) {
   }, root, now);
 }
 
+export async function prepareExternalWake(binding, input, root?, now?) {
+  return updateGoalState(binding.goalId, (current) => {
+    if (current.externalChange?.revision !== input.revision) {
+      throw new Error("the watched external resource changed before its notification was prepared");
+    }
+    current.externalChange.workerSequence = Number.MAX_SAFE_INTEGER;
+    current.observationCursor = { kind: "reread-boundary-unavailable" };
+    current.progress = input.progress;
+    delete current.wait;
+    delete current.reviewAt;
+    return current;
+  }, root, now);
+}
+
+export async function recordExternalWake(binding, input, root?, now = () => new Date().toISOString()) {
+  const at = now();
+  const state = await updateGoalState(binding.goalId, (current) => {
+    if (current.externalChange?.revision !== input.revision) {
+      throw new Error("the watched external resource changed again before its notification was recorded");
+    }
+    current.externalChange.workerSequence = input.workerSequence;
+    current.observationCursor = structuredClone(input.observationCursor);
+    current.progress = input.progress;
+    delete current.wait;
+    delete current.reviewAt;
+    return current;
+  }, root, () => at);
+  let auditError;
+  try {
+    await appendAudit({
+      v: 1,
+      id: `audit_${randomUUID()}`,
+      at,
+      type: "external_wake_recorded",
+      goalId: binding.goalId,
+      goalRevision: state.revision,
+      summary: input.progress,
+      action: input.action,
+      evidence: [],
+    }, root);
+  } catch (error) {
+    auditError = error;
+  }
+  return { state, auditError };
+}
+
 export async function loadSupervisorGoals(root?) {
   const records = await listGoalRecords(root);
   return {
