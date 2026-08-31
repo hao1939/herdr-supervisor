@@ -61,6 +61,7 @@ export function githubPullRequestDiscovery({
     async scan(known = []) {
       const observations = [];
       const pullsBySubject = new Map();
+      const knownSubjects = new Set(known.map((resource) => resource.subject));
       for (const { owner, repository } of scopes) {
         const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
         const pulls = await json(
@@ -83,6 +84,7 @@ export function githubPullRequestDiscovery({
       const annotated = [...pullsBySubject.entries()]
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.body) }))
         .filter((item) => item.goalId)
+        .sort((left, right) => Number(knownSubjects.has(right.subject)) - Number(knownSubjects.has(left.subject)))
         .slice(0, MAX_ANNOTATED_PULLS);
       for (const { subject, pull, goalId } of annotated) {
         const parsed = parseSubject(subject);

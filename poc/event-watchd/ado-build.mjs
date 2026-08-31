@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const GOAL_TAG = /^herdr-goal=(g_[a-zA-Z0-9_-]+)$/;
+const MAX_BUILDS = 500;
 const execFileAsync = promisify(execFile);
 
 function parseDefinition(value) {
@@ -75,7 +76,7 @@ export function adoBuildDiscovery({
   return {
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
-      const builds = new Map();
+      const recent = new Map();
       for (const { organization, project, definitionId } of scopes) {
         const base = `https://dev.azure.com/${encodeURIComponent(organization)}/${encodeURIComponent(project)}`;
         const result = await json(
@@ -84,18 +85,31 @@ export function adoBuildDiscovery({
           auth,
         );
         if (!Array.isArray(result.value)) throw new Error("Azure DevOps build discovery returned an invalid list");
-        for (const build of result.value) builds.set(`${organization}/${project}/${build.id}`, build);
+        for (const build of result.value) recent.set(`${organization}/${project}/${build.id}`, build);
       }
+      const selected = new Map();
       for (const resource of known) {
-        if (builds.has(resource.subject)) continue;
+        if (selected.size >= MAX_BUILDS) break;
         const parsed = parseSubject(resource.subject);
         if (!parsed || !allowedProjects.has(`${parsed.organization}/${parsed.project}`)) continue;
+        const current = recent.get(resource.subject);
+        if (current) {
+          selected.set(resource.subject, current);
+          continue;
+        }
         const base = `https://dev.azure.com/${encodeURIComponent(parsed.organization)}/${encodeURIComponent(parsed.project)}`;
-        const build = await json(fetchImpl, `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`, auth);
-        builds.set(resource.subject, build);
+        selected.set(resource.subject, await json(
+          fetchImpl,
+          `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`,
+          auth,
+        ));
+      }
+      for (const [subject, build] of recent) {
+        if (selected.size >= MAX_BUILDS) break;
+        if (!selected.has(subject) && taggedGoal(build.tags)) selected.set(subject, build);
       }
       const observations = [];
-      for (const [subject, build] of builds) {
+      for (const [subject, build] of selected) {
         const goalId = taggedGoal(build.tags);
         if (!goalId) continue;
         const stable = {

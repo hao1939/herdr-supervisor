@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -81,6 +81,43 @@ test("a failed delivery survives restart and retries from the bounded revision c
   await recovered.runOnce();
   assert.deepEqual(delivered, [["g_owner", "one"]]);
   assert.equal((Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any).pending, undefined);
+});
+
+test("restart replaces a pending revision with current provider state before waking", async (t) => {
+  const directory = await temporary(t, "event-watch-current-revision-");
+  const statePath = join(directory, "state.json");
+  let revision = "old";
+  const source = { scan: async () => [{ subject: "resource-1", goalId: "g_owner", revision, payload: {} }] };
+  const first = new DiscoveredEventWatcher({
+    statePath,
+    sources: { source },
+    deliver: async () => { throw new Error("Herdr unavailable"); },
+    diagnose: () => {},
+  });
+  await first.runOnce();
+
+  revision = "current";
+  const delivered = [];
+  const recovered = new DiscoveredEventWatcher({
+    statePath,
+    sources: { source },
+    deliver: async (_goalId, events) => delivered.push(events[0].revision),
+  });
+  await recovered.runOnce();
+
+  assert.deepEqual(delivered, ["current"]);
+});
+
+test("array-shaped checkpoint resources fail instead of losing observations", async (t) => {
+  const directory = await temporary(t, "event-watch-invalid-state-");
+  const statePath = join(directory, "state.json");
+  await writeFile(statePath, '{"version":1,"resources":[]}\n');
+  const watcher = new DiscoveredEventWatcher({
+    statePath,
+    sources: { source: { scan: async () => [] } },
+    deliver: async () => {},
+  });
+  await assert.rejects(watcher.runOnce(), /state is invalid or unsupported/);
 });
 
 test("source and delivery diagnostics coalesce but recover naturally", async (t) => {
@@ -221,6 +258,41 @@ test("GitHub discovery refreshes a remembered pull request outside the recent wi
   assert.ok(urls.some((url) => url.endsWith("/pulls/42")));
 });
 
+test("GitHub discovery does not crowd a remembered pull request out with recent results", async () => {
+  const recent = Array.from({ length: 20 }, (_, index) => ({
+    number: index + 1,
+    body: `## Supervision\n- Goal ID: g_recent_${index + 1}`,
+    head: { sha: `recent-${index + 1}` },
+    state: "open",
+    draft: false,
+    updated_at: "2026-09-01T00:00:00Z",
+  }));
+  const remembered = {
+    number: 42,
+    body: "## Supervision\n- Goal ID: g_remembered",
+    head: { sha: "remembered" },
+    state: "open",
+    draft: false,
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("/pulls?")) return response(recent);
+      if (String(url).endsWith("/pulls/42")) return response(remembered);
+      if (String(url).includes("check-runs")) return response({ check_runs: [] });
+      if (String(url).includes("/status?")) return response({ statuses: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{ subject: "owner/repo#42", goalId: "g_remembered" }]);
+
+  assert.equal(found.length, 20);
+  assert.ok(found.some((item) => item.subject === "owner/repo#42"));
+});
+
 test("ADO discovery uses the durable build tag and current build revision", async () => {
   const source = adoBuildDiscovery({
     definitions: ["org/project/77"],
@@ -265,6 +337,38 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.ok(urls.some((url) => url.includes("/builds/101?")));
+});
+
+test("ADO discovery bounds output without dropping remembered builds", async () => {
+  const definitions = Array.from({ length: 6 }, (_, index) => `org/project/${index + 1}`);
+  const source = adoBuildDiscovery({
+    definitions,
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("builds?")) {
+        const definition = Number(new URL(text).searchParams.get("definitions"));
+        return response({ value: Array.from({ length: 100 }, (_, index) => ({
+          id: definition * 1_000 + index,
+          tags: [`herdr-goal=g_recent_${definition}_${index}`],
+          sourceVersion: `sha-${definition}-${index}`,
+          status: "inProgress",
+        })) });
+      }
+      if (text.includes("/builds/999?")) return response({
+        id: 999,
+        tags: ["herdr-goal=g_remembered"],
+        sourceVersion: "remembered",
+        status: "inProgress",
+      });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{ subject: "org/project/999", goalId: "g_remembered" }]);
+
+  assert.equal(found.length, 500);
+  assert.ok(found.some((item) => item.subject === "org/project/999"));
 });
 
 test("Herdr delivery resolves a goal to its current exact native session", async (t) => {

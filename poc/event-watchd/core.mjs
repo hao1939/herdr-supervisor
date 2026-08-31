@@ -7,7 +7,7 @@ const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
 const MAX_TEXT = 2_000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SCAN_RESULTS = 500;
-const DEFAULT_MAX_RESOURCES = 1_024;
+const DEFAULT_MAX_RESOURCES = MAX_SCAN_RESULTS;
 const MAX_EVENTS_PER_DELIVERY = 20;
 
 function requiredText(value, name) {
@@ -51,7 +51,8 @@ function emptyState() {
 
 function validateState(value, maxResources) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || value.version !== VERSION || !value.resources || typeof value.resources !== "object") {
+    || value.version !== VERSION || !value.resources || typeof value.resources !== "object"
+    || Array.isArray(value.resources)) {
     throw new Error("event watcher state is invalid or unsupported");
   }
   const entries = Object.entries(value.resources);
@@ -238,7 +239,6 @@ export class DiscoveredEventWatcher {
 
   async run() {
     await this.ready;
-    await this.deliverPending();
     const observations = await this.scan();
     const next = structuredClone(this.state);
     let changed = false;

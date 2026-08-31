@@ -174,6 +174,13 @@ worker, delivery fails closed. The daemon does not guess another worker or
 create a goal. It records one bounded diagnostic for the supervisor. The
 supervisor uses ordinary goal reasoning and tools to repair the situation.
 
+The PoC still has two production gates. Its standalone daemon currently writes
+diagnostics to service stderr rather than the supervisor conversation, and its
+final exact-worker check and Herdr prompt are separate requests. Replacing the
+current watcher requires one small supervisor-visible diagnostic adapter and a
+session-addressed or atomic Herdr prompt boundary. These are delivery safety
+requirements, not reasons to add watch registration.
+
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
 must be idempotent or independently verified.
@@ -216,6 +223,13 @@ Herdr Supervisor supplies the goal resolver and wake adapter. Provider adapters
 remain small modules that can later consume webhooks or service hooks instead
 of polling without changing the observation contract.
 
+Configured scopes must also define who may write trusted ownership metadata.
+The current GitHub PR-body convention is appropriate only when a trusted worker
+or maintainer owns that block. A public contributor can edit their own PR body,
+so production use for public intake needs a maintainer- or bot-authored
+metadata record. This changes only provider authorization; it does not create
+a subscription lifecycle.
+
 The provisioner has only two integration duties:
 
 - start the daemon with its configured provider scopes; and
@@ -223,14 +237,23 @@ The provisioner has only two integration duties:
 
 ## Live evidence
 
-The MLVM experiment proved the identity path:
+The MLVM experiment now proves the metadata path end to end for goal
+`g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde` and its exact current worker in pane
+`w1:p11`:
 
-- ADO PR `16980570` contains a complete `## Supervision` block.
-- Its goal ID maps exactly to the active canonical goal and current worker.
-- Linked build `178997557` has useful build state but no goal metadata.
+- Builds `178997557`, `179017733`, and `179018392` carry the durable goal tag;
+  the worker registered no watch.
+- First discovery woke the exact worker. The worker reread ADO authority and
+  reconciled the resources instead of treating the hint as completion proof.
+- Canceling duplicate build `179018392` produced later revisions and another
+  wake without renewal. Its final state is completed/canceled.
+- Build `179017733` remains `notStarted`. Repeated unchanged scans have produced
+  no new wake, while the ordinary goal checkpoint retains its bounded review.
+- The shared daemon remained healthy and retained all three latest revisions in
+  its bounded checkpoint.
 
-The PR is therefore discoverable now. Standalone builds need the goal tag added
-when they are queued. This is the first end-to-end case for the revised PoC.
+Live restart recovery, supervisor-visible diagnostics, and the atomic exact
+session delivery boundary remain unproven production gates.
 
 ## PoC acceptance
 
