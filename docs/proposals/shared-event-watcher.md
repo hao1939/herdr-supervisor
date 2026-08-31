@@ -247,13 +247,19 @@ The MLVM experiment now proves the metadata path end to end for goal
   reconciled the resources instead of treating the hint as completion proof.
 - Canceling duplicate build `179018392` produced later revisions and another
   wake without renewal. Its final state is completed/canceled.
-- Build `179017733` remains `notStarted`. Repeated unchanged scans have produced
-  no new wake, while the ordinary goal checkpoint retains its bounded review.
+- Repeated unchanged scans of build `179017733` produced no new wake. After the
+  daemon restarted with its existing checkpoint, the build changed from
+  `notStarted` to `inProgress` at `2026-08-31T19:31:37Z`; the watcher recorded
+  the new revision at `19:31:43Z` and woke the same Codex session
+  `01a04ca8-8771-7473-8e20-cebef028f430`.
+- That worker reread the exact build and SHA, recorded its own durable
+  checkpoint, and continued independent goal work while leaving terminal ADO
+  proof event-driven.
 - The shared daemon remained healthy and retained all three latest revisions in
   its bounded checkpoint.
 
-Live restart recovery, supervisor-visible diagnostics, and the atomic exact
-session delivery boundary remain unproven production gates.
+Supervisor-visible diagnostics and the atomic exact-session delivery boundary
+remain unproven production gates.
 
 ## PoC acceptance
 
