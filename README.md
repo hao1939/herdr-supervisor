@@ -171,7 +171,7 @@ change; the metadata only makes the originating supervised work easy to trace.
 - **Codex only.** Worker startup, message-level observation, and exact-session
   recovery are Codex-specific. Other Herdr CLIs fall back to terminal scraping.
 - **One agent per goal.** Multi-agent execution (relay, reviewer pair) is
-  designed but not implemented. See `docs/poc-design.md`.
+  designed but not implemented. See `docs/multi-agent-design.md`.
 
 ## Development
 
