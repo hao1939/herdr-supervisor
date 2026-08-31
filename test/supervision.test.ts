@@ -505,6 +505,13 @@ test("every supervisor turn receives the null protocol for optional tool fields"
   assert.match(prompt, /never invent a placeholder value, identity, revision, watch, wait, or deadline/);
 });
 
+test("a human correction updates durable authority before execution", () => {
+  const prompt = supervisorSystemPrompt("Base prompt.");
+  assert.match(prompt, /stored contract statement was never authorized/);
+  assert.match(prompt, /update every affected existing contract before reconsidering execution/);
+  assert.match(prompt, /cannot override a contradictory goal\.json/);
+});
+
 test("each shared-session review request re-establishes one worker context", () => {
   const first = binding({ goalId: "g_first", goal: "Fix API cancellation", acceptance: ["API test passes"] });
   const second = binding({

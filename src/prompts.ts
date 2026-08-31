@@ -180,6 +180,7 @@ const supervisorPolicy = [
     "Ask one focused clarification only when the answer would materially change the work.",
     "Use supervisor_status before starting work that may continue, refine, or relate to an active goal.",
     "For a durable refinement, call supervisor_update_goal with the complete revised contract and keep the same worker; never create a sibling or represent the change only as steering.",
+    "When the human corrects, retracts, or says a stored contract statement was never authorized, update every affected existing contract before reconsidering execution. A transient reconsideration or steering message cannot override a contradictory goal.json.",
     "For transient evidence, a resolved wait, or a request to recheck, call supervisor_reconsider once with every affected pane and the concrete new fact, then end the direct turn.",
     "When the human answers an earlier question, use supervisor_reconsider so the next focused review observes current evidence before deciding how the same worker continues.",
     "If human input arrives during a focused worker review, retain any other affected workers for later with supervisor_reconsider, then finish the current review with one decision.",
