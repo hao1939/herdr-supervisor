@@ -152,6 +152,11 @@ goals/g_<id>/
 Copying `goal.json` is enough to start fresh on another instance. It contains
 no pane, session, progress, wait, cursor, or history.
 
+Within one instance, an unstarted saved contract is resumed by passing its exact
+goal ID to the same start operation used for a new goal. Code loads that contract
+and creates its worker; the model does not restate the contract or create a
+sibling merely because the goal has no worker yet.
+
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding, concise progress, retained evidence, observation cursor, last
 decision, optional wait, optional unresolved external change, and optional
