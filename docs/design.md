@@ -355,6 +355,27 @@ graph.
 
 ## Failure behavior
 
+Every failure resolves to one of three outcomes: retry safely, fail closed, or
+surface to the human. Nothing is silently dropped, and no failure path creates
+duplicate work.
+
+```mermaid
+flowchart TD
+    F[Something failed] --> K{What kind?}
+
+    K -->|lost Herdr subscription| RC[Reconnect with backoff<br/>then reread state]
+    K -->|missed event| DL[Nearest review deadline<br/>covers it]
+    K -->|supervisor restarted| RL[Reload every goal from<br/>contract and checkpoint]
+    K -->|worker process stopped| RS[Resume the exact<br/>native session]
+    K -->|worker identity changed| FC[Fail closed<br/>no prompt sent]
+    K -->|review made no decision| BR[One bounded retry<br/>then ask human]
+    K -->|checkpoint write failed| CB[Action already closed<br/>state reloaded]
+    K -->|audit write failed| AV[Visible warning<br/>authoritative state unchanged]
+
+    FC --> H[Ask the human]
+    BR --> H
+```
+
 - Subscription loss reconnects with bounded backoff, then rereads Herdr state.
 - A missed event is covered by the nearest review deadline.
 - An interrupted supervisor reloads every unfinished goal from its contract and
