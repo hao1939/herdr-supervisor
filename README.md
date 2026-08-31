@@ -59,6 +59,8 @@ state at any time.
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
+| `GITHUB_TOKEN` | — | Optional. Raises GitHub pull-request watch above the 60/hour unauthenticated limit |
+| `AZURE_DEVOPS_EXT_PAT` | — | Required for Azure DevOps build watch (the `az` CLI is not in the image) |
 
 Codex runs sandboxed with its normal approval prompts by default. Set
 `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1` to pass `--dangerously-bypass-approvals-and-sandbox`
