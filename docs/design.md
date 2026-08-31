@@ -80,6 +80,11 @@ contract, its latest review checkpoint, and the judgment about what to do next.
 One native agent session can belong to only one unfinished goal, regardless of
 which pane currently routes to it.
 
+Each local worker binding may also keep a short display label. Herdr shows that
+label on the pane, while the opaque goal ID, terminal ID, and native session ID
+remain authoritative. A label helps a human navigate; it never selects a
+worker or proves identity.
+
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.
@@ -171,8 +176,9 @@ In plain language:
 2. The model compares it with active goals.
 3. The model updates a fitting goal or defines one new goal with objective,
    stable context, acceptance criteria, and constraints.
-4. Code validates that contract, creates or selects one worker space, starts
-   Codex, records its exact native session, and gives it the native `/goal`.
+4. Code validates that contract, creates or selects one meaningfully labelled
+   worker space, starts Codex, records its exact native session, and gives it
+   the native `/goal`.
 5. The worker keeps working without supervisor model turns.
 6. A Herdr event or bounded deadline asks the supervisor to review that goal.
 7. Code supplies the goal, fresh Herdr state, and bounded new worker evidence.
@@ -246,7 +252,7 @@ and creates its worker; the model does not restate the contract or create a
 sibling merely because the goal has no worker yet.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
-binding, concise progress, retained evidence, observation cursor, last
+binding and its optional display label, concise progress, retained evidence, observation cursor, last
 decision, optional wait, and optional terminal result. It does not copy live
 worker or provider status; those facts stay with Herdr and the provider.
 
@@ -331,6 +337,20 @@ its own earlier work.
 The worker never sleeps or polls for an external condition. When it has
 genuinely exhausted the safe work it can do now, it reports the exact remaining
 condition once and yields. An idle worker costs nothing.
+
+Idle is not the same as inactive. An unfinished goal keeps its pane because it
+may still own a wait, review, or immediate next action. The first lifecycle
+cleanup is deliberately smaller: after the supervisor accepts a completed
+goal, it closes a settled worker pane only after recording the terminal result,
+and keeps the exact native Codex session in the completed checkpoint. A working
+process is left alone. A close failure is a visible cleanup warning and cannot
+undo completion. Explicit `/unsupervise` still leaves the worker alone, as its
+command promises.
+
+Automatic parking of unfinished waiting goals is deferred. It becomes safe
+only when Herdr can atomically resume and prompt the expected native session;
+until then, saving a little memory does not justify a second parked lifecycle
+or a chance of addressing the wrong process.
 
 When the pull request or build later changes, the watch or the bounded review
 wakes that exact session. The worker rereads the current provider state,

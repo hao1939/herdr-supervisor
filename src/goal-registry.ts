@@ -35,6 +35,7 @@ export function bindingFromRecord(record): GoalBinding {
     paneId: record.state.worker.paneId,
     terminalId: record.state.worker.terminalId,
     agentSession: structuredClone(record.state.worker.agentSession),
+    label: record.state.worker.label,
     goal: record.contract.objective,
     context: [...record.contract.context],
     acceptance: [...record.contract.acceptance],

@@ -8,6 +8,7 @@ import {
   dueBindings,
   findPane,
   formatWorker,
+  goalPaneLabel,
   identityMismatch,
   liveWorker,
   nextReviewDelay,
@@ -77,6 +78,11 @@ test("worker identity captures the exact native session", () => {
     terminalId: "term-1",
     agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" },
   });
+});
+
+test("worker display labels are bounded without changing goal meaning", () => {
+  assert.equal(goalPaneLabel("  Validate   Kubernetes versions  "), "Validate Kubernetes versions");
+  assert.equal(goalPaneLabel("A".repeat(80), 12), `${"A".repeat(11)}…`);
 });
 
 test("native session equality has one exact identity contract", () => {

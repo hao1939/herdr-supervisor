@@ -133,7 +133,8 @@ the supervisor cannot become a second worker.
 
 The supervisor creates goals conversationally. It forms explicit completion
 criteria, places a Codex worker in a new or related tab, records the binding,
-and projects the canonical contract into that worker's native Codex Goal.
+gives its pane a short goal-based label, and projects the canonical contract
+into that worker's native Codex Goal.
 Codex owns the ordinary work-check-continue loop. The supervisor sleeps until a
 Herdr event or review deadline wakes it, then observes the worker once and makes
 exactly one decision:
@@ -150,6 +151,9 @@ is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction. If
 its pane disappeared and the recorded session supports exact resume, the
 executor may create a new routing pane, but only for that saved session.
+After an accepted goal is durably complete, the supervisor closes its settled
+worker pane and keeps the exact native session in the completed checkpoint.
+An unfinished idle or waiting goal is not automatically parked.
 
 For GitHub and Azure DevOps, one shared metadata watcher observes configured
 provider scopes without model turns. Workers attach their durable goal ID when
@@ -190,6 +194,9 @@ change; the metadata only makes the originating supervised work easy to trace.
   recovery are Codex-specific. Other Herdr CLIs fall back to terminal scraping.
 - **One agent per goal.** Multi-agent execution (relay, reviewer pair) is
   designed but not implemented. See `docs/multi-agent-design.md`.
+- **No automatic unfinished-goal parking.** Safe parking needs an atomic Herdr
+  operation that resumes and prompts the expected native session. Until then,
+  idle is treated as execution state rather than proof that a goal is inactive.
 
 ## Development
 

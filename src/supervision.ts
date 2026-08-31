@@ -51,6 +51,12 @@ export function captureIdentity(agent) {
   };
 }
 
+export function goalPaneLabel(objective, limit = 60) {
+  const label = objective.replace(/\s+/g, " ").trim();
+  if (!label) throw new Error("worker display label requires a goal objective");
+  return label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+}
+
 export function identityMismatch(binding, agent, pane?) {
   if (!agent && !pane) return "worker pane is no longer present";
   if (!agent && pane.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";
@@ -183,7 +189,10 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
         ? "turn finished"
         : agent.agent_status;
   const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
-  const worker = `${binding.agentSession.agent} ${binding.paneId}`;
+  const displayLabel = binding.label
+    ? (detailed ? binding.label : compact(binding.label, 40))
+    : undefined;
+  const worker = `${displayLabel ? `${displayLabel} · ` : ""}${binding.agentSession.agent} ${binding.paneId}`;
   const goal = detailed ? binding.goal : compact(binding.goal, 240);
   const lines = [
     `${goalLabel} · ${goalState}`,

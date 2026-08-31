@@ -203,6 +203,29 @@ test("createTab creates an unfocused related-work tab in one exact workspace", a
   }
 });
 
+test("pane display operations keep their exact pane target", async (t) => {
+  const client = new HerdrClient();
+  const requests = [];
+  t.mock.method(client, "request", async (method, params) => {
+    requests.push({ method, params });
+    return { type: "pane_info" };
+  });
+
+  await client.renamePane("w1:p2", "Validate Kubernetes versions");
+  await client.closePane("w1:p2");
+
+  assert.deepEqual(requests, [
+    {
+      method: "pane.rename",
+      params: { pane_id: "w1:p2", label: "Validate Kubernetes versions" },
+    },
+    {
+      method: "pane.close",
+      params: { pane_id: "w1:p2" },
+    },
+  ]);
+});
+
 test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () => {
   let launched = false;
   let checks = 0;

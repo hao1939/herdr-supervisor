@@ -220,6 +220,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   };
   let createTabRequest;
   let startRequest;
+  let renamedPane;
   const deliveredPrompts = [];
   t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
     createTabRequest = request;
@@ -232,6 +233,9 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
     startRequest = request;
     return managed;
+  });
+  t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => {
+    renamedPane = { paneId, label };
   });
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [{ ...managed, name: startRequest?.name }],
@@ -270,6 +274,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     label: "sample-project",
     focus: false,
   });
+  assert.deepEqual(renamedPane, {
+    paneId: managed.pane_id,
+    label: "sample-project",
+  });
   assert.equal(startRequest.kind, "codex");
   assert.equal(startRequest.paneId, managed.pane_id);
   assert.match(startRequest.name, /^goal-[a-z0-9_-]+$/);
@@ -302,6 +310,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
+  assert.equal(goals.active[0].label, "sample-project");
   assert.ok(deliveredPrompts[0].prompt.includes(`- Goal ID: ${JSON.stringify(goals.active[0].goalId)}`));
   assert.ok(deliveredPrompts[0].prompt.includes(`herdr-goal=${goals.active[0].goalId}`));
   assert.match(deliveredPrompts[0].prompt, /Never tag another goal's build or register a watch/);
@@ -354,6 +363,7 @@ test("an unstarted saved goal starts by exact ID without restating its contract"
     return managed;
   });
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -460,6 +470,7 @@ test("a new goal never adopts a legacy-named worker without an existing contract
     assert.equal(paneId, createdAgent.pane_id);
     return createdAgent;
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -490,6 +501,7 @@ test("attaching an existing worker delivers its exact persisted supervision trac
   });
   const prompts = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working", name: "attached-worker" }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -528,6 +540,7 @@ test("a copied goal activated after restart keeps its exact goal and worker trac
   }, root, { goalId: "g_copied_trace" });
   const prompts = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working", name: "copied-worker" }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => prompts.push({ paneId, prompt }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -570,6 +583,7 @@ test("native Goal delivery refuses a replacement session after registration", as
           agent_session: { ...worker.agentSession, value: "replacement_session" },
         });
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -638,6 +652,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   };
   let splitRequest;
   let startRequest;
+  let renamedPane;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [relatedAgent, started],
     panes: [
@@ -654,6 +669,9 @@ test("the supervisor can place related workers in the same tab", async (t) => {
     startRequest = request;
     return started;
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => {
+    renamedPane = { paneId, label };
+  });
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => started);
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
@@ -663,7 +681,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   const result = await pi.tools.get("supervisor_start_goal").execute("start-related", {
     goal: "Implement the related design.",
     acceptance: ["The focused proof passes."],
-    placement: { mode: "related", pane_id: related.paneId },
+    placement: { mode: "related", pane_id: related.paneId, label: "related implementation" },
     working_directory: "/app/projects/example",
     direction: "right",
   }, undefined, undefined, { ui: { setStatus() {} } });
@@ -676,9 +694,14 @@ test("the supervisor can place related workers in the same tab", async (t) => {
     focus: false,
   });
   assert.equal(startRequest.paneId, started.pane_id);
+  assert.deepEqual(renamedPane, {
+    paneId: started.pane_id,
+    label: "related implementation",
+  });
   assert.deepEqual(startRequest.args, [
     "Initialize this worker session only. Do not inspect or change files. Wait for the goal.",
   ]);
+  assert.equal((await loadSupervisorGoals(root)).active.find(({ goalId }) => goalId !== "g_related").label, "related implementation");
   pi.events.get("session_shutdown")();
 });
 
@@ -1461,6 +1484,7 @@ test("a missing native session cannot leave assigned work running unsupervised",
   t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => {
     throw new Error("native session unavailable");
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
 
   const pi = fakePi();
@@ -1533,6 +1557,7 @@ test("retry reuses a pending initialized pane instead of creating another worker
     sessionReady = true;
     return { ...identified, name: workerName };
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -1610,6 +1635,7 @@ test("restart reuses a legacy-named worker for an installed goal instead of crea
     if (!restarted) throw new Error("native session unavailable");
     return { ...identified, name: workerName };
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -1710,6 +1736,7 @@ test("restart never adopts a legacy-named session already owned by another goal"
     assert.equal(paneId, newAgent.pane_id);
     return newAgent;
   });
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => { prompts.push({ paneId, prompt }); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
