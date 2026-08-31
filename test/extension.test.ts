@@ -4001,9 +4001,18 @@ test("missing-pane recovery rejects duplicate processes for one native session",
     pane_id: worker.paneId,
     message: "Continue the exact goal.",
   });
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
 
   assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not start worker recovery/);
   assert.match(result.content[0].text, /multiple Herdr agents expose the same codex session/);
+  assert.match(result.content[0].text, /may decide again in this review turn/);
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /Could not start worker recovery/);
+  assert.match(repeated.content[0].text, /multiple Herdr agents expose the same codex session/);
   assert.equal(creates, 0);
   assert.equal(prompts, 0);
   pi.events.get("session_shutdown")();
