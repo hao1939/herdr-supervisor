@@ -130,8 +130,10 @@ test("pull request traceability never publishes a path-backed session locator", 
   assert.match(trace, /- Pane: "w1:p9"/);
   assert.doesNotMatch(trace, /Codex session:/);
   assert.doesNotMatch(trace, /\/private\/home/);
-  assert.match(trace, /Write the PR description in plain language/);
+  assert.match(trace, /Write the description in plain language/);
   assert.match(trace, /what was wrong and what changes for the user/);
+  assert.ok(trace.indexOf("Write the description") < trace.indexOf("## Supervision"));
+  assert.match(trace, /Append this traceability block after the meaningful explanation/);
   assert.match(trace, /supervision metadata secondary/);
 });
 

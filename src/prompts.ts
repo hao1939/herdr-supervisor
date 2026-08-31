@@ -40,11 +40,12 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
   }
   fields.push(`- Pane: ${JSON.stringify(binding.paneId)}`);
   return [
-    "When you create or update a pull request for this goal, re-read the canonical goal.json and use this traceability format in its description:",
+    "When you create or update a pull request for this goal, re-read the canonical goal.json.",
+    "Write the description in plain language. Lead with what was wrong and what changes for the user, then state scope, proof, and remaining limits clearly. Keep the title and main summary focused on the code change.",
+    "Append this traceability block after the meaningful explanation:",
     "## Supervision",
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
-    "Write the PR description in plain language. Lead with what was wrong and what changes for the user, then state scope, proof, and remaining limits clearly. Keep the title and main summary focused on the code change.",
     "Keep this supervision metadata secondary: it identifies the originating work but is not completion evidence. Never publish a local session path or another private native-session locator.",
   ].join("\n");
 }

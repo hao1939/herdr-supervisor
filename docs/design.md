@@ -226,6 +226,11 @@ budget, or goal schema. A separate review goal exists only when review itself
 is the human's distinct durable outcome, such as an ongoing project-wide review
 program—not merely because one implementation reached a review step.
 
+The lightweight GitHub watch notices head, state, mergeability, checks, and
+commit-status changes. A review comment or approval by itself may therefore wait
+for the ordinary bounded review, where the worker rereads the current PR. That
+fallback preserves correctness without making the watcher another review system.
+
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
 remaining limitations. Supervision identity remains a small secondary block;
