@@ -1120,6 +1120,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (requestedGoalId && hasContractInput) {
       throw new Error("Supply either goal_id for a saved goal or contract fields for a new goal, not both.");
     }
+    if (typeof params.working_directory !== "string") {
+      throw new Error("The worker working_directory is required and must be an absolute path.");
+    }
+    const cwd = params.working_directory.trim();
+    if (!isAbsolute(cwd)) {
+      throw new Error("The worker working_directory must be an absolute path.");
+    }
 
     let installed;
     if (requestedGoalId) {
@@ -1148,13 +1155,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       }
     }
 
-    if (typeof params.working_directory !== "string") {
-      throw new Error("The worker working_directory is required and must be an absolute path.");
-    }
-    const cwd = params.working_directory.trim();
-    if (!isAbsolute(cwd)) {
-      throw new Error("The worker working_directory must be an absolute path.");
-    }
     const continuingInstalledGoal = goals.unstarted.some((record) => record.goalId === installed.goalId);
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);

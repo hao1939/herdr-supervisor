@@ -963,6 +963,7 @@ test("a worker requires an explicit absolute working directory", async (t) => {
   assert.equal(relative.isError, true);
   assert.match(relative.content[0].text, /absolute path/);
   assert.equal(snapshots, 0);
+  assert.equal((await loadSupervisorGoals(root)).unstarted.length, 0);
   pi.events.get("session_shutdown")();
 });
 
