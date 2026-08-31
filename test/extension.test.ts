@@ -1946,6 +1946,37 @@ test("a display snapshot failure cannot disable supervision startup", async (t) 
   pi.events.get("session_shutdown")();
 });
 
+test("a startup display rename failure is reported without disabling supervision", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let subscriptions = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "working",
+    state_change_seq: 2,
+  }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {
+    throw new Error("temporary display write failure");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => {
+    subscriptions += 1;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  assert.equal(subscriptions, 1);
+  assert.match(pi.messages[0].content, /temporary display write failure/);
+  pi.events.get("session_shutdown")();
+});
+
 test("restart adopts a new terminal without forcing a healthy worker review", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

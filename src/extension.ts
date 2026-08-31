@@ -472,7 +472,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       )) return;
       // Display metadata is best effort. A naming failure cannot block or
       // compete with supervision of the goal itself.
-      await applyWorkerLabel(binding);
+      const warning = await applyWorkerLabel(binding);
+      if (warning) {
+        reportBackgroundFailure(
+          `Could not refresh the display name for ${binding.goalId}`,
+          new Error(warning.trim()),
+        );
+      }
     }));
   }
 
