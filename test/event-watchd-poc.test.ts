@@ -9,7 +9,7 @@ import { eventWatchRequest } from "../poc/event-watchd/client.mjs";
 import { EventWatchService } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestSource } from "../poc/event-watchd/github-pr.mjs";
 import { herdrDelivery } from "../poc/event-watchd/herdr.mjs";
-import { MAX_RESULT_BYTES } from "../poc/event-watchd/protocol.mjs";
+import { MAX_DATA_BYTES, MAX_RESULT_BYTES } from "../poc/event-watchd/protocol.mjs";
 import { EventWatchServer } from "../poc/event-watchd/server.mjs";
 
 function destination(name: string) {
@@ -588,6 +588,44 @@ test("daemon shutdown closes an idle client before releasing ownership", async (
   await replacement.stop();
 });
 
+test("daemon shutdown keeps ownership until an active request drains", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-drain-"));
+  const socketPath = join(directory, "watch.sock");
+  let requestStarted!: () => void;
+  const started = new Promise<void>((resolve) => { requestStarted = resolve; });
+  let releaseRequest!: () => void;
+  const release = new Promise<void>((resolve) => { releaseRequest = resolve; });
+  const server = new EventWatchServer({
+    socketPath,
+    service: {
+      start: async () => {},
+      stop: async () => {},
+      pollNow: async () => {
+        requestStarted();
+        await release;
+      },
+    },
+  });
+  await server.start();
+  const request = eventWatchRequest({ action: "poll" }, { socketPath, timeoutMs: 1_000 });
+  const requestFailure = assert.rejects(request, /(ended|closed) without a response/);
+  await started;
+  let stopped = false;
+  const stopping = server.stop().then(() => { stopped = true; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(stopped, false, "the old daemon retains ownership while its request can still mutate state");
+  releaseRequest();
+  await requestFailure;
+  await stopping;
+
+  const replacement = new EventWatchServer({
+    socketPath,
+    service: new EventWatchService({ statePath: join(directory, "replacement.json"), sources: {}, deliveries: {} }),
+  });
+  await replacement.start();
+  await replacement.stop();
+});
+
 function githubResponse(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -670,6 +708,20 @@ test("GitHub observations page through checks with a hard upper bound", async ()
   assert.equal(result.payload.checks.length, 25);
   assert.equal(result.payload.truncated, true);
   assert.equal(calls.filter((url) => url.includes("/check-runs")).length, 2);
+});
+
+test("GitHub observation payload stays inside the shared data budget", async () => {
+  const label = "测".repeat(200);
+  const checks = Array.from({ length: 50 }, (_, id) => ({
+    id, name: label, status: "completed", conclusion: "success",
+  }));
+  const statuses = Array.from({ length: 50 }, (_, id) => ({ id, context: label, state: "success" }));
+  const result = await githubPullRequestSource({ fetchImpl: githubFixture({ checks, statuses }), token: "test" })
+    .read("owner/repo#42");
+
+  assert.ok(Buffer.byteLength(JSON.stringify(result.payload)) <= MAX_DATA_BYTES);
+  assert.equal(result.payload.truncated, true);
+  assert.ok(result.payload.checks.length + result.payload.statuses.length < 50);
 });
 
 test("GitHub pagination fails visibly inside its authenticated request budget", async () => {

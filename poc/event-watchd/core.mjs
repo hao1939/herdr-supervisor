@@ -1,11 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { MAX_RESULT_BYTES } from "./protocol.mjs";
+import { MAX_DATA_BYTES, MAX_RESULT_BYTES } from "./protocol.mjs";
 
 const VERSION = 1;
 const MAX_TEXT = 2_000;
-const MAX_TARGET_BYTES = 16 * 1024;
 const MAX_WATCHES = 1_024;
 const MAX_CONCURRENT_READS = 4;
 const DEFAULT_LIST_LIMIT = 20;
@@ -23,8 +22,8 @@ function text(value, name) {
 
 function data(value, name) {
   const encoded = JSON.stringify(value);
-  if (!encoded || Buffer.byteLength(encoded) > MAX_TARGET_BYTES) {
-    throw new Error(`${name} must be JSON no larger than ${MAX_TARGET_BYTES} bytes`);
+  if (!encoded || Buffer.byteLength(encoded) > MAX_DATA_BYTES) {
+    throw new Error(`${name} must be JSON no larger than ${MAX_DATA_BYTES} bytes`);
   }
   return JSON.parse(encoded);
 }
@@ -677,8 +676,9 @@ export class EventWatchService {
     this.schedule();
   }
 
-  stop() {
+  async stop() {
     this.running = false;
     clearTimeout(this.timer);
+    await Promise.allSettled([this.mutations, ...this.resourceLocks.values()]);
   }
 }

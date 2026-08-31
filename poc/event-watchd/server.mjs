@@ -44,6 +44,7 @@ export class EventWatchServer {
     this.service = service;
     this.socketPath = socketPath;
     this.sockets = new Set();
+    this.requests = new Set();
     this.ownsSocket = false;
   }
 
@@ -115,7 +116,13 @@ export class EventWatchServer {
         buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
         if (Buffer.byteLength(line) > MAX_FRAME_BYTES) return socket.destroy(new Error("frame too large"));
-        requests = requests.then(() => this.handle(socket, line));
+        const request = requests.then(() => this.handle(socket, line));
+        requests = request;
+        this.requests.add(request);
+        void request.then(
+          () => this.requests.delete(request),
+          () => this.requests.delete(request),
+        );
       }
       if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) socket.destroy(new Error("frame too large"));
     });
@@ -140,12 +147,17 @@ export class EventWatchServer {
   }
 
   async stop() {
-    this.service.stop();
+    const firstDrain = Promise.allSettled([Promise.resolve().then(() => this.service.stop())]);
     if (this.server?.listening) {
       const closed = new Promise((resolve) => this.server.close(resolve));
       for (const socket of this.sockets) socket.destroy();
       await closed;
     }
+    await Promise.allSettled(this.requests);
+    const drains = [
+      ...await firstDrain,
+      ...await Promise.allSettled([Promise.resolve().then(() => this.service.stop())]),
+    ];
     this.server = undefined;
     if (this.ownsSocket) {
       await unlink(this.socketPath).catch((error) => {
@@ -154,6 +166,8 @@ export class EventWatchServer {
       this.ownsSocket = false;
     }
     await this.releaseLock();
+    const failed = drains.find((result) => result.status === "rejected");
+    if (failed) throw failed.reason;
   }
 
   async releaseLock() {

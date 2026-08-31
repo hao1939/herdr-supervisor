@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { MAX_DATA_BYTES } from "./protocol.mjs";
 
 const UNAUTHENTICATED_INTERVAL_MS = 5 * 60 * 1_000;
 const AUTHENTICATED_INTERVAL_MS = 60 * 1_000;
@@ -69,6 +70,26 @@ function requestBudget(fetchImpl, limit, now) {
   };
 }
 
+function payloadFor(stable, checks, statuses) {
+  const payload = {
+    ...stable,
+    checks: checks.slice(0, PAYLOAD_ITEMS),
+    statuses: statuses.slice(0, PAYLOAD_ITEMS),
+    totalChecks: checks.length,
+    totalStatuses: statuses.length,
+    truncated: checks.length > PAYLOAD_ITEMS || statuses.length > PAYLOAD_ITEMS,
+  };
+  while (Buffer.byteLength(JSON.stringify(payload)) > MAX_DATA_BYTES) {
+    if (!payload.checks.length && !payload.statuses.length) {
+      throw new Error("GitHub pull request metadata exceeds the bounded payload limit");
+    }
+    if (payload.checks.length >= payload.statuses.length && payload.checks.length) payload.checks.pop();
+    else payload.statuses.pop();
+    payload.truncated = true;
+  }
+  return payload;
+}
+
 export function githubPullRequestSource({
   fetchImpl = fetch,
   token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN,
@@ -120,18 +141,13 @@ export function githubPullRequestSource({
       };
       return {
         revision: createHash("sha256").update(JSON.stringify(stable)).digest("hex"),
-        payload: {
+        payload: payloadFor({
           head: pull.head.sha,
           state: pull.state,
           draft: pull.draft,
           mergeable: pull.mergeable,
           mergeableState: pull.mergeable_state,
-          checks: stableChecks.slice(0, PAYLOAD_ITEMS),
-          statuses: stableStatuses.slice(0, PAYLOAD_ITEMS),
-          totalChecks: stableChecks.length,
-          totalStatuses: stableStatuses.length,
-          truncated: stableChecks.length > PAYLOAD_ITEMS || stableStatuses.length > PAYLOAD_ITEMS,
-        },
+        }, stableChecks, stableStatuses),
       };
     },
   };
