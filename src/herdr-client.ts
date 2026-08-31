@@ -9,8 +9,13 @@ export function defaultSocketPath(env = process.env) {
 }
 
 function responseError(message) {
-  const detail = message?.error?.message || message?.error?.code || "unknown Herdr error";
-  return new Error(String(detail));
+  const code = message?.error?.code;
+  const detail = message?.error?.message || code || "unknown Herdr error";
+  return Object.assign(new Error(String(detail)), { code });
+}
+
+function hasErrorCode(error, code) {
+  return error?.code === code;
 }
 
 export class HerdrClient {
@@ -120,7 +125,7 @@ export class HerdrClient {
     return result.agent;
   }
 
-  async startAndWaitAgent(request, timeoutMs = 30_000, onStarted = () => {}) {
+  async startAndWaitAgent(request, timeoutMs = 31_000, onStarted = () => {}) {
     const deadline = Date.now() + timeoutMs;
     await this.startAgent(request, timeoutMs);
     onStarted();
@@ -131,7 +136,7 @@ export class HerdrClient {
       try {
         agent = await this.getAgent(request.paneId, remaining);
       } catch (error) {
-        if (!/agent target .* not found/i.test(error?.message || "")) throw error;
+        if (!hasErrorCode(error, "agent_not_found")) throw error;
       }
       if (agent?.interactive_ready) return agent;
       await wait(Math.min(200, Math.max(1, deadline - Date.now())));
@@ -147,7 +152,7 @@ export class HerdrClient {
       try {
         agent = await this.getAgent(paneId, remaining);
       } catch (error) {
-        if (!/agent target .* not found/i.test(error?.message || "")) throw error;
+        if (!hasErrorCode(error, "agent_not_found")) throw error;
       }
       if (agent?.agent_session) return agent;
       await wait(Math.min(200, Math.max(1, deadline - Date.now())));

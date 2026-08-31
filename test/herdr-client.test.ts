@@ -32,6 +32,24 @@ test("request correlates a newline-delimited Herdr response", async () => {
   } finally { await fake.close(); }
 });
 
+test("request preserves Herdr's structured error code", async () => {
+  const fake = await fakeHerdr((request, socket) => {
+    socket.write(`${JSON.stringify({
+      id: request.id,
+      error: { code: "agent_not_found", message: "localized detail" },
+    })}\n`);
+  });
+  try {
+    const client = new HerdrClient({ socketPath: fake.socketPath });
+    await assert.rejects(client.getAgent("w1:p2"), (error) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.message, "localized detail");
+      assert.equal(Reflect.get(error, "code"), "agent_not_found");
+      return true;
+    });
+  } finally { await fake.close(); }
+});
+
 test("startAgent requests one exact agent session in an existing pane", async () => {
   let observed;
   const fake = await fakeHerdr((request, socket) => {
@@ -215,13 +233,28 @@ test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () =
   }
 });
 
+test("startAndWaitAgent preserves Herdr's full launch allowance by default", async (t) => {
+  const client = new HerdrClient();
+  let launchTimeout;
+  t.mock.method(client, "startAgent", async (_request, timeoutMs) => {
+    launchTimeout = timeoutMs;
+    return { type: "agent_started" };
+  });
+  t.mock.method(client, "getAgent", async () => ({ interactive_ready: true }));
+
+  await client.startAndWaitAgent({ paneId: "w1:p2" });
+  assert.equal(launchTimeout, 31_000);
+});
+
 test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) => {
   const client = new HerdrClient();
   let reads = 0;
   t.mock.method(client, "startAgent", async () => ({ type: "agent_started" }));
   t.mock.method(client, "getAgent", async () => {
     reads += 1;
-    if (reads === 1) throw new Error("agent target w1:p2 not found");
+    if (reads === 1) {
+      throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+    }
     return { pane_id: "w1:p2", interactive_ready: true };
   });
   const agent = await client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000);
@@ -251,7 +284,7 @@ test("startAndWaitAgent shares one deterministic launch and readiness deadline",
   t.mock.method(client, "getAgent", async (_paneId, timeoutMs) => {
     readinessTimeout = timeoutMs;
     now += timeoutMs;
-    throw new Error("agent target w1:p2 not found");
+    throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
   });
 
   await assert.rejects(
@@ -267,7 +300,9 @@ test("native session discovery tolerates a brief missing-agent transition", asyn
   let reads = 0;
   t.mock.method(client, "getAgent", async () => {
     reads += 1;
-    if (reads === 1) throw new Error("agent target w1:p2 not found");
+    if (reads === 1) {
+      throw Object.assign(new Error("localized detail"), { code: "agent_not_found" });
+    }
     return { pane_id: "w1:p2", agent_session: { value: "session-1" } };
   });
   const agent = await client.waitForAgentSession("w1:p2", 1_000);
