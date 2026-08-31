@@ -63,7 +63,11 @@ message broker is not justified by the current problem.
 1. The worker creates or finds the exact PR or build.
 2. It runs `event-watch watch ...`.
 3. Registration reads the source once and returns only after saving that
-   baseline and the worker's exact native session identity.
+   baseline and the worker's exact native session identity. The response also
+   includes the current bounded provider payload. If the build or pull request
+   already reached the state the worker was waiting for, the worker handles it
+   immediately and removes the watch instead of settling on a condition that
+   can no longer change.
 4. The worker continues independent work. It does not run a polling command or
    wait for the watcher.
 5. If that external condition eventually becomes the only remaining path, the
@@ -372,6 +376,19 @@ watch was not created and the error stayed visible. Restarting the environment
 daemon with a credential and retrying the same registration succeeded. A real
 deployment must pass provider credentials to the daemon through its container
 or service configuration; a worker login elsewhere is not enough.
+
+A later restart exposed the same rule for executable discovery: launching Node
+directly with Docker's base `PATH` hid the Azure CLI installed in the runtime
+user's local bin directory, while the same account worked from the intended
+login environment. Restarting through that owned environment recovered all five
+ADO watches. Simultaneous ADO reads now also share one in-flight token lookup so
+they do not contend on the Azure CLI cache; later reads still refresh normally.
+
+That live state exposed four watches registered after their exact builds were
+already terminal. The daemon should not encode what “terminal” means. Instead,
+registration now returns the bounded provider payload it actually baselined, so
+the worker can handle an already-satisfied condition immediately and remove the
+one-shot watch rather than waiting for an impossible next change.
 
 Two adoption gaps remain explicit: Herdr lacks an atomic exact-session prompt,
 and the PoC lock deliberately requires service-manager cleanup after an

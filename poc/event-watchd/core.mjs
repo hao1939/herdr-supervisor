@@ -290,6 +290,7 @@ export class EventWatchService {
           source,
           subject,
           baseline: this.state.resources[id].revision,
+          payload: this.state.resources[id].payload,
           intervalMs: existing.intervalMs,
           existing: true,
         };
@@ -347,7 +348,14 @@ export class EventWatchService {
         };
         state.watches[identity] = { resourceId: id, destination, intervalMs };
         this.rescheduleResource(state, id);
-        return { watchId: identity, source, subject, baseline: observation.revision, intervalMs };
+        return {
+          watchId: identity,
+          source,
+          subject,
+          baseline: observation.revision,
+          payload: observation.payload,
+          intervalMs,
+        };
       });
       this.reportedDiagnostics.delete(`source:${source}:${subject}`);
       await this.deliverResource(id);

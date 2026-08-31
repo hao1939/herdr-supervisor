@@ -31,9 +31,10 @@ test("one-shot watches establish a quiet baseline and share later source reads",
   });
 
   await service.watch({ source: "source", subject: "same", destination: destination("a"), intervalMs: 1_000 });
-  await service.watch({ source: "source", subject: "same", destination: destination("b"), intervalMs: 1_000 });
+  const registered = await service.watch({ source: "source", subject: "same", destination: destination("b"), intervalMs: 1_000 });
   assert.equal(delivered.length, 0);
   assert.equal(reads, 2, "each registration establishes a current baseline");
+  assert.deepEqual(registered.payload, { revision: "one", reads: 2 }, "registration exposes the state it actually baselined");
 
   revision = "two";
   await service.pollNow();
@@ -227,6 +228,7 @@ test("retrying the same registration preserves its unseen pending change", async
 
   assert.equal(retried.watchId, original.watchId);
   assert.equal(retried.existing, true);
+  assert.deepEqual(retried.payload, { reads: 2 });
   assert.equal(reads, 2, "the idempotent retry does not replace the pending baseline");
   const watch: any = Object.values((await service.status()).watches)[0];
   assert.equal(watch.pending.revision, "two");
