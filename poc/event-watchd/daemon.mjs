@@ -16,9 +16,7 @@ const adoDefinitions = list("HERDR_WATCH_ADO_DEFINITIONS");
 const sources = {};
 if (githubRepositories.length) sources["github-pr"] = githubPullRequestDiscovery({ repositories: githubRepositories });
 if (adoDefinitions.length) sources["ado-build"] = adoBuildDiscovery({ definitions: adoDefinitions });
-if (!Object.keys(sources).length) {
-  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS");
-}
+const hasSources = Object.keys(sources).length > 0;
 
 const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "herdr-supervisor");
 const intervalMs = Number(process.env.HERDR_WATCH_INTERVAL_MS || 60_000);
@@ -31,6 +29,10 @@ const watcher = new DiscoveredEventWatcher({
   deliver: herdrGoalDelivery(),
   diagnose: herdrSupervisorDiagnostic(),
 });
+if (!hasSources) {
+  await watcher.runOnce();
+  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS");
+}
 
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) {

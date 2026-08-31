@@ -273,6 +273,11 @@ export class DiscoveredEventWatcher {
     const observed = new Set(scan.observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
+    for (const [key, resource] of Object.entries(next.resources)) {
+      if (Object.hasOwn(this.sources, resource.source)) continue;
+      delete next.resources[key];
+      changed = true;
+    }
     for (const key of scan.absent) {
       if (!next.resources[key]) continue;
       delete next.resources[key];

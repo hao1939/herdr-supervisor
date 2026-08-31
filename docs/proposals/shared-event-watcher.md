@@ -196,10 +196,11 @@ The delivery input is a durable goal ID, never a pane ID:
 4. Resume its native Goal if it is settled.
 5. Send a short hint naming the changed resource.
 
-If the goal is complete, missing, ambiguous, or temporarily has no valid
-worker, delivery fails closed. The daemon does not guess another worker or
-create a goal. It records one bounded diagnostic for the supervisor. The
-supervisor uses ordinary goal reasoning and tools to repair the situation.
+If the goal is already complete, the change is safely ignored. If the goal is
+missing, ambiguous, unreadable, or temporarily has no valid worker, delivery
+fails closed. The daemon does not guess another worker or create a goal. It
+records one bounded diagnostic for the supervisor, which uses ordinary goal
+reasoning and tools to repair the situation.
 
 The daemon resolves the environment's one Pi supervisor from fresh Herdr state
 and sends it a bounded diagnostic. It persists no supervisor destination. If

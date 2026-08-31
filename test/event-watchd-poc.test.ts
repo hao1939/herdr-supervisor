@@ -164,6 +164,34 @@ test("authoritative absence forgets a resource without delivering its stale pend
   assert.deepEqual(state.resources, {});
 });
 
+test("removing a configured provider forgets its checkpoint without stale delivery", async (t) => {
+  const directory = await temporary(t, "event-watch-provider-removed-");
+  const statePath = join(directory, "state.json");
+  let deliveries = 0;
+  const initial = new DiscoveredEventWatcher({
+    statePath,
+    sources: { removed: { scan: async () => discovery([{
+      subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
+    }]) } },
+    deliver: async () => {
+      deliveries += 1;
+      throw new Error("worker unavailable");
+    },
+    diagnose: () => {},
+  });
+  await initial.runOnce();
+
+  const cleanup = new DiscoveredEventWatcher({
+    statePath,
+    sources: {},
+    deliver: async () => { deliveries += 1; },
+  });
+  await cleanup.runOnce();
+
+  assert.equal(deliveries, 1);
+  assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")).resources, {});
+});
+
 test("array-shaped checkpoint resources fail instead of losing observations", async (t) => {
   const directory = await temporary(t, "event-watch-invalid-state-");
   const statePath = join(directory, "state.json");
