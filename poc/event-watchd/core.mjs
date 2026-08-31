@@ -73,7 +73,9 @@ async function concurrent(items, limit, operation) {
       await operation(items[index]);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  const results = await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, run));
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed) throw failed.reason;
 }
 
 function object(value) {

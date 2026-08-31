@@ -811,6 +811,20 @@ test("GitHub rate-limit guidance is exposed to the shared scheduler", async () =
   });
 });
 
+test("ordinary GitHub errors do not install provider-wide rate-limit backoff", async () => {
+  const source = githubPullRequestSource({
+    fetchImpl: async () => new Response("missing", {
+      status: 404,
+      headers: { "x-ratelimit-reset": String(Math.ceil(Date.now() / 1_000) + 3_600) },
+    }),
+    token: "test",
+  });
+  await assert.rejects(source.read("owner/repo#42"), (error: any) => {
+    assert.equal(error.retryAfterMs, undefined);
+    return true;
+  });
+});
+
 test("GitHub source bounds actual requests across reads", async () => {
   let requests = 0;
   const source = githubPullRequestSource({
@@ -1089,6 +1103,55 @@ test("a queued scheduler pass rechecks the resource deadline after its lock", as
   service.stop();
 
   assert.equal(reads, 2, "the queued pass skips the resource after the first pass moves its deadline");
+});
+
+test("a failed concurrent scheduler read drains its started siblings", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-concurrent-drain-"));
+  let now = 10_000;
+  let polling = false;
+  let secondStarted!: () => void;
+  const started = new Promise<void>((resolve) => { secondStarted = resolve; });
+  let releaseSecond!: () => void;
+  const release = new Promise<void>((resolve) => { releaseSecond = resolve; });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    now: () => now,
+    sources: {
+      source: {
+        read: async (subject: string) => {
+          if (!polling) return { revision: subject, payload: null };
+          if (subject === "one") return { revision: "one-changed", payload: null };
+          secondStarted();
+          await release;
+          return { revision: subject, payload: null };
+        },
+      },
+    },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  await service.watch({ source: "source", subject: "one", destination: destination("one"), intervalMs: 1_000 });
+  await service.watch({ source: "source", subject: "two", destination: destination("two"), intervalMs: 1_000 });
+  const mutate = (service as any).mutate.bind(service);
+  let failNextMutation = true;
+  (service as any).mutate = async (change: unknown) => {
+    if (failNextMutation) {
+      failNextMutation = false;
+      throw new Error("first state save failed");
+    }
+    return mutate(change);
+  };
+  polling = true;
+  now += 1_000;
+  (service as any).running = true;
+  let settled = false;
+  const tick = service.tick().finally(() => { settled = true; });
+  await started;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(settled, false, "the scheduler keeps ownership while a sibling read can still mutate state");
+  (service as any).running = false;
+  releaseSecond();
+  await assert.rejects(tick, /first state save failed/);
+  await service.stop();
 });
 
 test("service shutdown drains a scheduler tick before it acquires a resource lock", async () => {

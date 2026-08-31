@@ -24,11 +24,13 @@ async function json(response, label) {
     const error = new Error(`${label} returned HTTP ${response.status}${body ? `: ${body}` : ""}`);
     const retryAfterHeader = response.headers.get("retry-after");
     const resetHeader = response.headers.get("x-ratelimit-reset");
+    const remainingHeader = response.headers.get("x-ratelimit-remaining");
     const retryAfter = retryAfterHeader === null ? Number.NaN : Number(retryAfterHeader);
     const reset = resetHeader === null ? Number.NaN : Number(resetHeader);
+    const remaining = remainingHeader === null ? Number.NaN : Number(remainingHeader);
     if (Number.isFinite(retryAfter) && retryAfter >= 0) {
       error.retryAfterMs = retryAfter * 1_000;
-    } else if (Number.isFinite(reset) && reset > 0) {
+    } else if ((response.status === 429 || remaining === 0) && Number.isFinite(reset) && reset > 0) {
       error.retryAfterMs = Math.max(1_000, reset * 1_000 - Date.now());
     }
     throw error;
