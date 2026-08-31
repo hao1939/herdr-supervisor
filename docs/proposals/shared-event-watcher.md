@@ -43,8 +43,10 @@ events, supervisor reviews, Codex's native Goal, or good goal design.
 7. The next changed revision is saved, then delivered directly to the same
    native worker session through Herdr.
 8. Delivery resumes the native Goal before adding the wake hint when the worker
-   is settled. The worker rereads GitHub or ADO, decides what the change means, and either
-   continues or registers another one-shot watch.
+   is settled. The worker rereads GitHub or ADO directly, or uses
+   `event-watch read` to make a fresh authenticated read through the same source
+   adapter. It decides what the change means and either continues or registers
+   another one-shot watch.
 
 The notification is only a hint. Its payload can help explain why the worker
 woke, but it never proves that a check passed, a review was resolved, or the
@@ -121,10 +123,12 @@ the unique agent with that native identity. It sends the hint to that current
 pane. A missing or ambiguous identity fails closed and goes to diagnostics; it
 never guesses from focus, tab order, agent kind, or an old pane.
 
-If that exact worker is settled, the adapter first submits `/goal resume`, then
-submits the wake hint. If it is already working, it submits only the hint. This
-uses Codex's existing Goal lifecycle instead of adding watcher-owned worker
-states.
+If that exact worker is settled, the adapter first submits `/goal resume` and
+uses Herdr's atomic wait to confirm that the worker started. Only then does it
+submit the wake hint. This ordering prevents two terminal inputs from merging
+into one malformed slash command. If the worker is already working, it submits
+only the hint. This uses Codex's existing Goal lifecycle instead of adding
+watcher-owned worker states.
 
 The daemon persists the newest pending revision before delivery. A successful
 Herdr prompt submission counts as delivery and consumes the one-shot watch. If
@@ -145,6 +149,12 @@ daemon:
 - worker worktrees inherit only the CLI and socket location;
 - the supervisor Pi extension registers diagnostics and exposes health;
 - credentials stay in the environment and are never written into watch state.
+
+The daemon also exposes a fresh `read` operation over its existing source
+adapters. This lets a woken worker verify authority without copying provider
+credentials into every worker process. `read` never returns the cached event;
+it calls the source adapter again. Provider write actions and repository-local
+commands remain worker-owned and are not executed by the daemon.
 
 The worktree provisioner may ensure that the CLI is available in a new worker
 environment, but it is a one-shot worktree hook and must not become the owner of
@@ -172,7 +182,7 @@ Implement only:
 2. a bounded newline-JSON Unix-socket API;
 3. one GitHub PR source adapter;
 4. one exact-session Herdr delivery adapter;
-5. a CLI that registers the calling Herdr worker;
+5. a CLI that registers the calling Herdr worker and can reread a source;
 6. health/list/unwatch operations;
 7. focused tests and one MLVM end-to-end experiment.
 
@@ -196,3 +206,46 @@ The PoC is convincing only when MLVM proves all of the following:
 
 After that evidence, decide whether the daemon replaces the current in-process
 supervisor watch. Do not maintain both production paths.
+
+## MLVM result
+
+The PoC was exercised against draft pull request 42 in the live MLVM Herdr
+environment.
+
+What worked:
+
+- registration established a quiet baseline and returned to the worker;
+- the worker reviewed the watcher while the daemon alone polled GitHub;
+- that review found a real shared-interval scheduling bug, which was fixed and
+  covered by a regression test;
+- restarting the daemon preserved the registered watch;
+- the worker followed Codex's native blocked audit and settled after the same
+  external blocker occurred three times;
+- a real check-state revision resumed the same native Goal and delivered the
+  hint directly to its exact session;
+- the one-shot watch disappeared after successful delivery;
+- `event-watch read` made a fresh authenticated read and showed the current PR
+  head and five successful checks.
+
+The experiment also found two integration failures:
+
+1. Sending `/goal resume` and the hint without waiting allowed terminal input
+   to merge into one malformed Goal command. Herdr's atomic prompt wait now
+   proves the Goal is working before the hint is sent.
+2. Unauthenticated two-second polling exhausted GitHub's public rate limit.
+   The watch stayed pending and diagnostics woke the supervisor as designed.
+   Restarting the daemon with an ambient credential recovered without changing
+   watch state. Production intervals must be much slower and credentials must
+   be provisioned for the daemon.
+
+The live daemon used negligible idle CPU. It was about 56 MB RSS before its
+first GitHub read and about 70–73 MB afterward. That is reasonable for this
+Node-based PoC, but production adoption should retain the daemon only when
+shared observation and released worker turns justify that fixed cost.
+
+One unrelated provisioning issue interrupted the first disposable worker:
+Codex showed its interactive update prompt, Herdr considered the process ready,
+and the first submitted Goal selected “update now.” The container could not
+replace its root-owned global package. A centrally versioned image should start
+workers with `check_for_update_on_startup=false`; image rebuilds, not workers,
+should update Codex.

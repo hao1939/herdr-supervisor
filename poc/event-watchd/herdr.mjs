@@ -64,11 +64,15 @@ export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
         ? `External event watcher needs diagnosis. ${event.payload.error}`
         : [
             `External state changed for ${event.source} ${event.subject}.`,
-            "Reread the provider's current authoritative state, handle what changed, and continue your active goal.",
+            `Reread current authority directly or run event-watch read ${event.source} ${event.subject}, handle what changed, and continue your active goal.`,
             "This notification is only a wake hint; do not treat its payload as completion proof.",
           ].join(" ");
       if (!event.diagnostic && matches[0].agent_status !== "working") {
-        await request("agent.prompt", { target: matches[0].pane_id, text: "/goal resume" }, options);
+        await request("agent.prompt", {
+          target: matches[0].pane_id,
+          text: "/goal resume",
+          wait: { until: ["working"], timeout_ms: 10_000 },
+        }, { ...options, timeoutMs: 12_000 });
       }
       await request("agent.prompt", { target: matches[0].pane_id, text: message }, options);
       return { paneId: matches[0].pane_id };

@@ -37,6 +37,10 @@ if (command === "watch") {
     intervalMs: args[2] ? Number(args[2]) : undefined,
     destination: await currentHerdrDestination(),
   });
+} else if (command === "read") {
+  const [source, subject] = args;
+  if (!source || !subject) throw new Error("usage: event-watch read <source> <subject>");
+  result = await request({ action: "read", source, subject });
 } else if (command === "diagnostics") {
   result = await request({ action: "diagnostics", destination: await currentHerdrDestination() });
 } else if (command === "unwatch") {
@@ -46,6 +50,6 @@ if (command === "watch") {
 } else if (command === "poll") {
   result = await request({ action: "poll" });
 } else {
-  throw new Error("usage: event-watch <watch|diagnostics|unwatch|list|poll> ...");
+  throw new Error("usage: event-watch <watch|read|diagnostics|unwatch|list|poll> ...");
 }
 console.log(JSON.stringify(result, null, 2));

@@ -37,6 +37,29 @@ test("one-shot watches establish a quiet baseline and share later source reads",
   assert.equal(Object.keys((await service.status()).watches).length, 0, "successful delivery consumes each watch");
 });
 
+test("a worker can make a fresh authoritative read through the daemon adapter", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-read-"));
+  let reads = 0;
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision: `revision-${++reads}`, payload: { reads } }) } },
+    deliveries: {},
+  });
+
+  assert.deepEqual(await service.readCurrent({ source: "source", subject: "subject" }), {
+    source: "source",
+    subject: "subject",
+    revision: "revision-1",
+    payload: { reads: 1 },
+  });
+  assert.deepEqual(await service.readCurrent({ source: "source", subject: "subject" }), {
+    source: "source",
+    subject: "subject",
+    revision: "revision-2",
+    payload: { reads: 2 },
+  });
+});
+
 test("an undelivered revision survives restart and a duplicate wake is bounded", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-restart-"));
   const statePath = join(directory, "state.json");
@@ -127,7 +150,8 @@ test("Herdr delivery resumes a settled native Goal before sending the wake hint"
 
   const prompts = calls.map((call) => call.params.text).filter(Boolean);
   assert.equal(prompts[0], "/goal resume");
-  assert.match(prompts[1], /Reread the provider's current authoritative state/);
+  assert.match(prompts[1], /event-watch read github-pr owner\/repo#1/);
+  assert.deepEqual(calls[1].params.wait, { until: ["working"], timeout_ms: 10_000 });
 });
 
 test("delivery failure stays pending and emits one coalesced supervisor diagnostic", async () => {

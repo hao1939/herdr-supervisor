@@ -57,6 +57,7 @@ export class EventWatchServer {
       request = JSON.parse(line);
       let result;
       if (request.action === "watch") result = await this.service.watch(request);
+      else if (request.action === "read") result = await this.service.readCurrent(request);
       else if (request.action === "unwatch") result = await this.service.unwatch(request.watchId);
       else if (request.action === "list") result = await this.service.status();
       else if (request.action === "poll") result = await this.service.pollNow();

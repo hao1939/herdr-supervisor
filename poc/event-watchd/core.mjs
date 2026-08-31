@@ -158,6 +158,12 @@ export class EventWatchService {
     };
   }
 
+  async readCurrent(input) {
+    const source = text(input.source, "source");
+    const subject = text(input.subject, "subject");
+    return { source, subject, ...await this.read(source, subject) };
+  }
+
   async setDiagnostics(destination) {
     const validated = validateDestination(destination);
     await this.mutate((state) => { state.diagnostics = validated; });
