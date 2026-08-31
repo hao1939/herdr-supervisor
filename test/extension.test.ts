@@ -1067,7 +1067,7 @@ test("a missing-decision retry waits until the human follow-up settles", async (
     type: "message_start",
     message: { role: "custom", ...relayed.message, timestamp: Date.now() },
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pi.messages.length, 2, "the retry must not preempt the human follow-up");
 
   await pi.events.get("agent_settled")();
