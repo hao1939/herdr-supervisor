@@ -1110,7 +1110,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (reviewTurn.isBusy()) {
       throw new Error(`Finish preparing or reviewing ${reviewTurn.paneId} before starting another goal.`);
     }
-    const goals = await activeBindings();
     const requestedGoalId = typeof params.goal_id === "string" ? params.goal_id.trim() : "";
     if (params.goal_id !== undefined && params.goal_id !== null && !requestedGoalId) {
       throw new Error("The saved goal_id cannot be empty.");
@@ -1127,13 +1126,17 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (!isAbsolute(cwd)) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
+    if (requestedGoalId) await reloadGoals();
+    const goals = await activeBindings();
 
     let installed;
+    let continuingInstalledGoal = false;
     if (requestedGoalId) {
       const existing = goals.active.find((binding) => binding.goalId === requestedGoalId);
       if (existing) return { binding: existing, existing: true, warning: "" };
       installed = goals.unstarted.find((record) => record.goalId === requestedGoalId);
       if (!installed) throw new Error(`${requestedGoalId} is not an active or unstarted goal.`);
+      continuingInstalledGoal = true;
     } else {
       const objective = typeof params.goal === "string" ? params.goal.trim() : "";
       const acceptance = (params.acceptance || []).map((item) => item.trim()).filter(Boolean);
@@ -1144,6 +1147,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const existing = goals.active.find((binding) => binding.goal.trim() === objective);
       if (existing) return { binding: existing, existing: true, warning: "" };
       installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
+      continuingInstalledGoal = Boolean(installed);
       if (!installed) {
         installed = await installSupervisorGoal({
           objective,
@@ -1155,7 +1159,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       }
     }
 
-    const continuingInstalledGoal = goals.unstarted.some((record) => record.goalId === installed.goalId);
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
     const legacyWorkerName = legacyWorkerNameForGoal(goalId);
