@@ -191,10 +191,19 @@ and sends it a bounded diagnostic. It persists no supervisor destination. If
 the supervisor is missing or ambiguous, the diagnostic fails closed, remains
 visible in service stderr, and is retried on the next failing scan.
 
-One production gate remains: the final exact-worker check and Herdr prompt are
-separate requests. Replacing the current watcher requires a session-addressed
-or atomic Herdr prompt boundary. This is a delivery safety requirement, not a
-reason to add watch registration.
+Replacing the current watcher still has several production gates:
+
+- the final exact-worker check and Herdr prompt are separate requests, so Herdr
+  needs a session-addressed or atomic prompt boundary;
+- an in-progress provider scan needs bounded cancellation during shutdown;
+- combined provider capacity and refresh fairness need proof at the supported
+  deployment scale; and
+- GitHub discovery needs an authenticated request budget and provider-directed
+  backoff before it is enabled continuously.
+
+These are delivery and observation hardening requirements, not reasons to add
+watch registration. The PoC stays draft until live frequency and deployment
+scale justify the smallest fixes.
 
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
@@ -289,7 +298,8 @@ The MLVM experiment now proves the metadata path end to end for goal
   `01a04ca8-8771-7473-8e20-cebef028f430` in pane `w1:p11` returned to
   `working`. Later unchanged scans left the checkpoint timestamp unchanged.
 
-The remaining production gate is the atomic exact-session delivery boundary.
+The metadata lifecycle and live ADO path are proven. The production gates above
+remain open, so this PoC does not replace the current watcher yet.
 
 ## PoC acceptance
 
