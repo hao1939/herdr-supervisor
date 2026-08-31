@@ -92,6 +92,7 @@ const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 5 * 60 * 1000;
+const WORKER_EVENT_SETTLE_MS = 250;
 type SupervisorMode = "observe" | "dry-run" | "live";
 
 function text(value: string, isError = false) {
@@ -145,6 +146,7 @@ function exactSessionAgent(snapshot, session) {
 
 type SupervisorServices = {
   loadGoals?: typeof loadSupervisorGoals;
+  workerEventSettleMs?: number;
 };
 
 export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
@@ -153,6 +155,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let reconnectTimer: undefined | ReturnType<typeof setTimeout>;
   let reviewTimer: undefined | ReturnType<typeof setTimeout>;
   let globalReviewTimer: undefined | ReturnType<typeof setTimeout>;
+  const workerEventTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const pendingSignals = new Map<string, ReviewSignal | undefined>();
   const pendingStarts = new Map<string, string>();
   const runtimeGoals = new Map<string, GoalRuntime>();
@@ -835,7 +838,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function handleWorkerEvent(paneId: string) {
-    handleSignal(paneId);
+    const existing = workerEventTimers.get(paneId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      workerEventTimers.delete(paneId);
+      handleSignal(paneId);
+    }, services.workerEventSettleMs ?? WORKER_EVENT_SETTLE_MS);
+    workerEventTimers.set(paneId, timer);
+    timer.unref?.();
   }
 
   async function reconsiderCurrentBindings() {
@@ -2462,6 +2472,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (reviewTimer) clearTimeout(reviewTimer);
     if (globalReviewTimer) clearTimeout(globalReviewTimer);
+    for (const timer of workerEventTimers.values()) clearTimeout(timer);
+    workerEventTimers.clear();
     pendingSignals.clear();
     pendingStarts.clear();
     pendingHumanFollowUps.clear();

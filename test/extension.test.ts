@@ -1228,6 +1228,53 @@ test("a worker event cannot start an unfenced review inside the human follow-up 
   pi.events.get("session_shutdown")();
 });
 
+test("a brief settled transition stays inside the worker native Goal", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let status = "working";
+  let sequence = 2;
+  let subscriptionEvent;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: status,
+    state_change_seq: sequence,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The native Goal really stopped here.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
+    subscriptionEvent = onEvent;
+    return () => {};
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi, { workerEventSettleMs: 20 });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+
+  status = "done";
+  sequence = 3;
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.messages.length, 0, "an unrelated drain must not consume the raw transition early");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  status = "working";
+  sequence = 4;
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(pi.messages.length, 0, "native Goal continuation should not spend a supervisor turn");
+
+  status = "done";
+  sequence = 5;
+  subscriptionEvent({ data: { pane_id: worker.paneId } });
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /worker is done/);
+  pi.events.get("session_shutdown")();
+});
+
 test("settling a direct human decision clears its review fence", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

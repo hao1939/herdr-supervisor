@@ -402,6 +402,10 @@ decision at a time.
 
 - Each worker has at most one pending in-memory review signal.
 - Repeated signals coalesce because the review rereads authoritative state.
+- Each worker's raw transitions receive a short process-local settling window. A
+  native Goal that moves immediately from a completed turn into its next turn
+  stays worker-owned; a worker that remains settled receives the ordinary
+  focused review. Human, peer, external, and deadline signals are not delayed.
 - Pending workers retain first-observed order.
 - One review fence owns preparation, observation, decision, and settlement for
   the focused pane.
