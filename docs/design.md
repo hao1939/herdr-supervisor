@@ -297,6 +297,26 @@ prompt it merely because one turn ended. A final response, pull request, test
 run, report, cleared backlog, or raised threshold is evidence, not automatic
 completion.
 
+### A pending review is a thread, not a barrier
+
+A pull request or pipeline run is one workstream inside the goal, not the end
+of it. A worker that opens a pull request must not stop and wait for it. It
+moves to the next useful thing in the same goal: another change, a test,
+preparation for the next step, or independent verification.
+
+The worker never blocks, sleeps, or polls for an external condition. Blocking
+holds a worker that could be making progress, and it makes a waiting worker
+look busy to Herdr. When a worker has genuinely exhausted the safe work it can
+do now, its turn simply ends. An idle worker costs nothing.
+
+When the pull request or build later changes, the watch or the bounded review
+wakes that exact session. The worker rereads the current provider state,
+handles what changed — review comments, a failed check, a merge conflict — and
+continues. A merged pull request is only complete when it also satisfies the
+goal's acceptance criteria.
+
+### Wait rules
+
 Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
@@ -317,17 +337,29 @@ A human question follows the same rule. It is concrete, asks for the minimum
 input that changes the work, and receives a bounded reconsideration so
 unrelated useful work can continue.
 
+### External watches
+
 External watches run as small deterministic reads inside the existing Pi
 extension process. They share the nearest-deadline timer and the per-goal
-review signal map. An unchanged revision schedules another read without a
-model turn. A changed revision queues the ordinary focused review, where the
-model asks the same worker to reread provider authority before judging it.
-When that external condition is the worker's only remaining blocker, the
-worker reports it once and lets its native Goal block. It does not sleep or
-poll; the watch or bounded review resumes the same session.
+review signal map.
+
+The watch detects change; it does not interpret it. It compares one revision
+identity — a pull request head or a build result — and nothing more. An
+unchanged revision schedules another read without a model turn. A changed
+revision queues the ordinary focused review, where the model asks the same
+worker to reread provider authority and judge it.
+
+Deciding what a review comment, failed check, or merged branch means for the
+goal belongs to the worker, not the supervisor and not the watch.
+
 Watch registration is process-local in the first version: after restart, the
 ordinary bounded goal review can register it again. This keeps provider polling
 an optimization rather than another durable task or event system.
+
+Provider credentials belong to the environment, not the goal contract:
+`GITHUB_TOKEN` for GitHub, `AZURE_DEVOPS_EXT_PAT` for Azure DevOps. Without
+them a watch degrades to unauthenticated rate limits or fails with a clear
+error; it never guesses.
 
 ## Concurrency
 

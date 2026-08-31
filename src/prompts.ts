@@ -12,7 +12,8 @@ const workerExecutionBoundary = [
   "Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "When one external or peer condition is the only remaining blocker, report that exact condition once and let the native Goal become blocked. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
+  "A pending pull request, pipeline run, or peer condition is one workstream inside the goal, not the end of it. Never stop and wait on it: move to the next useful thing in the same goal — another change, a test, preparation, or independent verification.",
+  "When you have genuinely exhausted the safe work you can do now, report the exact remaining condition once and end your turn. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
 ].join(" ");
 
@@ -54,7 +55,7 @@ export function nativeGoalPrompt(binding: GoalTrace, workerName: string) {
     `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
     "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
     workerExecutionBoundary,
-    "Work proactively from current evidence. Keep independent useful paths moving when one path waits. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
+    "Work proactively from current evidence. Keep independent useful paths moving when one path waits; opening a pull request or starting a pipeline is never a reason to stop. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
     pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language. Keep exact technical evidence, but explain what happened, why it matters, and what comes next; define uncommon acronyms when needed.",
   ].join(" ");
