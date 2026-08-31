@@ -1887,7 +1887,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           reviewTurn.close(binding.paneId);
           let resumedAgent;
           try {
-            resumedAgent = await client.startAndWaitAgent(request, 30_000);
+            resumedAgent = await client.startAndWaitAgent(request, 31_000);
           } catch (error) {
             scheduleReview(binding);
             let warning = "";
