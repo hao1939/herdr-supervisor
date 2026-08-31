@@ -706,6 +706,9 @@ export class EventWatchService {
   async stop() {
     this.running = false;
     clearTimeout(this.timer);
-    await Promise.allSettled([this.mutations, ...this.resourceLocks.values(), ...this.activeTicks]);
+    for (;;) {
+      await Promise.allSettled([this.mutations, ...this.resourceLocks.values(), ...this.activeTicks]);
+      if (!this.resourceLocks.size && !this.activeTicks.size) break;
+    }
   }
 }

@@ -1118,6 +1118,29 @@ test("service shutdown drains a scheduler tick before it acquires a resource loc
   assert.equal((service as any).activeTicks.size, 0);
 });
 
+test("service shutdown waits for ticks that become active while draining", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-stop-active-ticks-"));
+  let releaseMutation!: () => void;
+  const mutation = new Promise<void>((resolve) => { releaseMutation = resolve; });
+  let releaseTick!: () => void;
+  const activeTick = new Promise<void>((resolve) => { releaseTick = resolve; });
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { source: { read: async () => ({ revision: "same", payload: null }) } },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  (service as any).mutations = mutation;
+  let stopped = false;
+  const stopping = service.stop().then(() => { stopped = true; });
+  const trackedTick = activeTick.finally(() => (service as any).activeTicks.delete(trackedTick));
+  (service as any).activeTicks.add(trackedTick);
+  releaseMutation();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(stopped, false);
+  releaseTick();
+  await stopping;
+});
+
 test("a closed daemon connection cannot leave a CLI request pending", async () => {
   const directory = await mkdtemp(join(tmpdir(), "event-watchd-client-"));
   const socketPath = join(directory, "watch.sock");
