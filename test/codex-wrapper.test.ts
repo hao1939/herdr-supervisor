@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -77,6 +77,7 @@ test("the wrapper preserves native Codex Goals", async () => {
 test("full-access workers trust their pane directory for unattended resume", async () => {
   const script = await wrapper();
   const cwd = await mkdtemp(join(tmpdir(), 'herdr-supervisor-project-"quoted"-'));
+  const physicalCwd = await realpath(cwd);
   assert.deepEqual(run(script, ["resume", "session-1"], {
     cwd,
     env: { HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "1" },
@@ -84,7 +85,7 @@ test("full-access workers trust their pane directory for unattended resume", asy
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
     "-c",
-    `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`,
+    `projects={${JSON.stringify(physicalCwd)}={trust_level="trusted"}}`,
     "-c",
     'tui.resume_cwd="session"',
     "resume",
