@@ -1,8 +1,7 @@
 import net from "node:net";
 import { chmod, lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-
-const MAX_FRAME = 64 * 1024;
+import { MAX_FRAME_BYTES } from "./protocol.mjs";
 
 function reply(socket, value) {
   if (socket.writable) socket.write(`${JSON.stringify(value)}\n`);
@@ -115,10 +114,10 @@ export class EventWatchServer {
         const line = buffer.slice(0, newline);
         buffer = buffer.slice(newline + 1);
         if (!line.trim()) continue;
-        if (Buffer.byteLength(line) > MAX_FRAME) return socket.destroy(new Error("frame too large"));
+        if (Buffer.byteLength(line) > MAX_FRAME_BYTES) return socket.destroy(new Error("frame too large"));
         requests = requests.then(() => this.handle(socket, line));
       }
-      if (Buffer.byteLength(buffer) > MAX_FRAME) socket.destroy(new Error("frame too large"));
+      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) socket.destroy(new Error("frame too large"));
     });
   }
 

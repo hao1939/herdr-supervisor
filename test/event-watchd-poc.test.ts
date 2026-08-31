@@ -9,6 +9,7 @@ import { eventWatchRequest } from "../poc/event-watchd/client.mjs";
 import { EventWatchService } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestSource } from "../poc/event-watchd/github-pr.mjs";
 import { herdrDelivery } from "../poc/event-watchd/herdr.mjs";
+import { MAX_RESULT_BYTES } from "../poc/event-watchd/protocol.mjs";
 import { EventWatchServer } from "../poc/event-watchd/server.mjs";
 
 function destination(name: string) {
@@ -401,6 +402,30 @@ test("list returns bounded pages without opaque destination data", async () => {
   const second = await service.list({ cursor: first.nextCursor });
   assert.equal(second.watches.length, 5);
   assert.equal(second.nextCursor, null);
+});
+
+test("list keeps multibyte valid state inside the socket response budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "event-watchd-list-bytes-"));
+  const sourceName = "源".repeat(2_000);
+  const subject = "项".repeat(1_500);
+  const service = new EventWatchService({
+    statePath: join(directory, "state.json"),
+    sources: { [sourceName]: { read: async () => ({ revision: "版".repeat(2_000), payload: null }) } },
+    deliveries: { test: { deliver: async () => {} } },
+  });
+  for (let index = 0; index < 20; index += 1) {
+    await service.watch({
+      source: sourceName,
+      subject,
+      destination: destination(`worker-${index}`),
+      intervalMs: 1_000,
+    });
+  }
+
+  const first = await service.list();
+  assert.ok(first.watches.length > 0 && first.watches.length < 20);
+  assert.ok(first.nextCursor);
+  assert.ok(Buffer.byteLength(JSON.stringify(first)) <= MAX_RESULT_BYTES);
 });
 
 test("a slower second watch cannot postpone an existing fast resource", async () => {
@@ -1038,6 +1063,30 @@ test("Herdr delivery sends no prompt for a missing or ambiguous native session",
     }), new RegExp(`resolved to ${matches} live agents`));
     assert.equal(calls.filter((call) => call.method === "agent.prompt").length, 0);
   }
+});
+
+test("Herdr delivery prompts a blocked session directly without resuming its Goal", async () => {
+  const calls: any[] = [];
+  const agentSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session" };
+  const request = async (method: string, params: any) => {
+    calls.push({ method, params });
+    return {
+      snapshot: {
+        agents: [{ pane_id: "w1:p2", agent_status: "blocked", agent_session: agentSession }],
+      },
+    };
+  };
+  await herdrDelivery({ request }).deliver({ agentSession }, {
+    source: "github-pr",
+    subject: "owner/repo#1",
+    revision: "two",
+    payload: null,
+  });
+
+  const prompts = calls.filter((call) => call.method === "agent.prompt");
+  assert.equal(prompts.length, 1);
+  assert.doesNotMatch(prompts[0].params.text, /goal resume/);
+  assert.match(prompts[0].params.text, /External state changed/);
 });
 
 test("delivery failure stays pending and emits one coalesced supervisor diagnostic", async () => {

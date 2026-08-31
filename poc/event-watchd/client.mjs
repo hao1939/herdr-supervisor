@@ -1,6 +1,5 @@
 import net from "node:net";
-
-const MAX_FRAME = 64 * 1024;
+import { MAX_FRAME_BYTES } from "./protocol.mjs";
 const DEFAULT_TIMEOUT_MS = 5_000;
 const SOURCE_TIMEOUT_MS = 4 * 60 * 1_000;
 const POLL_TIMEOUT_MS = 20 * 60 * 1_000;
@@ -32,7 +31,7 @@ export function eventWatchRequest(message, { socketPath, timeoutMs } = {}) {
     socket.setEncoding("utf8");
     socket.on("data", (chunk) => {
       buffer += chunk;
-      if (Buffer.byteLength(buffer) > MAX_FRAME) {
+      if (Buffer.byteLength(buffer) > MAX_FRAME_BYTES) {
         finish(new Error("event watcher response is too large"));
         return;
       }

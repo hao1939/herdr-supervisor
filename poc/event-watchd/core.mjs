@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
+import { MAX_RESULT_BYTES } from "./protocol.mjs";
 
 const VERSION = 1;
 const MAX_TEXT = 2_000;
@@ -547,11 +548,12 @@ export class EventWatchService {
     const start = cursor === undefined
       ? 0
       : entries.findIndex(([id]) => id > cursor);
-    const page = (start < 0 ? [] : entries.slice(start, start + limit));
-    const watches = page.map(([id, watch]) => {
+    const candidates = start < 0 ? [] : entries.slice(start, start + limit);
+    const watches = [];
+    for (const [id, watch] of candidates) {
       const resource = this.state.resources[watch.resourceId];
       const subject = summaryText(resource.subject);
-      return {
+      const item = {
         watchId: id,
         source: resource.source,
         subject,
@@ -566,15 +568,26 @@ export class EventWatchService {
         } : null,
         error: summaryText(watch.lastError || resource.lastError) || null,
       };
-    });
-    const consumed = start < 0 ? entries.length : start + page.length;
+      const candidate = {
+        totalWatches: entries.length,
+        totalResources: Object.keys(this.state.resources).length,
+        diagnosticsConfigured: Boolean(this.state.diagnostics),
+        schedulerError: summaryText(this.schedulerError) || null,
+        watches: [...watches, item],
+        nextCursor: id,
+      };
+      if (Buffer.byteLength(JSON.stringify(candidate)) > MAX_RESULT_BYTES) break;
+      watches.push(item);
+    }
+    if (candidates.length && !watches.length) throw new Error("event watcher list entry exceeds its response budget");
+    const consumed = start < 0 ? entries.length : start + watches.length;
     return {
       totalWatches: entries.length,
       totalResources: Object.keys(this.state.resources).length,
       diagnosticsConfigured: Boolean(this.state.diagnostics),
       schedulerError: summaryText(this.schedulerError) || null,
       watches,
-      nextCursor: consumed < entries.length && page.length ? page.at(-1)[0] : null,
+      nextCursor: consumed < entries.length && watches.length ? watches.at(-1).watchId : null,
     };
   }
 

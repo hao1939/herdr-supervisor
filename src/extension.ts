@@ -15,7 +15,7 @@ import {
 } from "./goal-registry.ts";
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
-import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
+import { canRecoverAgentSession, canResumeNativeGoal, sameAgentSession } from "./identity.ts";
 import {
   ExternalPollFence,
   observeExternalWatches,
@@ -1926,10 +1926,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
-        const canResumeNativeGoal = Boolean(
+        const shouldResumeNativeGoal = Boolean(
           liveAgent
-          && binding.agentSession.agent === "codex"
-          && ["idle", "done"].includes(liveAgent.agent_status),
+          && canResumeNativeGoal(binding.agentSession, liveAgent.agent_status),
         );
         if (liveMismatch && !canResumeNow) {
           if (relocatedBinding) throw new Error(liveMismatch);
@@ -1966,7 +1965,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-        } else if (canResumeNativeGoal) {
+        } else if (shouldResumeNativeGoal) {
           try {
             await client.promptAgent(binding.paneId, "/goal resume", {
               until: ["working"],

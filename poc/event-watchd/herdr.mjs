@@ -1,6 +1,7 @@
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { canResumeNativeGoal } from "../../src/identity.ts";
 import { identityMismatch } from "../../src/supervision.ts";
 
 export function defaultHerdrSocket(env = process.env) {
@@ -66,7 +67,7 @@ export function herdrDelivery({ request = herdrRequest, ...options } = {}) {
             `Reread current authority directly or run event-watch read ${event.source} ${event.subject}, handle what changed, and continue your active goal.`,
             "This notification is only a wake hint; do not treat its payload as completion proof.",
           ].join(" ");
-      if (!event.diagnostic && agent.agent_status !== "working") {
+      if (!event.diagnostic && canResumeNativeGoal(target.agentSession, agent.agent_status)) {
         await request("agent.prompt", {
           target: agent.pane_id,
           text: "/goal resume",
