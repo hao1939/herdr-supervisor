@@ -27,7 +27,7 @@ const stateFields = new Set([
   "observationCursor",
   "externalChange",
 ]);
-const workerFields = new Set(["paneId", "terminalId", "agentSession", "label"]);
+const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
 const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
@@ -126,10 +126,6 @@ function validateWorker(worker) {
   onlyFields(worker, workerFields, "goal worker");
   requiredString(worker.paneId, "worker.paneId");
   requiredString(worker.terminalId, "worker.terminalId");
-  if (worker.label !== undefined) {
-    requiredString(worker.label, "worker.label");
-    if (worker.label.length > 80) throw new Error("worker.label must be at most 80 characters");
-  }
   if (!worker.agentSession || typeof worker.agentSession !== "object") {
     throw new Error("goal state requires worker.agentSession");
   }

@@ -189,10 +189,7 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
         ? "turn finished"
         : agent.agent_status;
   const goalLabel = binding.goalId ? `Goal ${binding.goalId}` : "Goal";
-  const displayLabel = binding.label
-    ? (detailed ? binding.label : compact(binding.label, 40))
-    : undefined;
-  const worker = `${displayLabel ? `${displayLabel} · ` : ""}${binding.agentSession.agent} ${binding.paneId}`;
+  const worker = `${binding.agentSession.agent} ${binding.paneId}`;
   const goal = detailed ? binding.goal : compact(binding.goal, 240);
   const lines = [
     `${goalLabel} · ${goalState}`,

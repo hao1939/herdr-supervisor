@@ -80,10 +80,10 @@ contract, its latest review checkpoint, and the judgment about what to do next.
 One native agent session can belong to only one unfinished goal, regardless of
 which pane currently routes to it.
 
-Each local worker binding may also keep a short display label. Herdr shows that
-label on the pane, while the opaque goal ID, terminal ID, and native session ID
-remain authoritative. A label helps a human navigate; it never selects a
-worker or proves identity.
+Herdr derives each worker's short display label from its goal. The opaque goal
+ID, terminal ID, and native session ID remain authoritative. A label helps a
+human navigate; it is not stored state, never selects a worker, and never
+proves identity.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -342,10 +342,11 @@ Idle is not the same as inactive. An unfinished goal keeps its pane because it
 may still own a wait, review, or immediate next action. The first lifecycle
 cleanup is deliberately smaller: after the supervisor accepts a completed
 goal, it closes a settled worker pane only after recording the terminal result,
-and keeps the exact native Codex session in the completed checkpoint. A working
-process is left alone. A close failure is a visible cleanup warning and cannot
-undo completion. Explicit `/unsupervise` still leaves the worker alone, as its
-command promises.
+and keeps the exact native Codex session in the completed checkpoint. Startup
+retries this cleanup for older accepted goals, after proving that no active goal
+reuses their pane or session. A working process is left alone. A close failure
+is a visible cleanup warning and cannot undo completion. Explicit
+`/unsupervise` still leaves the worker alone, as its command promises.
 
 Automatic parking of unfinished waiting goals is deferred. It becomes safe
 only when Herdr can atomically resume and prompt the expected native session;

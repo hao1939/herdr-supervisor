@@ -106,7 +106,7 @@ test("optional supervisor tool fields accept null without placeholder values", (
     context: null,
     acceptance: null,
     constraints: null,
-    placement: { mode: "new", label: "saved" },
+    placement: { mode: "new" },
     working_directory: "/app",
     direction: null,
   }), true);
@@ -116,7 +116,7 @@ test("optional supervisor tool fields accept null without placeholder values", (
     context: null,
     acceptance: ["The result is verified."],
     constraints: null,
-    placement: { mode: "new", label: "new" },
+    placement: { mode: "new" },
     working_directory: "/app",
     direction: null,
   }), true);
@@ -261,7 +261,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
     context: ["Another worker is validating the same repository."],
     acceptance: ["The focused test passes.", "The change is reviewed."],
     constraints: ["Make changes only in an isolated worktree."],
-    placement: { mode: "new", label: "sample-project" },
+    placement: { mode: "new" },
     working_directory: "/app/projects/sample-project",
     direction: "down",
   }, undefined, undefined, { ui: { setStatus() {} } });
@@ -271,12 +271,12 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(createTabRequest, {
     workspaceId: "w1",
     cwd: "/app/projects/sample-project",
-    label: "sample-project",
+    label: "Fix the focused regression.",
     focus: false,
   });
   assert.deepEqual(renamedPane, {
     paneId: managed.pane_id,
-    label: "sample-project",
+    label: "Fix the focused regression.",
   });
   assert.equal(startRequest.kind, "codex");
   assert.equal(startRequest.paneId, managed.pane_id);
@@ -310,7 +310,6 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
-  assert.equal(goals.active[0].label, "sample-project");
   assert.ok(deliveredPrompts[0].prompt.includes(`- Goal ID: ${JSON.stringify(goals.active[0].goalId)}`));
   assert.ok(deliveredPrompts[0].prompt.includes(`herdr-goal=${goals.active[0].goalId}`));
   assert.match(deliveredPrompts[0].prompt, /Never tag another goal's build or register a watch/);
@@ -381,7 +380,7 @@ test("an unstarted saved goal starts by exact ID without restating its contract"
   const ambiguous = await pi.tools.get("supervisor_start_goal").execute("ambiguous", {
     goal_id: "g_saved",
     goal: "Do not replace the saved contract.",
-    placement: { mode: "new", label: "saved-goal" },
+    placement: { mode: "new" },
     working_directory: "/app",
   }, undefined, undefined, { ui: { setStatus() {} } });
   const result = await pi.tools.get("supervisor_start_goal").execute("saved", {
@@ -390,7 +389,7 @@ test("an unstarted saved goal starts by exact ID without restating its contract"
     context: null,
     acceptance: null,
     constraints: null,
-    placement: { mode: "new", label: "saved-goal" },
+    placement: { mode: "new" },
     working_directory: "/app",
     direction: null,
   }, undefined, undefined, { ui: { setStatus() {} } });
@@ -479,7 +478,7 @@ test("a new goal never adopts a legacy-named worker without an existing contract
   const result = await pi.tools.get("supervisor_start_goal").execute("new", {
     goal: "Complete one new diagnostic.",
     acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new", label: "new-diagnostic" },
+    placement: { mode: "new" },
     working_directory: "/app",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
@@ -681,7 +680,7 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   const result = await pi.tools.get("supervisor_start_goal").execute("start-related", {
     goal: "Implement the related design.",
     acceptance: ["The focused proof passes."],
-    placement: { mode: "related", pane_id: related.paneId, label: "related implementation" },
+    placement: { mode: "related", pane_id: related.paneId },
     working_directory: "/app/projects/example",
     direction: "right",
   }, undefined, undefined, { ui: { setStatus() {} } });
@@ -696,12 +695,11 @@ test("the supervisor can place related workers in the same tab", async (t) => {
   assert.equal(startRequest.paneId, started.pane_id);
   assert.deepEqual(renamedPane, {
     paneId: started.pane_id,
-    label: "related implementation",
+    label: "Implement the related design.",
   });
   assert.deepEqual(startRequest.args, [
     "Initialize this worker session only. Do not inspect or change files. Wait for the goal.",
   ]);
-  assert.equal((await loadSupervisorGoals(root)).active.find(({ goalId }) => goalId !== "g_related").label, "related implementation");
   pi.events.get("session_shutdown")();
 });
 
@@ -1430,12 +1428,12 @@ test("a worker requires an explicit absolute working directory", async (t) => {
   const missing = await pi.tools.get("supervisor_start_goal").execute("missing-directory", {
     goal: "Fix one regression.",
     acceptance: ["The focused test passes."],
-    placement: { mode: "new", label: "regression" },
+    placement: { mode: "new" },
   }, undefined, undefined, { ui: { setStatus() {} } });
   const relative = await pi.tools.get("supervisor_start_goal").execute("relative-directory", {
     goal: "Fix another regression.",
     acceptance: ["The focused test passes."],
-    placement: { mode: "new", label: "regression" },
+    placement: { mode: "new" },
     working_directory: ".",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
@@ -1492,7 +1490,7 @@ test("a missing native session cannot leave assigned work running unsupervised",
   const result = await pi.tools.get("supervisor_start_goal").execute("missing-session", {
     goal: "Complete one full validation.",
     acceptance: ["Every result is accounted for."],
-    placement: { mode: "new", label: "validation" },
+    placement: { mode: "new" },
     working_directory: "/app/projects/sample-project",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
@@ -1566,7 +1564,7 @@ test("retry reuses a pending initialized pane instead of creating another worker
   const request = {
     goal: "Complete one bounded diagnostic.",
     acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new", label: "diagnostic" },
+    placement: { mode: "new" },
     working_directory: "/app",
   };
   const first = await pi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
@@ -1642,7 +1640,7 @@ test("restart reuses a legacy-named worker for an installed goal instead of crea
   const request = {
     goal: "Complete one restart-safe diagnostic.",
     acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new", label: "diagnostic" },
+    placement: { mode: "new" },
     working_directory: "/app",
   };
   const firstPi = fakePi();
@@ -1745,7 +1743,7 @@ test("restart never adopts a legacy-named session already owned by another goal"
   const result = await pi.tools.get("supervisor_start_goal").execute("start", {
     goal: "Start the independent diagnostic.",
     acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new", label: "diagnostic" },
+    placement: { mode: "new" },
     working_directory: "/app",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
@@ -1825,7 +1823,7 @@ test("restart never infers legacy ownership from a completed goal name collision
   const result = await pi.tools.get("supervisor_start_goal").execute("start", {
     goal: "Start the later diagnostic.",
     acceptance: ["The later diagnostic is verified."],
-    placement: { mode: "new", label: "diagnostic" },
+    placement: { mode: "new" },
     working_directory: "/app",
   }, undefined, undefined, { ui: { setStatus() {} } });
 
@@ -1837,6 +1835,119 @@ test("restart never infers legacy ownership from a completed goal name collision
   const goals = await loadSupervisorGoals(root);
   assert.equal(goals.completed.length, 1);
   assert.equal(goals.unstarted.length, 1);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart names active workers and retires accepted panes without losing their sessions", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reconcile-presentation-"));
+  const activeWorker = {
+    paneId: "w1:p2",
+    terminalId: "term_active",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_active" },
+  };
+  const completedWorker = {
+    paneId: "w1:p3",
+    terminalId: "term_completed",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  };
+  await registerSupervisedGoal(activeWorker, {
+    objective: "Keep validating the current release.",
+    acceptance: ["The release is verified."],
+  }, root, { goalId: "g_active" });
+  const completed = await registerSupervisedGoal(completedWorker, {
+    objective: "Prove the disposable check.",
+    acceptance: ["The disposable check passes."],
+  }, root, { goalId: "g_completed" });
+  await recordDecision(completed, "accept", {
+    progress: "The disposable check passed.",
+    action: "Accepted the verified goal.",
+    evidence: ["The exact check passed."],
+    terminal: { state: "accepted", summary: "The disposable check passed." },
+  }, root);
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const agents = [
+    {
+      pane_id: activeWorker.paneId,
+      terminal_id: activeWorker.terminalId,
+      agent_status: "working",
+      state_change_seq: 2,
+      agent_session: activeWorker.agentSession,
+    },
+    {
+      pane_id: completedWorker.paneId,
+      terminal_id: completedWorker.terminalId,
+      agent_status: "idle",
+      state_change_seq: 3,
+      agent_session: completedWorker.agentSession,
+    },
+  ];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents,
+    panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
+  }));
+  const renamed = [];
+  const closed = [];
+  t.mock.method(HerdrClient.prototype, "renamePane", async (paneId, label) => { renamed.push({ paneId, label }); });
+  t.mock.method(HerdrClient.prototype, "closePane", async (paneId) => { closed.push(paneId); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+
+  assert.deepEqual(renamed, [{ paneId: activeWorker.paneId, label: "Keep validating the current release." }]);
+  assert.deepEqual(closed, [completedWorker.paneId]);
+  const goals = await loadSupervisorGoals(root);
+  assert.equal(goals.active.length, 1);
+  assert.equal(goals.completed[0].state.worker.agentSession.value, "session_completed");
+  pi.events.get("session_shutdown")();
+});
+
+test("restart never retires a completed binding whose session has been reused by an active goal", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reused-session-"));
+  const completed = await registerSupervisedGoal(worker, {
+    objective: "Finish the earlier check.",
+    acceptance: ["The earlier check passes."],
+  }, root, { goalId: "g_earlier" });
+  await recordDecision(completed, "accept", {
+    progress: "The earlier check passed.",
+    action: "Accepted the verified goal.",
+    evidence: ["The exact check passed."],
+    terminal: { state: "accepted", summary: "The earlier check passed." },
+  }, root);
+  await registerSupervisedGoal(worker, {
+    objective: "Run the current check.",
+    acceptance: ["The current check passes."],
+  }, root, { goalId: "g_current" });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const agent = snapshot({ agent_status: "working", state_change_seq: 4 }).agents[0];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [agent],
+    panes: [{ pane_id: agent.pane_id, terminal_id: agent.terminal_id }],
+  }));
+  const closed = [];
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
+  t.mock.method(HerdrClient.prototype, "closePane", async (paneId) => { closed.push(paneId); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+
+  assert.deepEqual(closed, []);
+  assert.equal((await loadSupervisorGoals(root)).active[0].goalId, "g_current");
   pi.events.get("session_shutdown")();
 });
 
@@ -2314,6 +2425,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
     ],
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Local work is complete; a peer owns the shared capacity check.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -2444,6 +2556,7 @@ test("a peer review wakes only the dependent wait selected by the model", async 
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The peer recorded its current capacity decision.", truncated: false },
   }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   let subscriptionEvent;
   t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
     subscriptionEvent = onEvent;

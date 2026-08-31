@@ -2,9 +2,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import { loadGoalContract } from "./goal-store.ts";
 import { HerdrClient } from "./herdr-client.ts";
 import {
+  bindingFromRecord,
   loadSupervisorGoals,
   installSupervisorGoal,
   recordDecision,
@@ -453,8 +453,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function applyWorkerLabel(binding) {
-    const label = binding.label;
-    if (!label) return "";
+    const label = goalPaneLabel(binding.goal);
     try {
       await client.renamePane(binding.paneId, label);
       return "";
@@ -463,26 +462,53 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
   }
 
-  async function closeAcceptedWorkerPane(binding) {
-    try {
-      const snapshot = await client.snapshot();
-      const pane = findPane(snapshot, binding.paneId);
-      if (!pane) return `\nWorker pane was already closed; its native ${binding.agentSession.agent} session remains recorded.`;
-      if (pane.terminal_id !== binding.terminalId) {
-        return "\nWorker pane was left open because it now refers to a different terminal.";
+  async function closeAcceptedWorkerPane(binding, knownSnapshot?) {
+    const snapshot = knownSnapshot || await client.snapshot();
+    const pane = findPane(snapshot, binding.paneId);
+    if (!pane) return `\nWorker pane was already closed; its native ${binding.agentSession.agent} session remains recorded.`;
+    if (pane.terminal_id !== binding.terminalId) {
+      return "\nWorker pane was left open because it now refers to a different terminal.";
+    }
+    const agent = findAgent(snapshot, binding.paneId);
+    if (agent) {
+      const mismatch = identityMismatch(binding, agent, pane);
+      if (mismatch) return `\nWorker pane was left open because ${mismatch}.`;
+      if (agent.agent_status === "working") {
+        return "\nWorker pane was left open because its process is still working.";
       }
-      const agent = findAgent(snapshot, binding.paneId);
-      if (agent) {
-        const mismatch = identityMismatch(binding, agent, pane);
-        if (mismatch) return `\nWorker pane was left open because ${mismatch}.`;
-        if (agent.agent_status === "working") {
-          return "\nWorker pane was left open because its process is still working.";
-        }
+    }
+    await client.closePane(binding.paneId);
+    return `\nWorker pane closed; its native ${binding.agentSession.agent} session remains recorded.`;
+  }
+
+  async function reconcileWorkerPresentation(goals) {
+    if (mode() !== "live") return;
+    const snapshot = await client.snapshot();
+    for (const binding of goals.active) {
+      if (identityMismatch(
+        binding,
+        findAgent(snapshot, binding.paneId),
+        findPane(snapshot, binding.paneId),
+      )) continue;
+      const warning = await applyWorkerLabel(binding);
+      if (warning) reportBackgroundFailure("Could not name an active worker", new Error(warning.trim()));
+    }
+    const retiredPanes = new Set<string>();
+    for (const record of goals.completed) {
+      if (record.state?.terminal?.state !== "accepted") continue;
+      const binding = bindingFromRecord(record);
+      if (retiredPanes.has(binding.paneId)) continue;
+      const reused = goals.active.some((active) => (
+        active.paneId === binding.paneId
+        || sameAgentSession(active.agentSession, binding.agentSession)
+      ));
+      if (reused) continue;
+      try {
+        await closeAcceptedWorkerPane(binding, snapshot);
+        retiredPanes.add(binding.paneId);
+      } catch (error) {
+        reportBackgroundFailure(`Could not retire accepted worker ${binding.paneId}`, error);
       }
-      await client.closePane(binding.paneId);
-      return `\nWorker pane closed; its native ${binding.agentSession.agent} session remains recorded.`;
-    } catch (error) {
-      return `\nWorker pane could not be closed: ${error.message}.`;
     }
   }
 
@@ -904,10 +930,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const snapshot = await client.snapshot();
     const agent = findAgent(snapshot, paneId);
     if (!agent) throw new Error(`no observable agent in ${paneId}`);
-    const binding = await registerSupervisedGoal({
-      ...captureIdentity(agent),
-      label: goalPaneLabel(goal),
-    }, {
+    const binding = await registerSupervisedGoal(captureIdentity(agent), {
       objective: goal,
       acceptance,
       context,
@@ -988,9 +1011,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
 
     const goalId = installed.goalId;
-    const workerLabel = typeof params.placement.label === "string" && params.placement.label.trim()
-      ? params.placement.label.trim()
-      : goalPaneLabel(installed.contract.objective);
     const workerName = workerNameForGoal(goalId);
     const legacyWorkerName = legacyWorkerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
@@ -1045,11 +1065,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         const created = await client.splitPane({ paneId: anchor.pane_id, direction, cwd, focus: false });
         paneId = created?.pane?.pane_id;
       } else if (!paneId) {
-        const label = params.placement.label.trim();
         const created = await client.createTab({
           workspaceId: supervisor.workspace_id,
           cwd,
-          label,
+          label: goalPaneLabel(installed.contract.objective, 40),
           focus: false,
         });
         paneId = created?.root_pane?.pane_id;
@@ -1085,7 +1104,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
     let result;
     try {
-      result = await startInstalled(paneId, goalId, { wake: false, label: workerLabel });
+      result = await startInstalled(paneId, goalId, { wake: false });
       pendingStarts.delete(goalId);
     } catch (error) {
       throw new Error(`Started identified Codex worker ${paneId}, but could not record its goal: ${error.message}. The goal was not delivered; do not create another worker.`);
@@ -1103,16 +1122,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   async function startInstalled(paneId: string, goalId: string, {
     wake = true,
     activateNativeGoal = false,
-    label,
-  }: { wake?: boolean; activateNativeGoal?: boolean; label?: string } = {}) {
+  }: { wake?: boolean; activateNativeGoal?: boolean } = {}) {
     const snapshot = await client.snapshot();
     const agent = findAgent(snapshot, paneId);
     if (!agent) throw new Error(`no observable agent in ${paneId}`);
-    const contract = label ? undefined : await loadGoalContract(goalId);
-    const binding = await startInstalledGoal(goalId, {
-      ...captureIdentity(agent),
-      label: label || goalPaneLabel(contract.objective),
-    });
+    const binding = await startInstalledGoal(goalId, captureIdentity(agent));
     cacheBinding(binding);
     if (goalCache) goalCache.unstarted = goalCache.unstarted.filter((record) => record.goalId !== goalId);
     scheduleReview(binding);
@@ -1157,12 +1171,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       placement: Type.Union([
         Type.Object({
           mode: Type.Literal("new"),
-          label: Type.String({ minLength: 1, maxLength: 40, description: "Short goal-based label for the new worker tab and pane." }),
         }),
         Type.Object({
           mode: Type.Literal("related"),
           pane_id: Pane,
-          label: Type.String({ minLength: 1, maxLength: 80, description: "Short goal-based name for this worker pane." }),
         }),
       ], { description: "Create a new worker tab, or join the tab of one exact active related worker." }),
       working_directory: Type.String({ minLength: 1, description: "Absolute project or discovery root where the worker starts. It is independent of the supervisor directory; the worker manages any required worktrees." }),
@@ -1911,7 +1923,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
       );
       let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
-      warning += await closeAcceptedWorkerPane(binding);
+      try {
+        warning += await closeAcceptedWorkerPane(binding);
+      } catch (error) {
+        warning += `\nWorker pane could not be closed: ${error.message}.`;
+      }
       try {
         await connectObserver();
         await armReviewTimer();
@@ -2124,7 +2140,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     pi.setActiveTools(supervisorTools);
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
-    await reloadGoals();
+    const storedGoals = await reloadGoals();
+    await reconcileWorkerPresentation(storedGoals);
     const goals = await activeBindings();
     for (const binding of goals.active) {
       const runtime = runtimeFor(binding);

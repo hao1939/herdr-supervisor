@@ -23,7 +23,6 @@ import {
 const worker = {
   paneId: "w1:p2",
   terminalId: "term_test",
-  label: "Verified result",
   agentSession: {
     source: "herdr:codex",
     agent: "codex",
@@ -85,8 +84,6 @@ test("the local checkpoint rejects contract and unknown fields", async () => {
   const current = await loadGoalState("g_test", root);
   current.worker.agent_status = "working";
   assert.throws(() => validateGoalState(current), /goal worker contains unsupported field agent_status/);
-  current.worker = { ...worker, label: "x".repeat(81) };
-  assert.throws(() => validateGoalState(current), /worker.label must be at most 80 characters/);
 });
 
 test("v1 checkpoints retain read compatibility with the legacy recover decision", async () => {

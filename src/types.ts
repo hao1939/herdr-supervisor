@@ -9,8 +9,6 @@ export type WorkerIdentity = {
   paneId: string;
   terminalId: string;
   agentSession: AgentSession;
-  /** Human-readable local display only; never used as worker identity. */
-  label?: string;
 };
 
 export type GoalContract = {
