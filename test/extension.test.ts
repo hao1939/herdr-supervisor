@@ -915,6 +915,13 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   assert.equal(relayed.message.customType, "herdr-supervisor-human-follow-up");
   assert.equal(relayed.message.content, "Start the saved goal after this review.");
   assert.deepEqual(relayed.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(pi.events.get("input")({
+    type: "input",
+    text: "Then show me its progress.",
+    source: "rpc",
+    streamingBehavior: "followUp",
+  }), { action: "handled" });
+  const secondRelayed = pi.customMessages.at(-1);
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   const decision = await pi.tools.get("supervisor_leave").execute("leave", {
@@ -947,6 +954,21 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   });
   assert.equal(directTurn.isError, false);
   assert.doesNotMatch(directTurn.content[0].text, /decision is already applied/);
+
+  const directDecision = await pi.tools.get("supervisor_leave").execute("direct-leave", {
+    pane_id: worker.paneId,
+    progress: "The worker remains healthy while answering the human follow-up.",
+  });
+  assert.equal(directDecision.isError, false);
+  await pi.events.get("message_start")({
+    type: "message_start",
+    message: { role: "custom", ...secondRelayed.message, timestamp: Date.now() },
+  });
+  const secondDirectTurn = await pi.tools.get("supervisor_status").execute("second-follow-up", {
+    pane_id: null,
+  });
+  assert.equal(secondDirectTurn.isError, false);
+  assert.doesNotMatch(secondDirectTurn.content[0].text, /decision is already applied/);
 
   assert.deepEqual(pi.events.get("input")({
     type: "input",
@@ -3797,7 +3819,11 @@ test("only the current automated review remains in model context", () => {
       { role: "assistant", content: "old tool call" },
       { role: "toolResult", content: "old large observation" },
       { role: "assistant", content: "old review result" },
-      { role: "user", content: "Also prefer plain language." },
+      {
+        role: "custom",
+        customType: "herdr-supervisor-human-follow-up",
+        content: "Also prefer plain language.",
+      },
       { role: "assistant", content: "Understood." },
       { role: "custom", customType: "herdr-supervisor-review", content: "current goal" },
       { role: "assistant", content: "current tool call" },

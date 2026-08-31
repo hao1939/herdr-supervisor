@@ -2345,7 +2345,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (event.message.role !== "custom" || event.message.customType !== humanFollowUpMessageType) return;
     const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
-    if (!activeGlobalReview && !reviewTurn.isActive()) return;
     const settledGlobal = await settleGlobalReview();
     if (!settledGlobal) await settleFocusedReview();
     await armReviewTimer();
@@ -2369,7 +2368,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           insideOldReview = index !== latestReview;
           return index === latestReview;
         }
-        if (insideOldReview && message.role === "user") insideOldReview = false;
+        const humanMessage = message.role === "user"
+          || (message.role === "custom" && message.customType === humanFollowUpMessageType);
+        if (insideOldReview && humanMessage) insideOldReview = false;
         return !insideOldReview;
       }),
     };
