@@ -58,6 +58,7 @@ export function githubPullRequestDiscovery({
   const scopes = repositories.map(parseRepository);
   const allowedRepositories = new Set(repositories);
   const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH);
+  const recentWindow = boundedRefreshWindow(MAX_ANNOTATED_PULLS - MAX_REMEMBERED_REFRESH);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -104,11 +105,11 @@ export function githubPullRequestDiscovery({
       }
       const annotated = [...pullsBySubject.entries()]
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.body) }))
-        .filter((item) => item.goalId)
-        .sort((left, right) => Number(rememberedSubjects.has(right.subject))
-          - Number(rememberedSubjects.has(left.subject)))
-        .slice(0, MAX_ANNOTATED_PULLS);
-      for (const { subject, pull, goalId } of annotated) {
+        .filter((item) => item.goalId);
+      const retained = annotated.filter((item) => rememberedSubjects.has(item.subject));
+      const recent = recentWindow(annotated.filter((item) => !rememberedSubjects.has(item.subject)));
+      const selected = [...retained, ...recent];
+      for (const { subject, pull, goalId } of selected) {
         const parsed = parseSubject(subject);
         const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
         const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;

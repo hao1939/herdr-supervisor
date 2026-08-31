@@ -437,8 +437,38 @@ test("GitHub discovery does not crowd a remembered pull request out with recent 
 
   const { observations: found } = await source.scan([{ subject: "owner/repo#42", goalId: "g_remembered" }]);
 
-  assert.equal(found.length, 20);
+  assert.equal(found.length, 11);
   assert.ok(found.some((item) => item.subject === "owner/repo#42"));
+});
+
+test("GitHub discovery rotates through recent annotated pull requests", async () => {
+  const pulls = Array.from({ length: 25 }, (_, index) => ({
+    number: index + 1,
+    body: `## Supervision\n- Goal ID: g_recent_${index + 1}`,
+    head: { sha: `sha-${index + 1}` },
+    state: "open",
+    draft: false,
+    updated_at: "2026-09-01T00:00:00Z",
+  }));
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("/pulls?")) return response(pulls);
+      if (String(url).includes("check-runs")) return response({ check_runs: [] });
+      if (String(url).includes("/status?")) return response({ statuses: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const seen = new Set();
+  for (let scan = 0; scan < 3; scan += 1) {
+    const { observations: found } = await source.scan();
+    assert.equal(found.length, 10);
+    for (const item of found) seen.add(item.subject);
+  }
+
+  assert.equal(seen.size, 25);
 });
 
 test("ADO discovery uses the durable build tag and current build revision", async () => {
