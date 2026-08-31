@@ -117,8 +117,9 @@ flowchart LR
     B[Review deadline] --> Q
     C[Peer goal changed] --> Q
     D[Watched PR or build] --> Q
-    E[Hourly global check] --> Q
     Q --> R[Focused review]
+    E[Hourly global check] --> G[Compact global review]
+    G -. selected goals .-> Q
 ```
 
 The supervisor sleeps otherwise. It never polls a worker.
@@ -144,9 +145,10 @@ flowchart TD
     A -.-> W
 ```
 
-Every decision writes the checkpoint and an audit entry. A steer never
-substitutes a different worker — if identity cannot be confirmed, it fails
-closed and asks the human.
+Every decision commits the checkpoint, then appends a best-effort audit entry.
+An audit failure is visible but never rolls back the authoritative checkpoint.
+A steer never substitutes a different worker — if identity cannot be
+confirmed, it fails closed and asks the human.
 
 In plain language:
 
@@ -382,10 +384,12 @@ Watch registration is process-local in the first version: after restart, the
 ordinary bounded goal review can register it again. This keeps provider polling
 an optimization rather than another durable task or event system.
 
-Provider credentials belong to the environment, not the goal contract:
-`GITHUB_TOKEN` for GitHub, `AZURE_DEVOPS_EXT_PAT` for Azure DevOps. Without
-them a watch degrades to unauthenticated rate limits or fails with a clear
-error; it never guesses.
+Provider credentials belong to the environment, not the goal contract. GitHub
+accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
+`AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
+the runtime environment. Without usable credentials, a watch degrades to
+unauthenticated GitHub limits or fails with a clear Azure DevOps error; it never
+guesses.
 
 ## Concurrency
 
@@ -435,12 +439,11 @@ flowchart TD
     K -->|supervisor restarted| RL[Reload every goal from<br/>contract and checkpoint]
     K -->|worker process stopped| RS[Resume the exact<br/>native session]
     K -->|worker identity changed| FC[Fail closed<br/>no prompt sent]
-    K -->|review made no decision| BR[One bounded retry<br/>then ask human]
+    K -->|review made no decision| BR[One immediate retry<br/>then the next bounded review]
     K -->|checkpoint write failed| CB[Action already closed<br/>state reloaded]
     K -->|audit write failed| AV[Visible warning<br/>authoritative state unchanged]
 
     FC --> H[Ask the human]
-    BR --> H
 ```
 
 - Subscription loss reconnects with bounded backoff, then rereads Herdr state.
