@@ -31,12 +31,14 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
   const tools = new Map();
   const events = new Map();
   const messages = [];
+  const customMessages = [];
   const userMessages = [];
   return {
     commands,
     tools,
     events,
     messages,
+    customMessages,
     userMessages,
     registerFlag() {},
     getFlag(name) {
@@ -48,7 +50,10 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "
     registerTool(tool) { tools.set(tool.name, tool); },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) { events.set(name, handler); },
-    sendMessage(message) { messages.push(message); },
+    sendMessage(message, options) {
+      messages.push(message);
+      customMessages.push({ message, options });
+    },
     sendUserMessage(content, options) { userMessages.push({ content, options }); },
     setActiveTools() {},
   };
@@ -906,10 +911,10 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
     streamingBehavior: "steer",
   });
   assert.deepEqual(queued, { action: "handled" });
-  assert.deepEqual(pi.userMessages, [{
-    content: "Start the saved goal after this review.",
-    options: { deliverAs: "followUp", expandPromptTemplates: false },
-  }]);
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(relayed.message.customType, "herdr-supervisor-human-follow-up");
+  assert.equal(relayed.message.content, "Start the saved goal after this review.");
+  assert.deepEqual(relayed.options, { triggerTurn: true, deliverAs: "followUp" });
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   const decision = await pi.tools.get("supervisor_leave").execute("leave", {
@@ -925,7 +930,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
 
   await pi.events.get("message_start")({
     type: "message_start",
-    message: { role: "user", content: [{ type: "text", text: "Unrelated extension steering." }] },
+    message: { role: "user", content: [{ type: "text", text: "Start the saved goal after this review." }] },
   });
   const unrelatedSteering = await pi.tools.get("supervisor_status").execute("unrelated-steering", {
     pane_id: null,
@@ -935,7 +940,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
 
   await pi.events.get("message_start")({
     type: "message_start",
-    message: { role: "user", content: [{ type: "text", text: "Start the saved goal after this review." }] },
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
   });
   const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
     pane_id: null,
@@ -949,7 +954,7 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
     source: "extension",
     streamingBehavior: "followUp",
   }), { action: "continue" });
-  assert.equal(pi.userMessages.length, 1);
+  assert.equal(pi.userMessages.length, 0);
   pi.events.get("session_shutdown")();
 });
 
@@ -981,10 +986,10 @@ test("a command-shaped human follow-up is relayed unchanged and releases its rev
     source: "rpc",
     streamingBehavior: "followUp",
   }), { action: "handled" });
-  assert.deepEqual(pi.userMessages, [{
-    content: "/review src/index.ts",
-    options: { deliverAs: "followUp", expandPromptTemplates: false },
-  }]);
+  const relayed = pi.customMessages.at(-1);
+  assert.equal(relayed.message.customType, "herdr-supervisor-human-follow-up");
+  assert.equal(relayed.message.content, "/review src/index.ts");
+  assert.deepEqual(relayed.options, { triggerTurn: true, deliverAs: "followUp" });
 
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   await pi.tools.get("supervisor_leave").execute("leave", {
@@ -993,7 +998,7 @@ test("a command-shaped human follow-up is relayed unchanged and releases its rev
   });
   await pi.events.get("message_start")({
     type: "message_start",
-    message: { role: "user", content: [{ type: "text", text: "/review src/index.ts" }] },
+    message: { role: "custom", ...relayed.message, timestamp: Date.now() },
   });
   const directTurn = await pi.tools.get("supervisor_status").execute("follow-up", {
     pane_id: null,

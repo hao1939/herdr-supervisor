@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
@@ -90,6 +90,7 @@ const supervisorTools = [
 ];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
+const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const DEFAULT_EXTERNAL_WATCH_INTERVAL_MS = 5 * 60 * 1000;
 type SupervisorMode = "observe" | "dry-run" | "live";
 
@@ -2267,15 +2268,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     },
   });
 
-  function userMessageKey(content) {
-    const parts = typeof content === "string"
-      ? [{ type: "text", text: content }]
-      : content.map((part) => part.type === "text"
-        ? { type: "text", text: part.text }
-        : { type: "image", data: part.data, mimeType: part.mimeType });
-    return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
-  }
-
   pi.on("input", (event) => {
     const automaticReview = reviewTurn.isActive() || activeGlobalReview;
     if (
@@ -2288,10 +2280,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const content = event.images?.length
       ? [{ type: "text" as const, text: event.text }, ...event.images]
       : event.text;
-    pendingHumanFollowUps.add(userMessageKey(content));
-    pi.sendUserMessage(content, {
+    const deliveryId = randomUUID();
+    pendingHumanFollowUps.add(deliveryId);
+    pi.sendMessage({
+      customType: humanFollowUpMessageType,
+      content,
+      display: true,
+      details: { deliveryId },
+    }, {
+      triggerTurn: true,
       deliverAs: "followUp",
-      expandPromptTemplates: false,
     });
     return { action: "handled" };
   });
@@ -2344,8 +2342,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   pi.on("message_start", async (event) => {
-    if (event.message.role !== "user") return;
-    if (!pendingHumanFollowUps.delete(userMessageKey(event.message.content))) return;
+    if (event.message.role !== "custom" || event.message.customType !== humanFollowUpMessageType) return;
+    const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
+    if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
     if (!activeGlobalReview && !reviewTurn.isActive()) return;
     const settledGlobal = await settleGlobalReview();
     if (!settledGlobal) await settleFocusedReview();

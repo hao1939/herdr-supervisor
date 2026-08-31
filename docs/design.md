@@ -293,11 +293,12 @@ decision at a time.
 - The fence allows one successful observation and one decision in a turn.
 - Events arriving during a review remain pending for a later turn.
 - Human input arriving during an automatic review uses Pi's built-in follow-up
-  delivery without rewriting or expanding it. The current review makes its one
-  decision, then the human request gets the next direct turn before more
-  background reviews. The supervisor does not confuse extension-generated
-  steering with that human follow-up and does not add another durable message
-  queue; after a process failure the human may simply resend the request.
+  delivery with an opaque delivery ID and without rewriting or expanding the
+  request. The current review makes its one decision, then the human request
+  gets the next direct turn before more background reviews. The supervisor does
+  not confuse extension-generated steering with that human follow-up and does
+  not add another durable message queue; after a process failure the human may
+  simply resend the request.
 - A low-frequency compact global review sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
   work and may schedule ordinary focused reviews only for goals that have a
