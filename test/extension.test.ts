@@ -943,6 +943,40 @@ test("human input during an automatic review becomes the next Pi follow-up", asy
   pi.events.get("session_shutdown")();
 });
 
+test("settling a direct human decision clears its review fence", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const decision = await pi.tools.get("supervisor_leave").execute("leave", {
+    pane_id: worker.paneId,
+    progress: "The worker is actively pursuing the goal.",
+  });
+  assert.equal(decision.isError, false);
+
+  const fenced = await pi.tools.get("supervisor_status").execute("before-settlement", {
+    pane_id: null,
+  });
+  assert.equal(fenced.isError, true);
+  assert.match(fenced.content[0].text, /decision is already applied/);
+
+  await pi.events.get("agent_settled")();
+  const nextTurn = await pi.tools.get("supervisor_status").execute("after-settlement", {
+    pane_id: null,
+  });
+  assert.equal(nextTurn.isError, false);
+  assert.doesNotMatch(nextTurn.content[0].text, /decision is already applied/);
+  pi.events.get("session_shutdown")();
+});
+
 test("reconsideration rejects an unknown worker without scheduling work", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

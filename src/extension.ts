@@ -2305,9 +2305,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   async function settleFocusedReview() {
     const reviewedPane = reviewTurn.isActive() ? reviewTurn.paneId : undefined;
-    if (!reviewedPane) return false;
     const decisionApplied = reviewTurn.isClosed();
     reviewTurn.end();
+    if (!reviewedPane) return false;
     const binding = await bindingForPane(reviewedPane);
     if (binding) {
       const runtime = runtimeFor(binding);
