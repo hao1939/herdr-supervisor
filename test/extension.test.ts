@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { appendFile, mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,14 @@ const worker = {
   terminalId: "term_test",
   agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_test" },
 };
+
+function goalWorkerName(goalId: string) {
+  return `goal-${createHash("sha256").update(goalId).digest("hex").slice(0, 27)}`;
+}
+
+function legacyGoalWorkerName(goalId: string) {
+  return `goal-${goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
+}
 
 function fakePi({ reviewMs = "600000", globalReviewMs = "0", externalWatchMs = "120000" } = {}): any {
   const commands = new Map();
@@ -256,7 +265,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.equal(goals.active[0].paneId, managed.pane_id);
   assert.ok(deliveredPrompts[0].prompt.includes(`- Goal ID: ${JSON.stringify(goals.active[0].goalId)}`));
   assert.match(deliveredPrompts[0].prompt, /copy the current objective from the canonical goal\.json/);
-  assert.ok(deliveredPrompts[0].prompt.includes(`- Worker: ${JSON.stringify(`goal-${goals.active[0].goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`)}`));
+  assert.ok(deliveredPrompts[0].prompt.includes(`- Worker: ${JSON.stringify(goalWorkerName(goals.active[0].goalId))}`));
   assert.ok(deliveredPrompts[0].prompt.includes(`- Codex session: ${JSON.stringify(managed.agent_session.value)}`));
   assert.ok(deliveredPrompts[0].prompt.includes(`- Pane: ${JSON.stringify(managed.pane_id)}`));
   assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
@@ -778,12 +787,25 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
+  assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
+  assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
+  assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
+  assert.match(result.systemPrompt, /Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature/);
+  assert.match(result.systemPrompt, /whether an agent can handle it with existing tools/);
+  assert.match(result.systemPrompt, /whether an existing event or bounded review will trigger that agent/);
+  assert.match(result.systemPrompt, /whether the agent has enough current context and durable knowledge/);
+  assert.match(result.systemPrompt, /do not add another mechanism/);
+  assert.match(result.systemPrompt, /Propose a new code primitive only for a proven missing capability or trigger/);
+  assert.match(result.systemPrompt, /error explicitly says no action was applied/);
+  assert.match(result.systemPrompt, /action was applied or may have been applied/);
+  assert.match(result.systemPrompt, /follow the current worker evidence/);
+  assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
   pi.events.get("session_shutdown")();
 });
 
@@ -958,11 +980,12 @@ test("retry reuses a pending initialized pane instead of creating another worker
   assert.match(prompts[0], /Initialize this worker session only/);
   assert.match(prompts[1], /^\/goal /);
   assert.match(prompts[1], /goal\.json/);
+  assert.match(prompts[1], /Do not sleep, poll, or repeatedly reread unchanged state/);
   assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   pi.events.get("session_shutdown")();
 });
 
-test("restart reuses the named worker for an installed goal instead of creating a duplicate", async (t) => {
+test("restart reuses a legacy-named worker for an installed goal instead of creating a duplicate", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-restart-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
@@ -1025,6 +1048,8 @@ test("restart reuses the named worker for an installed goal instead of creating 
   herdrSupervisor(firstPi);
   const first = await firstPi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
   firstPi.events.get("session_shutdown")();
+  const [installed] = (await loadSupervisorGoals(root)).unstarted;
+  workerName = `goal-${installed.goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
   restarted = true;
 
   const secondPi = fakePi();
@@ -1038,6 +1063,179 @@ test("restart reuses the named worker for an installed goal instead of creating 
   assert.equal((await loadSupervisorGoals(root)).active.length, 1);
   assert.equal((await loadSupervisorGoals(root)).unstarted.length, 0);
   secondPi.events.get("session_shutdown")();
+});
+
+test("restart never adopts a legacy-named session already owned by another goal", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-owned-legacy-"));
+  const ownedSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session_owned" };
+  await registerSupervisedGoal({
+    paneId: "w1:p2",
+    terminalId: "term_owned_old",
+    agentSession: ownedSession,
+  }, {
+    objective: "Keep the existing release goal moving.",
+    acceptance: ["The release goal is verified."],
+  }, root, { goalId: "g_owner" });
+  await installSupervisorGoal({
+    objective: "Start the independent diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+  }, root, { goalId: "g_unstarted" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const ownedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_owned_new",
+    name: "goal-unstarted",
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_session: ownedSession,
+  };
+  const newAgent = {
+    pane_id: "w1:p3",
+    terminal_id: "term_new",
+    name: goalWorkerName("g_unstarted"),
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t3",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_new" },
+  };
+  let created = false;
+  let starts = 0;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: created ? [ownedAgent, newAgent] : [ownedAgent],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: ownedAgent.pane_id, terminal_id: ownedAgent.terminal_id, workspace_id: "w1", tab_id: ownedAgent.tab_id },
+      ...(created ? [{ pane_id: newAgent.pane_id, terminal_id: newAgent.terminal_id, workspace_id: "w1", tab_id: newAgent.tab_id }] : []),
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    created = true;
+    return { root_pane: { pane_id: newAgent.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    starts += 1;
+    assert.equal(request.paneId, newAgent.pane_id);
+    return newAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async (paneId) => {
+    assert.equal(paneId, newAgent.pane_id);
+    return newAgent;
+  });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => { prompts.push({ paneId, prompt }); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
+    goal: "Start the independent diagnostic.",
+    acceptance: ["The diagnostic is verified."],
+    placement: { mode: "new", label: "diagnostic" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, false);
+  assert.equal(starts, 1);
+  assert.equal(prompts.some(({ paneId }) => paneId === ownedAgent.pane_id), false);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value).sort(), ["session_new", "session_owned"]);
+  assert.equal(goals.unstarted.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("restart never infers legacy ownership from a completed goal name collision", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-completed-legacy-collision-"));
+  const completedGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_completed";
+  const targetGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_target";
+  const completed = await registerSupervisedGoal({
+    paneId: "w1:p9",
+    terminalId: "term_completed",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  }, {
+    objective: "Complete the earlier diagnostic.",
+    acceptance: ["The earlier diagnostic is verified."],
+  }, root, { goalId: completedGoalId });
+  await recordDecision(completed, "accept", {
+    progress: "The earlier diagnostic is verified.",
+    action: "Accepted the earlier goal.",
+    evidence: ["The expected result was observed."],
+    terminal: { state: "accepted", summary: "The expected result was observed." },
+  }, root);
+  await installSupervisorGoal({
+    objective: "Start the later diagnostic.",
+    acceptance: ["The later diagnostic is verified."],
+  }, root, { goalId: targetGoalId });
+
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const completedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_completed",
+    name: legacyGoalWorkerName(targetGoalId),
+    agent_status: "idle",
+    interactive_ready: true,
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  };
+  let creates = 0;
+  let starts = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [completedAgent],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      { pane_id: completedAgent.pane_id, terminal_id: completedAgent.terminal_id, workspace_id: "w1", tab_id: completedAgent.tab_id },
+    ],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    creates += 1;
+    return { root_pane: { pane_id: "w1:p3" } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { starts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
+    goal: "Start the later diagnostic.",
+    acceptance: ["The later diagnostic is verified."],
+    placement: { mode: "new", label: "diagnostic" },
+    working_directory: "/app",
+  }, undefined, undefined, { ui: { setStatus() {} } });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /legacy worker name.*ambiguous/i);
+  assert.equal(creates, 0);
+  assert.equal(starts, 0);
+  assert.equal(prompts, 0);
+  const goals = await loadSupervisorGoals(root);
+  assert.equal(goals.completed.length, 1);
+  assert.equal(goals.unstarted.length, 1);
+  pi.events.get("session_shutdown")();
 });
 
 test("restart adopts a new terminal without forcing a healthy worker review", async (t) => {
@@ -1582,15 +1780,18 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   assert.equal(stored.lastDecision.decision, "leave");
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
   assert.equal(stored.wait.condition, "w1:p7 to report that shared ADO capacity is available");
+  assert.equal(stored.wait.goalId, "g_peer");
   assert.equal(stored.wait.paneId, "w1:p7");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
 });
 
-test("a peer event immediately reconsiders its exact waiting worker", async (t) => {
+test("a peer review wakes only the dependent wait selected by the model", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-peer-wait-"));
   const sessionFile = join(root, "waiting-worker.jsonl");
+  const unrelatedSessionFile = join(root, "unrelated-waiting-worker.jsonl");
   await writeFile(sessionFile, "");
+  await writeFile(unrelatedSessionFile, "");
   const waitingWorker = {
     ...worker,
     agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: sessionFile },
@@ -1599,6 +1800,11 @@ test("a peer event immediately reconsiders its exact waiting worker", async (t) 
     paneId: "w1:p7",
     terminalId: "term_peer",
     agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_peer" },
+  };
+  const unrelatedWaitingWorker = {
+    paneId: "w1:p3",
+    terminalId: "term_other_waiter",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: unrelatedSessionFile },
   };
   const waiting = await registerSupervisedGoal(waitingWorker, {
     objective: "Run the next useful validation when capacity is free.",
@@ -1610,9 +1816,25 @@ test("a peer event immediately reconsiders its exact waiting worker", async (t) 
     wait: {
       condition: "w1:p7 to stop using shared capacity",
       paneId: peerWorker.paneId,
+      goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: 0 },
+  }, root);
+  const unrelatedWaiting = await registerSupervisedGoal(unrelatedWaitingWorker, {
+    objective: "Publish the peer's eventual capacity report.",
+    acceptance: ["The report is published."],
+  }, root, { goalId: "g_other_waiter" });
+  await recordDecision(unrelatedWaiting, "leave", {
+    progress: "The report template is ready.",
+    action: "Wait for the peer's final report.",
+    wait: {
+      condition: "w1:p7 to publish its final capacity report",
+      paneId: peerWorker.paneId,
+      goalId: "g_peer",
+      reviewAt: new Date(Date.now() + 60_000).toISOString(),
+    },
+    observationCursor: { kind: "codex-jsonl", path: unrelatedSessionFile, offset: 0 },
   }, root);
   await registerSupervisedGoal(peerWorker, {
     objective: "Check shared validation capacity.",
@@ -1640,10 +1862,20 @@ test("a peer event immediately reconsiders its exact waiting worker", async (t) 
       state_change_seq: 3,
       agent_session: peerWorker.agentSession,
     },
+    {
+      pane_id: unrelatedWaitingWorker.paneId,
+      terminal_id: unrelatedWaitingWorker.terminalId,
+      agent_status: "idle",
+      state_change_seq: 2,
+      agent_session: unrelatedWaitingWorker.agentSession,
+    },
   ];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents,
     panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The peer recorded its current capacity decision.", truncated: false },
   }));
   let subscriptionEvent;
   t.mock.method(HerdrClient.prototype, "subscribe", (_subscriptions, onEvent) => {
@@ -1658,9 +1890,34 @@ test("a peer event immediately reconsiders its exact waiting worker", async (t) 
   assert.equal(pi.messages.length, 0, "the unchanged future wait should remain quiet");
 
   subscriptionEvent({ data: { pane_id: peerWorker.paneId } });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(pi.messages.length, 0, "a raw peer event without meaningful evidence should remain cheap");
+
+  await pi.tools.get("supervisor_reconsider").execute("reconsider-peer", {
+    pane_ids: [peerWorker.paneId],
+    reason: "the peer has a fresh capacity decision",
+  });
+  await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 1);
-  assert.match(pi.messages[0].content, /w1:p7 changed; reconsider whether useful work can proceed/);
-  assert.match(pi.messages[0].content, /w1:p2/);
+  assert.match(pi.messages[0].content, /fresh capacity decision/);
+  assert.match(pi.messages[0].content, /Goals waiting on this goal/);
+  assert.match(pi.messages[0].content, /g_waiting \(w1:p2\): w1:p7 to stop using shared capacity/);
+  assert.match(pi.messages[0].content, /g_other_waiter \(w1:p3\): w1:p7 to publish its final capacity report/);
+  await pi.tools.get("supervisor_observe").execute("observe-peer", { pane_id: peerWorker.paneId });
+  await pi.tools.get("supervisor_reconsider").execute("route-peer-effect", {
+    pane_ids: [waitingWorker.paneId],
+    reason: "the fresh capacity decision materially changed the shared-capacity wait but not the final-report wait",
+  });
+  const leave = await pi.tools.get("supervisor_leave").execute("leave-peer", {
+    pane_id: peerWorker.paneId,
+    progress: "The peer recorded its current capacity decision.",
+  });
+  assert.equal(leave.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /fresh capacity decision materially changed/);
+  assert.match(pi.messages[1].content, /w1:p2/);
+  assert.doesNotMatch(pi.messages[1].content, /w1:p3/);
   pi.events.get("session_shutdown")();
 });
 
@@ -2889,18 +3146,24 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "The authenticated request is throttled.",
     waiting_for: "the server-directed retry boundary",
-    review_at: new Date(Date.now() + 1400).toISOString(),
+    review_at: new Date(Date.now() + 2000).toISOString(),
   });
   assert.equal(leave.isError, false);
 
   await pi.events.get("agent_settled")();
-  await new Promise((resolve) => setTimeout(resolve, 1100));
+  t.mock.timers.tick(1000);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pi.messages.length, 1, "the generic interval must not replace the decision deadline");
-  await waitFor(() => pi.messages.length === 2);
+  t.mock.timers.tick(1000);
+  for (let attempt = 0; attempt < 100 && pi.messages.length < 2; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(pi.messages.length, 2, "the decision deadline must still wake the review");
   assert.match(pi.messages[1].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
 });
@@ -2940,7 +3203,6 @@ test("an exact steering review survives restart and cannot be suppressed as quie
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  const reviewAt = new Date(Date.now() + 1400).toISOString();
   const firstPi = fakePi({ reviewMs: "1000" });
   herdrSupervisor(firstPi);
   await firstPi.events.get("session_start")({}, { ui: { setStatus() {} } });
@@ -2954,6 +3216,7 @@ test("an exact steering review survives restart and cannot be suppressed as quie
   });
   assert.equal(invalid.isError, true);
   assert.equal(prompts, 0, "an invalid deadline must fail before prompting the worker");
+  const reviewAt = new Date(Date.now() + 1400).toISOString();
   const steer = await firstPi.tools.get("supervisor_steer").execute("steer", {
     pane_id: worker.paneId,
     message: "Retry once at the exact boundary.",
@@ -3341,7 +3604,7 @@ test("an uncertain steer keeps an already accepted external reread resolved", as
   pi.events.get("session_shutdown")();
 });
 
-test("continuing a stopped worker resumes the exact session atomically", async (t) => {
+test("continuing after restart refreshes an empty pane terminal and resumes the exact session", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3352,11 +3615,15 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   let resumes = 0;
   let prompts = 0;
   let resumeRequest;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
+  const restartedTerminal = "term_after_restart";
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [],
+    panes: [{ pane_id: worker.paneId, terminal_id: restartedTerminal }],
+  }));
   t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
     resumes += 1;
     resumeRequest = request;
-    return snapshot().agents[0];
+    return snapshot({ terminal_id: restartedTerminal }).agents[0];
   });
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
     prompts += 1;
@@ -3382,6 +3649,9 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   ]);
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Resumed the exact codex session and native Goal/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.terminalId, restartedTerminal);
+  assert.equal(stored.progress, "The worker was steered to continue: Continue from current goal evidence.");
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
@@ -3391,7 +3661,479 @@ test("continuing a stopped worker resumes the exact session atomically", async (
   pi.events.get("session_shutdown")();
 });
 
-test("an accepted resume is not repeated when readiness checking fails", async (t) => {
+test("a direct human steer relocates a missing-pane worker and resumes the exact saved session", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const recoveryPane = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+  };
+  let disappeared = false;
+  let created = false;
+  let creates = 0;
+  let resumed = false;
+  let createRequest;
+  let resumeRequest;
+  const recoveryName = goalWorkerName("g_test");
+  const recoveredAgent = () => ({
+    pane_id: recoveryPane.pane_id,
+    terminal_id: recoveryPane.terminal_id,
+    workspace_id: recoveryPane.workspace_id,
+    tab_id: recoveryPane.tab_id,
+    agent_status: "working",
+    state_change_seq: 1,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+    name: "goal-test",
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: resumed
+      ? [recoveredAgent()]
+      : disappeared
+        ? []
+        : [{
+            pane_id: worker.paneId,
+            terminal_id: worker.terminalId,
+            workspace_id: "w1",
+            tab_id: "w1:t2",
+            agent_status: "working",
+            state_change_seq: 1,
+            agent_session: worker.agentSession,
+            interactive_ready: true,
+            name: "goal-test",
+          }],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+      ...(!disappeared
+        ? [{ pane_id: worker.paneId, terminal_id: worker.terminalId, workspace_id: "w1", tab_id: "w1:t2" }]
+        : []),
+      ...(created ? [recoveryPane] : []),
+    ],
+    tabs: created
+      ? [{ tab_id: recoveryPane.tab_id, workspace_id: "w1", label: recoveryName }]
+      : [],
+  }));
+  t.mock.method(HerdrClient.prototype, "createTab", async (request) => {
+    createRequest = request;
+    creates += 1;
+    created = true;
+    throw new Error("Herdr tab.create connection closed");
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
+    resumeRequest = request;
+    resumed = true;
+    return recoveredAgent();
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
+    prompts.push({ paneId, message });
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  assert.equal(pi.messages.length, 0);
+  disappeared = true;
+
+  const interrupted = await pi.tools.get("supervisor_steer").execute("continue-interrupted", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+  assert.equal(interrupted.isError, true);
+  assert.match(interrupted.content[0].text, /tab\.create connection closed/);
+  assert.match(interrupted.content[0].text, /Routing recovery may have partly applied/);
+  assert.match(interrupted.content[0].text, /Do not retry in this turn/);
+
+  const sameTurnRetry = await pi.tools.get("supervisor_steer").execute("continue-same-turn", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+  assert.equal(sameTurnRetry.isError, true);
+  assert.match(sameTurnRetry.content[0].text, /already applied/);
+  assert.equal(creates, 1);
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  await waitFor(() => pi.messages.length === 1);
+  assert.match(pi.messages[0].content, /worker pane is no longer present/);
+  await pi.tools.get("supervisor_observe").execute("observe-after-recovery-error", {
+    pane_id: worker.paneId,
+  });
+
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+
+  assert.deepEqual(createRequest, {
+    workspaceId: "w1",
+    cwd: "/app",
+    label: recoveryName,
+    focus: false,
+  });
+  assert.equal(creates, 1);
+  assert.deepEqual(resumeRequest.args, [
+    "resume",
+    worker.agentSession.value,
+    "/goal resume",
+  ]);
+  assert.equal(resumeRequest.name, recoveryName);
+  assert.equal(resumeRequest.paneId, recoveryPane.pane_id);
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [recoveryPane.pane_id]);
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /Relocated and resumed the exact codex session and native Goal in w1:p9/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, recoveryPane.pane_id);
+  assert.equal(stored.terminalId, recoveryPane.terminal_id);
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
+  assert.equal(stored.lastDecision.decision, "steer");
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-pane recovery adopts an exact session restored after its tab is created", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const createdPane = {
+    pane_id: "w1:p9",
+    terminal_id: "term_created",
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+  };
+  const restoredAgent = {
+    pane_id: "w1:p10",
+    terminal_id: "term_restored",
+    workspace_id: "w1",
+    tab_id: "w1:t10",
+    agent_status: "working",
+    state_change_seq: 5,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+    name: "already-restored",
+  };
+  let created = false;
+  let snapshotsAfterCreate = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    if (created) snapshotsAfterCreate += 1;
+    return {
+      agents: snapshotsAfterCreate > 1 ? [restoredAgent] : [],
+      panes: [
+        { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
+        ...(created ? [createdPane, restoredAgent] : []),
+      ],
+      tabs: [],
+    };
+  });
+  let creates = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    creates += 1;
+    created = true;
+    return { root_pane: createdPane };
+  });
+  let starts = 0;
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { starts += 1; });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
+    prompts.push({ paneId, message });
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.equal(creates, 1);
+  assert.equal(starts, 0, "the already-restored native session must not be started again");
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [restoredAgent.pane_id]);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, restoredAgent.pane_id);
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
+  pi.events.get("session_shutdown")();
+});
+
+test("a stale external decision is rejected before missing-pane recovery changes routing", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordExternalChange(binding, {
+    source: "github-pr",
+    subject: "hao1939/herdr-supervisor#28",
+    revision: "current-revision",
+    observedAt: new Date().toISOString(),
+  }, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({ agents: [], panes: [], tabs: [] }));
+  let creates = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("stale", {
+    pane_id: worker.paneId,
+    message: "Continue from stale evidence.",
+    external_change_revision: "stale-revision",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /does not match the current pending revision/);
+  assert.equal(creates, 0);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, worker.paneId);
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-pane recovery adopts the exact session already restored elsewhere", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const movedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    workspace_id: "w1",
+    tab_id: "w1:t9",
+    agent_status: "idle",
+    state_change_seq: 3,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+    name: "goal-test",
+  };
+  let nativeGoalResumed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [{ ...movedAgent, agent_status: nativeGoalResumed ? "working" : "idle" }],
+    panes: [{
+      pane_id: movedAgent.pane_id,
+      terminal_id: movedAgent.terminal_id,
+      workspace_id: movedAgent.workspace_id,
+      tab_id: movedAgent.tab_id,
+    }],
+  }));
+  let creates = 0;
+  let resumes = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { resumes += 1; });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
+    prompts.push({ paneId, message });
+    if (message === "/goal resume") nativeGoalResumed = true;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue from current goal evidence.",
+  });
+
+  assert.equal(creates, 0);
+  assert.equal(resumes, 0);
+  assert.equal(prompts.length, 2);
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [movedAgent.pane_id, movedAgent.pane_id]);
+  assert.equal(prompts[0].message, "/goal resume");
+  assert.match(prompts[1].message, /Continue from current goal evidence/);
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /Relocated the exact codex session and resumed its native Goal in w1:p9/);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, movedAgent.pane_id);
+  assert.equal(stored.agentSession.value, worker.agentSession.value);
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-pane recovery rejects duplicate processes for one native session", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const duplicateAgents = ["w1:p9", "w1:p10"].map((paneId, index) => ({
+    pane_id: paneId,
+    terminal_id: `term_duplicate_${index}`,
+    agent_status: "working",
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+  }));
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: duplicateAgents,
+    panes: duplicateAgents.map((agent) => ({
+      pane_id: agent.pane_id,
+      terminal_id: agent.terminal_id,
+    })),
+  }));
+  let creates = 0;
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Could not start worker recovery/);
+  assert.match(result.content[0].text, /multiple Herdr agents expose the same codex session/);
+  assert.match(result.content[0].text, /may decide again in this review turn/);
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /Could not start worker recovery/);
+  assert.match(repeated.content[0].text, /multiple Herdr agents expose the same codex session/);
+  assert.equal(creates, 0);
+  assert.equal(prompts, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("post-relocation observation failure closes the turn and schedules recovery", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const movedAgent = {
+    pane_id: "w1:p9",
+    terminal_id: "term_recovered",
+    agent_status: "working",
+    state_change_seq: 3,
+    agent_session: worker.agentSession,
+    interactive_ready: true,
+  };
+  let snapshots = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshots += 1;
+    if (snapshots === 3) throw new Error("post-relocation snapshot failed");
+    return {
+      agents: [movedAgent],
+      panes: [{ pane_id: movedAgent.pane_id, terminal_id: movedAgent.terminal_id }],
+    };
+  });
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: "1000" });
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+  const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /post-relocation snapshot failed/);
+  assert.match(result.content[0].text, /bounded review will reread current state/);
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already applied/);
+  assert.equal(prompts, 0);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, movedAgent.pane_id);
+  pi.events.get("session_shutdown")();
+});
+
+test("missing-pane recovery refuses a pane assigned to another active goal", async (t) => {
+  const root = await fixture();
+  const otherWorker = {
+    paneId: "w1:p9",
+    terminalId: "term_other",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_other" },
+  };
+  await registerSupervisedGoal(otherWorker, {
+    objective: "Keep the other goal isolated.",
+  }, root, { goalId: "g_other" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+
+  let conflict = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: conflict
+      ? [{
+          pane_id: otherWorker.paneId,
+          terminal_id: otherWorker.terminalId,
+          agent_status: "working",
+          agent_session: worker.agentSession,
+          interactive_ready: true,
+        }]
+      : [
+          { pane_id: worker.paneId, terminal_id: worker.terminalId, agent_status: "working", agent_session: worker.agentSession },
+          { pane_id: otherWorker.paneId, terminal_id: otherWorker.terminalId, agent_status: "working", agent_session: otherWorker.agentSession },
+        ],
+    panes: conflict
+      ? [{ pane_id: otherWorker.paneId, terminal_id: otherWorker.terminalId }]
+      : [
+          { pane_id: worker.paneId, terminal_id: worker.terminalId },
+          { pane_id: otherWorker.paneId, terminal_id: otherWorker.terminalId },
+        ],
+  }));
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  assert.equal(pi.messages.length, 0);
+  conflict = true;
+  const result = await pi.tools.get("supervisor_steer").execute("continue", {
+    pane_id: worker.paneId,
+    message: "Continue the exact goal.",
+  });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /already pursues goal g_other/);
+  assert.equal(prompts, 0);
+  pi.events.get("session_shutdown")();
+});
+
+test("an uncertain resume response is not repeated in the same turn", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -3401,10 +4143,9 @@ test("an accepted resume is not repeated when readiness checking fails", async (
   });
   let resumes = 0;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (_request, _timeout, onStarted) => {
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => {
     resumes += 1;
-    onStarted();
-    throw new Error("readiness timed out");
+    throw new Error("agent.start connection closed");
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -3420,8 +4161,8 @@ test("an accepted resume is not repeated when readiness checking fails", async (
 
   assert.equal(resumes, 1);
   assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /Herdr accepted the exact-session resume/);
-  assert.match(result.content[0].text, /Do not resume it again/);
+  assert.match(result.content[0].text, /resume may have started/);
+  assert.match(result.content[0].text, /Do not resume it again in this turn/);
   const repeated = await pi.tools.get("supervisor_steer").execute("continue-again", {
     pane_id: worker.paneId,
     message: "Continue from current goal evidence.",
@@ -3717,13 +4458,49 @@ test("a completed global review arms its next in-process deadline", async (t) =>
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
+  const finding = {
+    problem: "One already reported issue",
+    evidence: ["The current snapshot proves it"],
+    affected_goal_ids: ["g_test"],
+  };
   await pi.tools.get("supervisor_global_result").execute("first", {
     summary: "Healthy.",
-    findings: [],
+    findings: [finding],
     reconsider: [],
   });
   await pi.events.get("agent_settled")();
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 2);
+  const reviews = pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review");
+  assert.match(reviews[1].content, /Previously active finding/);
+  assert.match(reviews[1].content, /One already reported issue/);
+  assert.match(reviews[1].content, /Return it again if the current snapshot still proves it/);
+  await pi.tools.get("supervisor_global_result").execute("unchanged", {
+    summary: "No material change.",
+    findings: [finding],
+    reconsider: [],
+  });
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /One already reported issue/);
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 1);
+
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 3);
+  await pi.tools.get("supervisor_global_result").execute("resolved", {
+    summary: "The issue is resolved.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal((await loadGlobalReviewState(root)).lastFinding, undefined);
+
+  await pi.events.get("agent_settled")();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitFor(() => pi.messages.filter((message) => message.customType === "herdr-supervisor-global-review").length === 4);
+  await pi.tools.get("supervisor_global_result").execute("recurred", {
+    summary: "The issue recurred.",
+    findings: [finding],
+    reconsider: [],
+  });
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 2);
   pi.events.get("session_shutdown")();
 });

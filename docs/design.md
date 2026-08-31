@@ -77,6 +77,8 @@ There are three roles:
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal
 contract, its latest review checkpoint, and the judgment about what to do next.
+One native agent session can belong to only one unfinished goal, regardless of
+which pane currently routes to it.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -117,8 +119,11 @@ it is not a model review decision.
 Resuming a native Goal is also not a model decision. If `steer` is chosen for
 an exact settled Codex worker, code resumes its native Goal before sending the
 instruction into the active turn. If the process exited while its pane and
-native session remain recoverable, code resumes that same session first. A
-missing pane or changed session fails closed.
+native session remain recoverable, code resumes that same session first. An
+empty pane restored with a new terminal refreshes that transient checkpoint. A
+missing pane may be replaced as a routing location only when the recorded
+session supports exact resume and code verifies that saved identity. A changed
+or unsupported session fails closed.
 
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
@@ -219,11 +224,16 @@ Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
 promise to reconsider, not permission to forget the goal:
 
-- a direct peer wait records that exact peer so its next event wakes the goal;
+- a direct peer wait resolves the selected pane to the peer's durable goal ID;
+  when a peer review proves that condition materially changed, the model
+  selects the exact affected waits for early review, and a terminal peer wakes
+  all remaining dependents after either worker is relocated;
 - a wait on one exact GitHub PR or ADO build may register a disposable external
   watch chosen by the model;
 - every wait has a bounded recheck;
-- an exact later time is used only when evidence provides one;
+- the model chooses an evidence-appropriate safety time; a selected peer effect
+  or external watch still wakes the goal earlier, avoiding repeated short
+  reviews of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
 A human question follows the same rule. It is concrete, asks for the minimum
@@ -235,6 +245,9 @@ extension process. They share the nearest-deadline timer and the per-goal
 review signal map. An unchanged revision schedules another read without a
 model turn. A changed revision queues the ordinary focused review, where the
 model asks the same worker to reread provider authority before judging it.
+When that external condition is the worker's only remaining blocker, the
+worker reports it once and lets its native Goal block. It does not sleep or
+poll; the watch or bounded review resumes the same session.
 Watch registration is process-local in the first version: after restart, the
 ordinary bounded goal review can register it again. This keeps provider polling
 an optimization rather than another durable task or event system.
@@ -255,6 +268,10 @@ decision at a time.
   saved contracts that have no local worker. It reports cross-goal or unstarted
   work and may schedule ordinary focused reviews only for goals that have a
   worker; it never acts on workers itself.
+- Its small local checkpoint supplies the last bounded active finding to the
+  next review. The model returns the complete set still supported by current
+  evidence; code suppresses an identical set and clears resolved findings so a
+  later recurrence is visible again.
 
 This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.
@@ -296,6 +313,7 @@ events and internal metadata do not compete with the useful outcome.
 - `extension.ts` wires Pi tools, Herdr events, timers, and validated effects.
 - `prompts.ts` contains readable model and worker policy.
 - `types.ts` distinguishes durable goal bindings from transient runtime state.
+- `identity.ts` owns exact native-session equality shared across boundaries.
 - `goal-store.ts` validates and atomically persists contracts, checkpoints, and
   audit entries.
 - `goal-registry.ts` maps stored goal records to active bindings.
@@ -309,3 +327,7 @@ New abstractions must remove real duplication or clarify an authority boundary.
 Do not add a generic reducer, workflow engine, retry service, task graph, or
 keyword router unless measured evidence proves the simpler event-driven design
 cannot meet the goal.
+
+An uncertain routing recovery never causes a same-turn retry. The existing
+bounded review rereads runtime truth and safely adopts or retries the recovery;
+no separate recovery workflow or durable retry state is needed.

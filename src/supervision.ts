@@ -1,3 +1,5 @@
+import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
+
 export const DEFAULT_REVIEW_INTERVAL_MS = 10 * 60 * 1000;
 export const MAX_REVIEW_DELAY_MS = 24 * 60 * 60 * 1000;
 const ISO_8601_WITH_TIMEZONE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
@@ -56,8 +58,9 @@ export function identityMismatch(binding, agent, pane?) {
   const expected = binding.agentSession;
   const actual = agent.agent_session;
   if (!actual) return "worker has no native agent-session identity";
-  for (const field of ["source", "agent", "kind", "value"]) {
-    if (actual[field] !== expected[field]) return `worker ${field} changed`;
+  if (!sameAgentSession(actual, expected)) {
+    const field = ["source", "agent", "kind", "value"].find((key) => actual[key] !== expected[key]);
+    return `worker ${field} changed`;
   }
   return undefined;
 }
@@ -78,8 +81,14 @@ export function nextReviewDelay(workers, now = new Date()) {
   return Math.max(0, Math.min(...deadlines) - timestamp);
 }
 
-export function dependentBindings(workers, paneId) {
-  return workers.filter((worker) => worker.paneId !== paneId && worker.wait?.paneId === paneId);
+export function dependentBindings(workers, peer) {
+  return workers.filter((worker) => (
+    worker.goalId !== peer.goalId
+    && (
+      (peer.goalId && worker.wait?.goalId === peer.goalId)
+      || (!worker.wait?.goalId && worker.wait?.paneId === peer.paneId)
+    )
+  ));
 }
 
 export function liveWorker(binding, snapshot) {
@@ -118,7 +127,7 @@ export function recoveryRequest(binding, snapshot) {
   if (!pane) throw new Error("the registered worker pane is no longer present");
   if (pane.terminal_id !== binding.terminalId) throw new Error("the pane now refers to a different terminal");
   const session = binding.agentSession;
-  if (session.agent !== "codex" || session.kind !== "id") {
+  if (!canRecoverAgentSession(session)) {
     throw new Error(`exact recovery is not available for ${session.agent} ${session.kind} sessions`);
   }
   return {
@@ -136,10 +145,17 @@ function compact(value, limit) {
 
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
+  const paneMissing = mismatch === "worker pane is no longer present";
+  const terminalReplaced = mismatch === "pane now refers to a different terminal";
+  const sessionRecoverable = canRecoverAgentSession(binding.agentSession);
+  const workerUnavailable = !agent && Boolean(mismatch);
+  const routingRecoverable = !agent && sessionRecoverable;
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
   const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
   const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
-  const goalState = mismatch
+  const goalState = workerUnavailable && awaitingHuman
+    ? "waiting for you"
+    : mismatch
     ? "needs attention"
     : binding.externalChange
       ? (externalRereadWorking ? "working" : "needs review")
@@ -152,6 +168,10 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
           : "needs review";
   const workerState = processStopped
     ? "process stopped"
+    : paneMissing
+      ? "pane missing"
+    : terminalReplaced
+      ? "terminal replaced"
     : mismatch
       ? "identity changed"
       : agent.agent_status === "done"
@@ -167,13 +187,21 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   ];
   if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
-  if (mismatch && !processStopped) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
+  if (workerUnavailable && awaitingHuman) {
+    lines.push(sessionRecoverable
+      ? "  Next: answer the supervisor's question above; worker recovery can follow your answer"
+      : "  Next: answer the supervisor's question above; afterward the unsupported worker session still needs repair");
+    const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
+    if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
+  } else if (routingRecoverable) lines.push(paneMissing
+    ? "  Next: supervisor should review whether the exact session can resume in a new pane"
+    : "  Next: supervisor should review whether the exact session can resume");
+  else if (mismatch) lines.push(`  Needs you: ${mismatch}; supervision is paused`);
   else if (awaitingHuman) {
     lines.push("  Next: answer the supervisor's question above");
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
     if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
   }
-  else if (processStopped) lines.push("  Next: supervisor should review whether the exact session can resume");
   else if (binding.externalChange) {
     if (!externalRereadInFlight) {
       lines.push(`  Next: worker must reread ${binding.externalChange.source} ${binding.externalChange.subject}`);
