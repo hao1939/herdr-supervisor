@@ -296,7 +296,7 @@ Measure:
 
 ### Live results so far
 
-The first two feasibility gates passed in the MLVM container on 2026-08-31:
+The first three feasibility gates passed in the MLVM container on 2026-08-31:
 
 1. A disposable supervised Codex worker kept one ordinary foreground shell
    call active for 90.073 seconds while checking for an externally created
