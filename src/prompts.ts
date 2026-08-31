@@ -11,6 +11,7 @@ const workerExecutionBoundary = [
   "Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
+  "When one external or peer condition is the only remaining blocker, report that exact condition once and let the native Goal become blocked. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
 ].join(" ");
 
@@ -182,6 +183,7 @@ const supervisorPolicy = [
     "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
+    "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; the supervisor's watch and bounded review will resume the same native Goal.",
     "Supply review_at when current evidence justifies a specific safety-check time. A peer decision or external watch already wakes the goal early, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",
     "A human question also receives bounded reconsideration and does not prevent unrelated useful work.",

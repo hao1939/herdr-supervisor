@@ -543,6 +543,12 @@ boundary. A linked peer's next recorded supervisor decision triggers the same
 reconsideration immediately; its raw lifecycle changes wake only that peer's
 own goal.
 
+If one external or peer condition is the worker's only remaining blocker, the
+worker reports the exact boundary once and lets its native Goal block. It does
+not sleep, poll, or repeatedly reread unchanged state. The existing external
+watch, peer-decision wake, or bounded review resumes that same session; no
+second watcher or waiting workflow is needed.
+
 `ask_human` is an explicit supervisor operation because it has different
 effects from steering: it shows one question, closes the review turn, and leaves
 the worker untouched. Its wait and bounded reconsideration time are stored in
@@ -901,6 +907,12 @@ stores or displays copied live status as goal truth.
 - **Implemented:** an expired external wait cannot be extended from an unchanged
   settled-worker observation; the same worker must check the condition or take
   another concrete action.
+- **Live finding:** after one required ADO reread returned unchanged, a native
+  Codex Goal slept and reread the same build every two minutes even though the
+  supervisor already owned an external watch. No new scheduler was needed: the
+  worker and supervisor policies now say to report an external-only blocker
+  once, let the native Goal block, and resume the same session from the existing
+  watch or bounded review.
 - **Implemented:** advance the observation checkpoint only in the authoritative update that
   records a completed review. A crash before that point deliberately rereads
   bounded evidence; the audit never advances the cursor.

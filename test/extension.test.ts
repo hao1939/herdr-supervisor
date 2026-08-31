@@ -785,6 +785,7 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
   assert.match(result.systemPrompt, /peer decision or external watch already wakes the goal early/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
+  assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
   assert.match(result.systemPrompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
@@ -969,6 +970,7 @@ test("retry reuses a pending initialized pane instead of creating another worker
   assert.match(prompts[0], /Initialize this worker session only/);
   assert.match(prompts[1], /^\/goal /);
   assert.match(prompts[1], /goal\.json/);
+  assert.match(prompts[1], /Do not sleep, poll, or repeatedly reread unchanged state/);
   assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   pi.events.get("session_shutdown")();
 });

@@ -210,6 +210,9 @@ extension process. They share the nearest-deadline timer and the per-goal
 review signal map. An unchanged revision schedules another read without a
 model turn. A changed revision queues the ordinary focused review, where the
 model asks the same worker to reread provider authority before judging it.
+When that external condition is the worker's only remaining blocker, the
+worker reports it once and lets its native Goal block. It does not sleep or
+poll; the watch or bounded review resumes the same session.
 Watch registration is process-local in the first version: after restart, the
 ordinary bounded goal review can register it again. This keeps provider polling
 an optimization rather than another durable task or event system.
