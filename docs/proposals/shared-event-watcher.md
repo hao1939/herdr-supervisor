@@ -370,6 +370,15 @@ the watch, and the worker made one fresh `event-watch read`. The supervisor was
 not on the successful path, and the failed build result was treated only as
 authoritative transport evidence, not as success for the worker's goal.
 
+A later real ADO watch stayed quiet for the full three-hour build, survived
+several daemon upgrades, and then woke its exact long-running worker session.
+The worker made a fresh read, classified build `178962980` as a terminal timeout
+with no product assertions, retained the independently verified cleanup evidence,
+updated its existing PR evidence, and continued other readiness work. The watch
+was consumed and the daemon returned to zero watches without a supervisor turn.
+This is the intended benefit: provider waiting used no worker turn, while the
+worker—not the watcher—decided what the failed result meant for its larger goal.
+
 The first registration attempt also proved an important deployment boundary:
 the container did not automatically inherit the host's GitHub credential. The
 watch was not created and the error stayed visible. Restarting the environment
