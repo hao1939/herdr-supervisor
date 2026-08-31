@@ -470,6 +470,73 @@ test("watcher diagnostics fail closed when the supervisor is ambiguous", async (
   await assert.rejects(diagnose({ message: "failure" }), /expected one Pi supervisor, found 2/);
 });
 
+test("GitHub discovery refreshes every remembered pull request within a few bounded scans", async () => {
+  const known = Array.from({ length: 25 }, (_, index) => ({
+    subject: `owner/repo#${index + 1}`,
+    goalId: `g_remembered_${index + 1}`,
+  }));
+  const reads = [];
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("/pulls?")) return response([]);
+      const number = /\/pulls\/(\d+)$/.exec(text)?.[1];
+      if (number) {
+        reads.push(Number(number));
+        return response({
+          number: Number(number),
+          body: `## Supervision\n- Goal ID: g_remembered_${number}`,
+          head: { sha: `sha-${number}` },
+          state: "open",
+          draft: false,
+          updated_at: "2026-09-01T00:00:00Z",
+        });
+      }
+      if (text.includes("check-runs")) return response({ check_runs: [] });
+      if (text.includes("/status?")) return response({ statuses: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const scans = [];
+  for (let scan = 0; scan < 3; scan += 1) scans.push((await source.scan(known)).length);
+
+  assert.deepEqual(scans, [10, 10, 10]);
+  assert.deepEqual([...new Set(reads)].sort((left, right) => left - right), known.map((_, index) => index + 1));
+});
+
+test("ADO discovery bounds remembered rereads per scan and still covers them all", async () => {
+  const known = Array.from({ length: 120 }, (_, index) => ({
+    subject: `org/project/${index + 1}`,
+    goalId: `g_remembered_${index + 1}`,
+  }));
+  const reads = [];
+  const source = adoBuildDiscovery({
+    definitions: ["org/project/77"],
+    authorization: "******",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("builds?")) return response({ value: [] });
+      const id = Number(/\/builds\/(\d+)\?/.exec(text)?.[1]);
+      reads.push(id);
+      return response({
+        id,
+        tags: [`herdr-goal=g_remembered_${id}`],
+        sourceVersion: `sha-${id}`,
+        status: "inProgress",
+      });
+    },
+  });
+
+  const scans = [];
+  for (let scan = 0; scan < 3; scan += 1) scans.push((await source.scan(known)).length);
+
+  assert.deepEqual(scans, [50, 50, 50]);
+  assert.deepEqual([...new Set(reads)].sort((left, right) => left - right), known.map((_, index) => index + 1));
+});
+
 function response(value, ok = true, status = 200) {
   return { ok, status, json: async () => value };
 }

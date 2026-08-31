@@ -122,9 +122,13 @@ Each adapter periodically lists a bounded window of recent resources in its
 scope and returns only resources with a valid goal ID. It also rereads exact
 resources already present in the bounded revision checkpoint. This second read
 keeps later updates visible after a resource leaves the recent window; it does
-not create a separate subscription record. Recently closed or completed
-resources stay in the discovery window long enough to observe their final
-transition.
+not create a separate subscription record. When more resources are remembered
+than one scan may reread, the adapter takes the next bounded window each scan,
+so every remembered resource is refreshed within a bounded number of scans and
+neither recent nor remembered resources starve. That rotation is disposable
+runtime state: after a restart it simply starts again from the beginning.
+Recently closed or completed resources stay in the discovery window long enough
+to observe their final transition.
 
 Adapters own provider syntax and pagination. The core sees only normalized
 observations:

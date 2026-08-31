@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { boundedRefreshWindow } from "./refresh-window.mjs";
 
 const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
 const MAX_ANNOTATED_PULLS = 20;
+const MAX_REMEMBERED_REFRESH = 10;
 const MAX_EVIDENCE_ITEMS = 25;
 
 function parseRepository(value) {
@@ -51,6 +53,7 @@ export function githubPullRequestDiscovery({
   }
   const scopes = repositories.map(parseRepository);
   const allowedRepositories = new Set(repositories);
+  const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -61,7 +64,8 @@ export function githubPullRequestDiscovery({
     async scan(known = []) {
       const observations = [];
       const pullsBySubject = new Map();
-      const knownSubjects = new Set(known.map((resource) => resource.subject));
+      const remembered = rememberedWindow(known);
+      const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
       for (const { owner, repository } of scopes) {
         const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
         const pulls = await json(
@@ -73,7 +77,7 @@ export function githubPullRequestDiscovery({
         if (!Array.isArray(pulls)) throw new Error("GitHub pull request discovery returned an invalid list");
         for (const pull of pulls) pullsBySubject.set(`${owner}/${repository}#${pull.number}`, pull);
       }
-      for (const resource of known.slice(0, MAX_ANNOTATED_PULLS)) {
+      for (const resource of remembered) {
         if (pullsBySubject.has(resource.subject)) continue;
         const parsed = parseSubject(resource.subject);
         if (!parsed || !allowedRepositories.has(`${parsed.owner}/${parsed.repository}`)) continue;
@@ -84,7 +88,8 @@ export function githubPullRequestDiscovery({
       const annotated = [...pullsBySubject.entries()]
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.body) }))
         .filter((item) => item.goalId)
-        .sort((left, right) => Number(knownSubjects.has(right.subject)) - Number(knownSubjects.has(left.subject)))
+        .sort((left, right) => Number(rememberedSubjects.has(right.subject))
+          - Number(rememberedSubjects.has(left.subject)))
         .slice(0, MAX_ANNOTATED_PULLS);
       for (const { subject, pull, goalId } of annotated) {
         const parsed = parseSubject(subject);

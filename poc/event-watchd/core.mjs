@@ -205,6 +205,9 @@ export class DiscoveredEventWatcher {
       items.push({ key, resource, pending: structuredClone(resource.pending) });
       groups.set(resource.pending.goalId, items);
     }
+    for (const key of this.reported) {
+      if (key.startsWith("delivery:") && !groups.has(key.slice("delivery:".length))) this.reported.delete(key);
+    }
     for (const [goalId, items] of groups) {
       const batch = items.slice(0, MAX_EVENTS_PER_DELIVERY);
       try {

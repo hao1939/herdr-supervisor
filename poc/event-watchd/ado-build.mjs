@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { boundedRefreshWindow } from "./refresh-window.mjs";
 
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const GOAL_TAG = /^herdr-goal=(g_[a-zA-Z0-9_-]+)$/;
 const MAX_BUILDS = 500;
+const MAX_REMEMBERED_REREADS = 50;
 const execFileAsync = promisify(execFile);
 
 function parseDefinition(value) {
@@ -73,6 +75,7 @@ export function adoBuildDiscovery({
   }
   const scopes = definitions.map(parseDefinition);
   const allowedProjects = new Set(scopes.map((scope) => `${scope.organization}/${scope.project}`));
+  const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS);
   return {
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
@@ -88,17 +91,21 @@ export function adoBuildDiscovery({
         for (const build of result.value) recent.set(`${organization}/${project}/${build.id}`, build);
       }
       const selected = new Map();
+      const missing = [];
       for (const resource of known) {
-        if (selected.size >= MAX_BUILDS) break;
         const parsed = parseSubject(resource.subject);
         if (!parsed || !allowedProjects.has(`${parsed.organization}/${parsed.project}`)) continue;
         const current = recent.get(resource.subject);
         if (current) {
-          selected.set(resource.subject, current);
+          if (selected.size < MAX_BUILDS) selected.set(resource.subject, current);
           continue;
         }
+        missing.push({ subject: resource.subject, parsed });
+      }
+      for (const { subject, parsed } of rereadWindow(missing)) {
+        if (selected.size >= MAX_BUILDS) break;
         const base = `https://dev.azure.com/${encodeURIComponent(parsed.organization)}/${encodeURIComponent(parsed.project)}`;
-        selected.set(resource.subject, await json(
+        selected.set(subject, await json(
           fetchImpl,
           `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`,
           auth,
