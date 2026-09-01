@@ -340,6 +340,32 @@ test("checkpoint saturation does not block recovery of observed pending deliveri
   assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "two"]);
 });
 
+test("checkpoint saturation reports deferred discoveries without dropping pending deliveries", async (t) => {
+  const directory = await temporary(t, "event-watch-saturated-capacity-");
+  const diagnostics = [];
+  let observations = [{ subject: "one", goalId: "g_one", revision: "one", payload: {} }];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => discovery(observations) } },
+    deliver: async () => { throw new Error("worker unavailable"); },
+    diagnose: (item) => diagnostics.push(item),
+    maxResources: 1,
+  });
+
+  await watcher.runOnce();
+  observations = [{ subject: "two", goalId: "g_two", revision: "one", payload: {} }];
+  await watcher.runOnce();
+
+  assert.deepEqual(diagnostics.at(-1), {
+    kind: "capacity",
+    source: "source",
+    message: "source discovery deferred a new resource because all 1 checkpoint entries have pending deliveries",
+  });
+  const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
+  assert.equal(resources.length, 1);
+  assert.ok(resources[0].pending);
+});
+
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
   const directory = await temporary(t, "event-watch-coalesce-");
   const delivered = [];

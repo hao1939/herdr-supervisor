@@ -292,6 +292,7 @@ export class DiscoveredEventWatcher {
     }
     const known = [];
     const discovered = [];
+    const saturatedSources = new Set();
     for (const item of scan.observations) {
       const key = keyFor(item.source, item.subject);
       (next.resources[key] ? known : discovered).push(item);
@@ -302,7 +303,10 @@ export class DiscoveredEventWatcher {
       if (current?.goalId === item.goalId && current.revision === item.revision) continue;
       if (!current && Object.keys(next.resources).length >= this.maxResources) {
         const removable = removableResourceKeys(next)[0];
-        if (!removable) continue;
+        if (!removable) {
+          saturatedSources.add(item.source);
+          continue;
+        }
         delete next.resources[removable];
       }
       next.resources[key] = {
@@ -318,6 +322,17 @@ export class DiscoveredEventWatcher {
         },
       };
       changed = true;
+    }
+    for (const source of Object.keys(this.sources)) {
+      if (saturatedSources.has(source)) {
+        await this.report(`capacity:${source}`, {
+          kind: "capacity",
+          source,
+          message: `${source} discovery deferred a new resource because all ${this.maxResources} checkpoint entries have pending deliveries`,
+        });
+      } else {
+        this.reported.delete(`capacity:${source}`);
+      }
     }
     if (changed) {
       trimResources(next, this.maxResources);
