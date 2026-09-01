@@ -82,8 +82,8 @@ export function adoBuildDiscovery({
   const allowedProjects = new Set(scopes.map((scope) => `${scope.organization}/${scope.project}`));
   const allowedDefinitions = new Set(scopes.map((scope) =>
     `${scope.organization}/${scope.project}/${scope.definitionId}`));
-  const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS);
-  const recentWindow = boundedRefreshWindow(MAX_BUILDS);
+  const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS, (resource) => resource.subject);
+  const recentWindow = boundedRefreshWindow(MAX_BUILDS, ([subject]) => subject);
   return {
     async scan(known = []) {
       const auth = authorization || await getAuthorization();

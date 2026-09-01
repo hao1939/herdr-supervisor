@@ -77,8 +77,11 @@ export function githubPullRequestDiscovery({
   }
   const scopes = repositories.map(parseRepository);
   const allowedRepositories = new Set(repositories);
-  const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH);
-  const recentWindow = boundedRefreshWindow(MAX_ANNOTATED_PULLS - MAX_REMEMBERED_REFRESH);
+  const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH, (resource) => resource.subject);
+  const recentWindow = boundedRefreshWindow(
+    MAX_ANNOTATED_PULLS - MAX_REMEMBERED_REFRESH,
+    (resource) => resource.subject,
+  );
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",

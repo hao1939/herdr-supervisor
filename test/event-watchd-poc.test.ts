@@ -9,9 +9,26 @@ import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../poc/e
 import { DiscoveredEventWatcher } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestDiscovery, supervisionGoal } from "../poc/event-watchd/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../poc/event-watchd/herdr.mjs";
+import { boundedRefreshWindow } from "../poc/event-watchd/refresh-window.mjs";
 import { registerSupervisedGoal } from "../src/goal-registry.ts";
 
 const execFileAsync = promisify(execFile);
+
+test("bounded windows keep their place when new resources arrive first", () => {
+  const next = boundedRefreshWindow(2, (item) => item.id);
+  assert.deepEqual(next([{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }]), [
+    { id: "a" },
+    { id: "b" },
+  ]);
+  assert.deepEqual(next([
+    { id: "new-1" },
+    { id: "new-2" },
+    { id: "a" },
+    { id: "b" },
+    { id: "c" },
+    { id: "d" },
+  ]), [{ id: "c" }, { id: "d" }]);
+});
 
 async function temporary(t, label) {
   const directory = await mkdtemp(join(tmpdir(), label));

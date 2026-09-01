@@ -156,8 +156,10 @@ keeps later updates visible after a resource leaves the recent window; it does
 not create a separate subscription record. When more resources are remembered
 than one scan may reread, the adapter takes the next bounded window each scan,
 so every remembered resource is refreshed within a bounded number of scans and
-neither recent nor remembered resources starve. That rotation is disposable
-runtime state: after a restart it simply starts again from the beginning.
+neither recent nor remembered resources starve. The window remembers durable
+resource identities, so newly inserted provider results do not shift it back
+onto resources it already visited. That rotation is disposable runtime state:
+after a restart it simply starts again from the beginning.
 Recently closed or completed resources stay in the discovery window long enough
 to observe their final transition.
 
@@ -222,11 +224,11 @@ The delivery input is a durable goal ID, never a pane ID:
 4. Resume its native Goal if it is settled.
 5. Send a short hint naming the changed resource.
 
-If the goal is already complete, the change is safely ignored. If the goal is
-missing, ambiguous, unreadable, or temporarily has no valid worker, delivery
-fails closed. The daemon does not guess another worker or create a goal. It
-records one bounded diagnostic for the supervisor, which uses ordinary goal
-reasoning and tools to repair the situation.
+If the goal is already complete when delivery begins, the change is safely
+ignored. If the goal is missing, ambiguous, unreadable, or temporarily has no
+valid worker, delivery fails closed. The daemon does not guess another worker
+or create a goal. It records one bounded diagnostic for the supervisor, which
+uses ordinary goal reasoning and tools to repair the situation.
 
 The daemon resolves the environment's one Pi supervisor from fresh Herdr state
 and sends it a bounded diagnostic. It persists no supervisor destination. If
@@ -235,8 +237,9 @@ visible in service stderr, and is retried on the next failing scan.
 
 Replacing the current watcher still has several production gates:
 
-- the final exact-worker check and Herdr prompt are separate requests, so Herdr
-  needs a session-addressed or atomic prompt boundary;
+- canonical activity, the final exact-worker check, and Herdr prompts are
+  separate requests, so default enablement needs a cross-process-safe active
+  goal/revision precondition plus a session-addressed or atomic prompt boundary;
 - an in-progress provider scan needs bounded cancellation during shutdown;
 - GitHub discovery needs an authenticated request budget and provider-directed
   backoff before it is enabled continuously.
