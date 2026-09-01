@@ -107,6 +107,9 @@ Each provider stores it in the simplest durable metadata it already supports:
 
 - GitHub pull requests use the existing secondary `## Supervision` description
   block. The adapter reads only its `Goal ID` value for routing.
+- Azure DevOps pull requests use the same secondary `## Supervision` description
+  block. Repository scope is deployment configuration; the description remains
+  the durable link to a goal.
 - Azure DevOps builds use a build tag such as
   `herdr-goal=g_example`. Azure DevOps
   rejects a colon in the build-tag API path, so the portable spelling uses an
@@ -197,7 +200,7 @@ The payload is bounded context for the wake hint, not completion evidence.
 
 A revision includes only fields whose changes may matter to a worker. Examples:
 
-- PR head, state, draft state, update time, checks, and statuses;
+- PR head, state, draft and merge state, reviews, discussions, and policies;
 - build source version, status, result, and finish time.
 
 The GitHub adapter derives its revision from the listed pull-request
@@ -208,6 +211,14 @@ response. An approval, dismissal, or base-branch conflict that changes nothing
 else therefore waits for the bounded goal review. This keeps the provider
 budget and implementation small without claiming a wake the adapter cannot
 produce.
+
+The Azure DevOps PR adapter derives its revision from the pull request head,
+status, draft and merge state, reviewer votes, discussion thread revisions, and
+policy evaluations. It reads only PRs carrying the existing supervision block
+inside configured repositories. Because ADO truncates descriptions in its list
+response, the adapter rotates through bounded exact PR reads before parsing the
+block. Its payload is bounded while its revision covers the complete provider
+collections.
 
 On first discovery, the daemon records the revision and emits one wake. This
 may produce a harmless extra review when a resource was just created, but it
@@ -263,9 +274,9 @@ most 20 annotated pull requests per scan, and refuses truncated check or status
 evidence. Provider failures are diagnosed and the bounded goal review still
 guarantees eventual reconsideration.
 
-One watcher also accepts at most ten ADO pipeline definitions. These scope
-bounds keep the shared scan predictable without adding a provider scheduler or
-rate-limit state machine.
+One watcher also accepts at most ten ADO repositories and ten ADO pipeline
+definitions. These scope bounds keep the shared scan predictable without adding
+a provider scheduler or rate-limit state machine.
 
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions

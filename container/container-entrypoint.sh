@@ -8,7 +8,7 @@ mkdir -p "$extension_dir"
 ln -sfn /opt/herdr-supervisor/container/pi-extension.ts "$extension_dir/herdr-supervisor.ts"
 
 watcher_pid=""
-if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}" ]; then
+if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}${HERDR_WATCH_ADO_REPOSITORIES:-}" ]; then
   echo "Starting the shared provider metadata watcher." >&2
   node /opt/herdr-supervisor/src/event-watcher/daemon.mjs &
   watcher_pid=$!

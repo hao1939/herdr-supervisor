@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { boundedRefreshWindow } from "./refresh-window.mjs";
+import { supervisionGoal } from "./supervision-metadata.mjs";
 
-const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
+export { supervisionGoal } from "./supervision-metadata.mjs";
+
 const MAX_REPOSITORIES = 10;
 const MAX_ANNOTATED_PULLS = 20;
 const MAX_REMEMBERED_REFRESH = 10;
@@ -16,29 +18,6 @@ function parseRepository(value) {
 function parseSubject(value) {
   const match = /^([^/]+)\/([^#]+)#([1-9]\d*)$/.exec(value);
   return match ? { owner: match[1], repository: match[2], number: Number(match[3]) } : undefined;
-}
-
-export function supervisionGoal(body) {
-  const lines = String(body || "").split(/\r?\n/);
-  const matches = [];
-  let inSupervision = false;
-  for (const line of lines) {
-    if (line.trim() === "## Supervision") {
-      inSupervision = true;
-      continue;
-    }
-    if (/^#{1,2}(\s|$)/.test(line)) {
-      inSupervision = false;
-      continue;
-    }
-    if (!inSupervision) continue;
-    if (!/^\s*-\s*Goal ID:/.test(line)) continue;
-    const match = /^\s*-\s*Goal ID:\s*(?:"(g_[a-zA-Z0-9_-]+)"|(g_[a-zA-Z0-9_-]+))\s*$/.exec(line);
-    if (!match) return undefined;
-    const goalId = match[1] || match[2];
-    if (goalId && GOAL_ID.test(goalId)) matches.push(goalId);
-  }
-  return matches.length === 1 ? matches[0] : undefined;
 }
 
 async function json(fetchImpl, url, headers, label) {

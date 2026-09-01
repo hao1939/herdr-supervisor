@@ -432,7 +432,7 @@ promise to reconsider, not permission to forget the goal:
   when a peer review proves that condition materially changed, the model
   selects the exact affected waits for early review, and a terminal peer wakes
   all remaining dependents after either worker is relocated;
-- a wait on a supported GitHub PR or ADO build relies on its durable goal
+- a wait on a supported GitHub or ADO PR, or an ADO build, relies on its durable goal
   metadata for an early wake;
 - every wait has a bounded recheck;
 - the model chooses an evidence-appropriate safety time; a selected peer effect
@@ -473,7 +473,7 @@ live evidence.
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
 configured repositories. One watcher also accepts at most ten Azure DevOps
-pipeline definitions. Azure DevOps accepts
+repositories and ten pipeline definitions. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
 the runtime environment. Without usable credentials, discovery fails with a
 clear error and the watcher never guesses.

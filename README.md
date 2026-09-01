@@ -61,12 +61,13 @@ state at any time.
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
 | `GITHUB_TOKEN` | — | GitHub API token for configured metadata discovery. `GH_TOKEN` also works |
-| `AZURE_DEVOPS_EXT_PAT` | — | Azure DevOps token for configured build discovery (the `az` CLI is not in the image) |
+| `AZURE_DEVOPS_EXT_PAT` | — | Azure DevOps token for build or PR discovery; required in the stock image unless the deployment supplies Azure CLI and its login state |
 | `AZURE_CLI` | `az` | Optional Azure CLI executable used when no ADO token is configured |
 | `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
 | `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
 | `HERDR_WATCH_GITHUB_REPOSITORIES` | — | Up to ten comma-separated trusted `owner/repository` scopes; requires a GitHub token and enables the shared watcher |
 | `HERDR_WATCH_ADO_DEFINITIONS` | — | Up to ten comma-separated `organization/project/definition-id` scopes; enables the shared watcher |
+| `HERDR_WATCH_ADO_REPOSITORIES` | — | Up to ten comma-separated `organization/project/repository` scopes; observes annotated ADO PRs |
 | `HERDR_WATCH_INTERVAL_MS` | `60000` | Interval between bounded provider scans |
 | `HERDR_WATCH_STATE_HOME` | user state directory | Directory for the bounded revision checkpoint |
 
@@ -167,6 +168,11 @@ Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
 goal review remains the safety net after a missed signal or provider failure.
 One short per-goal execution lock prevents a notification from crossing an
 accept or stop decision; it contains no workflow state.
+
+ADO discovery uses `AZURE_DEVOPS_EXT_PAT` when configured. A custom deployment
+may instead supply Azure CLI, its login state, and `AZURE_CLI` when the executable
+is not on the service `PATH`. The stock image does not bundle Azure CLI.
+Credentials are never copied into goal or watcher state.
 
 Failures follow the same path. The component that sees a failure reports the
 operation, affected goals, observed error, and remaining automatic retry. The
