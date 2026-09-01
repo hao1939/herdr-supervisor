@@ -117,14 +117,18 @@ async function save(path, state) {
   }
 }
 
-function trimResources(state, maxResources) {
-  const entries = Object.entries(state.resources);
-  if (entries.length <= maxResources) return;
-  const removable = entries
+function removableResourceKeys(state) {
+  return Object.entries(state.resources)
     .filter(([, resource]) => !resource.pending)
-    .sort((left, right) => Date.parse(left[1].observedAt) - Date.parse(right[1].observedAt));
+    .sort((left, right) => Date.parse(left[1].observedAt) - Date.parse(right[1].observedAt))
+    .map(([key]) => key);
+}
+
+function trimResources(state, maxResources) {
+  if (Object.keys(state.resources).length <= maxResources) return;
+  const removable = removableResourceKeys(state);
   while (Object.keys(state.resources).length > maxResources && removable.length) {
-    delete state.resources[removable.shift()[0]];
+    delete state.resources[removable.shift()];
   }
   if (Object.keys(state.resources).length > maxResources) {
     throw new Error("pending event deliveries exceed the resource limit");
@@ -283,10 +287,21 @@ export class DiscoveredEventWatcher {
       delete next.resources[key];
       changed = true;
     }
+    const known = [];
+    const discovered = [];
     for (const item of scan.observations) {
+      const key = keyFor(item.source, item.subject);
+      (next.resources[key] ? known : discovered).push(item);
+    }
+    for (const item of [...known, ...discovered]) {
       const key = keyFor(item.source, item.subject);
       const current = next.resources[key];
       if (current?.goalId === item.goalId && current.revision === item.revision) continue;
+      if (!current && Object.keys(next.resources).length >= this.maxResources) {
+        const removable = removableResourceKeys(next)[0];
+        if (!removable) continue;
+        delete next.resources[removable];
+      }
       next.resources[key] = {
         source: item.source,
         subject: item.subject,

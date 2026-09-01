@@ -118,13 +118,18 @@ flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
     C[Selected peer goal changed] --> Q
-    D[Annotated PR or build revision changed] --> Q
+    D[Compatibility watch changed] --> Q
+    M[Metadata daemon found a change] --> W[Current worker rereads it]
+    W --> A
     Q --> R[Focused review]
     E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
 ```
 
 The supervisor sleeps otherwise. It never polls a worker.
+`Q` is the current supervisor path. The metadata-daemon branch is the PoC path:
+it wakes the worker, and only the worker's later Herdr state change reaches `Q`.
+The daemon does not write supervisor review state directly.
 
 ### One review, one decision
 
@@ -249,8 +254,9 @@ decision, optional wait, optional unresolved external change, and optional
 terminal result. It does not copy live worker status; that always comes from
 Herdr.
 
-Polling schedules remain disposable memory. If an annotated PR or build changes,
-only that unresolved fact is saved in `current.json`. It survives restart and
+Polling schedules remain disposable memory. If the compatibility in-process
+watch sees a PR or build change, only that unresolved fact is saved in
+`current.json`. It survives restart and
 cannot be cleared by merely sending a prompt or receiving a worker reply. After
 the reread delivery attempt, the supervisor saves the current transcript cursor
 or terminal fingerprint. A later native final response, or a later settled
@@ -310,17 +316,18 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; the external observer may wake the supervisor when a PR or build changes.
-The supervisor then judges the refreshed evidence through its normal focused
-review. There is no second review lifecycle, reviewer state machine, attempt
-budget, or goal schema. A separate review goal exists only when review itself
-is the human's distinct durable outcome, such as an ongoing project-wide review
-program—not merely because one implementation reached a review step.
+findings; the PoC metadata observer may wake the current worker when a PR or
+build changes. The worker rereads provider authority, and its resulting Herdr
+state change wakes the supervisor's normal focused review. There is no second
+review lifecycle, reviewer state machine, attempt budget, or goal schema. A
+separate review goal exists only when review itself is the human's distinct
+durable outcome, such as an ongoing project-wide review program—not merely
+because one implementation reached a review step.
 
-The lightweight GitHub watch notices head, state, mergeability, checks, and
-commit-status changes. A review comment or approval by itself may therefore wait
-for the ordinary bounded review, where the worker rereads the current PR. That
-fallback preserves correctness without making the watcher another review system.
+The PoC GitHub adapter notices head, state, draft state, PR update time, checks,
+and commit-status changes. A mergeability-only change waits for the ordinary
+bounded review, where the worker rereads the current PR. That fallback preserves
+correctness without making the watcher another review system.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -383,11 +390,11 @@ resource. It resolves the goal's current worker only when a changed revision
 needs delivery.
 
 The daemon detects change; it does not interpret it. It computes one compact
-revision identity from provider authority: GitHub PR head, state, draft and
-mergeability state, checks, and commit statuses; or Azure DevOps build status,
-ID, result, source version, and finish time. An unchanged identity costs no
-model turn. A changed identity wakes the worker, which rereads provider
-authority and decides what the change means for its goal.
+revision identity from provider authority: GitHub PR head, state, draft state,
+update time, checks, and commit statuses; or Azure DevOps build status, ID,
+result, source version, and finish time. An unchanged identity costs no model
+turn. A changed identity wakes the worker, which rereads provider authority and
+decides what the change means for its goal.
 
 The metadata is attached once per created resource. Every later revision of
 that resource needs no renewal. A rerun with a new build ID receives the same

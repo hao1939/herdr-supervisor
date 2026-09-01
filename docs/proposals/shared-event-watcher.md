@@ -253,7 +253,7 @@ advanced.
 The daemon keeps one atomically replaced bounded checkpoint:
 
 ```text
-(source, subject) -> goal ID, latest revision, last seen time,
+(source, subject) -> goal ID, latest revision, time that revision was first observed,
                      optional latest undelivered revision
 ```
 

@@ -279,6 +279,45 @@ test("the checkpoint stays bounded and prefers pending deliveries", async (t) =>
   assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "pending"]);
 });
 
+test("checkpoint saturation does not block recovery of observed pending deliveries", async (t) => {
+  const directory = await temporary(t, "event-watch-pending-capacity-");
+  const statePath = join(directory, "state.json");
+  let failing = true;
+  let observations = [
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "two", goalId: "g_same", revision: "one", payload: {} },
+  ];
+  const delivered = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath,
+    sources: { source: { scan: async () => discovery(observations) } },
+    deliver: async (_goalId, events) => {
+      if (failing) throw new Error("worker unavailable");
+      delivered.push(events.map((event) => event.subject));
+    },
+    diagnose: () => {},
+    maxResources: 2,
+  });
+
+  await watcher.runOnce();
+  failing = false;
+  observations = [
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "new", goalId: "g_same", revision: "one", payload: {} },
+  ];
+  await watcher.runOnce();
+
+  assert.deepEqual(delivered, [["one"]]);
+  let resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["one", "two"]);
+  assert.equal(resources.find((resource) => resource.subject === "one").pending, undefined);
+
+  await watcher.runOnce();
+  assert.deepEqual(delivered, [["one"], ["new"]]);
+  resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "two"]);
+});
+
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
   const directory = await temporary(t, "event-watch-coalesce-");
   const delivered = [];
