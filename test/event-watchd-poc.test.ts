@@ -738,6 +738,45 @@ test("Herdr delivery fails closed when canonical goal ownership is missing", asy
   await assert.rejects(deliver("g_missing", [{ source: "github-pr", subject: "owner/repo#42" }]), /active canonical goal was not found/);
 });
 
+for (const { description, prefix, agents, expected } of [
+  { description: "a stale", prefix: "stale", agents: [{
+    pane_id: "w1:p1",
+    terminal_id: "terminal-1",
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "stale-session" },
+    agent_status: "working",
+  }], expected: /resolved to 0 live native sessions/ },
+  { description: "an ambiguous", prefix: "ambiguous", agents: ["w1:p1", "w1:p2"].map((pane_id) => ({
+    pane_id,
+    terminal_id: `terminal-${pane_id}`,
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" },
+    agent_status: "working",
+  })), expected: /resolved to 2 live native sessions/ },
+]) {
+  test(`Herdr delivery fails closed for ${description} exact-session match`, async (t) => {
+    const root = await temporary(t, `event-watch-${prefix}-session-`);
+    const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" };
+    await registerSupervisedGoal({ paneId: "w1:p1", terminalId: "terminal-1", agentSession: session }, {
+      objective: "Finish the exact goal.",
+      acceptance: ["Current evidence proves completion."],
+    }, root, { goalId: "g_exact" });
+    const calls = [];
+    const deliver = herdrGoalDelivery({
+      goalsRoot: root,
+      request: async (method, params) => {
+        calls.push([method, params]);
+        if (method === "session.snapshot") return { snapshot: { agents } };
+        return {};
+      },
+    });
+
+    await assert.rejects(
+      deliver("g_exact", [{ source: "github-pr", subject: "owner/repo#42" }]),
+      expected,
+    );
+    assert.equal(calls.filter(([method]) => method === "agent.prompt").length, 0);
+  });
+}
+
 test("watcher failures wake the one Pi supervisor with bounded evidence", async () => {
   const calls = [];
   const diagnose = herdrSupervisorDiagnostic({
