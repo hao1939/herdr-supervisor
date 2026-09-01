@@ -539,6 +539,7 @@ test("goal formation precedes comparison with existing work", () => {
   assert.match(prompt, /does not authorize changing a related goal to permit coexistence or add coordination duties/);
   assert.match(prompt, /Put the new outcome's duties in its own contract/);
   assert.match(prompt, /Update another goal only when the human has changed that goal/);
+  assert.match(prompt, /new work from that other goal's worker/);
   assert.match(prompt, /make that expansion the material question/);
   assert.match(prompt, /that authority survives any necessary clarification/);
   assert.match(prompt, /act without asking for start permission again/);
