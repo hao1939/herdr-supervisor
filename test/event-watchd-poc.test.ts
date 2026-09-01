@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { adoBuildDiscovery, taggedGoal } from "../poc/event-watchd/ado-build.mjs";
+import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../poc/event-watchd/ado-build.mjs";
 import { DiscoveredEventWatcher } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestDiscovery, supervisionGoal } from "../poc/event-watchd/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../poc/event-watchd/herdr.mjs";
@@ -331,41 +331,46 @@ test("checkpoint saturation does not block recovery of observed pending deliveri
 
   assert.deepEqual(delivered, [["one"]]);
   let resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
-  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["one", "two"]);
-  assert.equal(resources.find((resource) => resource.subject === "one").pending, undefined);
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "two"]);
+  assert.ok(resources.find((resource) => resource.subject === "new").pending);
 
   await watcher.runOnce();
   assert.deepEqual(delivered, [["one"], ["new"]]);
   resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
-  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "two"]);
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["one", "two"]);
 });
 
-test("checkpoint saturation reports deferred discoveries without dropping pending deliveries", async (t) => {
-  const directory = await temporary(t, "event-watch-saturated-capacity-");
+test("checkpoint saturation is visible when pending delivery cannot recover", async (t) => {
+  const directory = await temporary(t, "event-watch-capacity-diagnostic-");
+  let observations = [
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "two", goalId: "g_same", revision: "one", payload: {} },
+  ];
   const diagnostics = [];
-  let observations = [{ subject: "one", goalId: "g_one", revision: "one", payload: {} }];
   const watcher = new DiscoveredEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async () => { throw new Error("worker unavailable"); },
     diagnose: (item) => diagnostics.push(item),
-    maxResources: 1,
+    maxResources: 2,
   });
 
   await watcher.runOnce();
-  observations = [{ subject: "two", goalId: "g_two", revision: "one", payload: {} }];
+  observations = [
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "new", goalId: "g_same", revision: "one", payload: {} },
+  ];
   await watcher.runOnce();
   observations = [];
   await watcher.runOnce();
+  observations = [
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "new", goalId: "g_same", revision: "one", payload: {} },
+  ];
+  await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.filter((item) => item.kind === "capacity"), [{
-    kind: "capacity",
-    source: "source",
-    message: "source discovery deferred a new resource because all 1 checkpoint entries have pending deliveries",
-  }]);
-  const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
-  assert.equal(resources.length, 1);
-  assert.ok(resources[0].pending);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.match(diagnostics[1].message, /source new/);
 });
 
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
@@ -581,6 +586,14 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.equal(found[0].goalId, "g_build");
+});
+
+test("ADO authorization preserves the configured CLI failure", async () => {
+  await assert.rejects(ambientAdoAuthorization({
+    pat: "",
+    azureCli: "/opt/az",
+    exec: async () => { throw new Error("spawn /opt/az ENOENT"); },
+  }), /using \/opt\/az: spawn \/opt\/az ENOENT; renew az login, set AZURE_CLI/);
 });
 
 test("ADO discovery refreshes a remembered build outside the recent definition window", async () => {

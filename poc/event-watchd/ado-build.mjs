@@ -46,8 +46,9 @@ export async function ambientAdoAuthorization({
     ], { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024 });
     if (!stdout.trim()) throw new Error("empty Azure access token");
     return `Bearer ${stdout.trim()}`;
-  } catch {
-    throw new Error("could not obtain Azure DevOps credentials; renew az login or set AZURE_DEVOPS_EXT_PAT");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`could not obtain Azure DevOps credentials using ${azureCli}: ${detail}; renew az login, set AZURE_CLI to the Azure CLI executable, or set AZURE_DEVOPS_EXT_PAT`, { cause: error });
   }
 }
 

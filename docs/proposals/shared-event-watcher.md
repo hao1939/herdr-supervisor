@@ -248,6 +248,13 @@ daemon keeps the pending revision and sends nothing. This prevents an older
 remembered revision from being delivered after the provider may already have
 advanced.
 
+If every checkpoint entry is pending when a new resource appears, the daemon
+first retries currently observed pending deliveries. When one succeeds, the
+new resource takes the recovered bounded slot and remains pending for its next
+authoritative read. If none succeeds, the daemon sends one coalesced capacity
+diagnostic naming the deferred current resources. It never silently exceeds the
+bound or evicts an unresolved delivery.
+
 ## Minimal state
 
 The daemon keeps one atomically replaced bounded checkpoint:

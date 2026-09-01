@@ -135,6 +135,32 @@ function trimResources(state, maxResources) {
   }
 }
 
+function storeObservation(state, item, maxResources) {
+  const key = keyFor(item.source, item.subject);
+  const current = state.resources[key];
+  if (current?.goalId === item.goalId && current.revision === item.revision) {
+    return { stored: true, changed: false };
+  }
+  if (!current && Object.keys(state.resources).length >= maxResources) {
+    const removable = removableResourceKeys(state)[0];
+    if (!removable) return { stored: false, changed: false };
+    delete state.resources[removable];
+  }
+  state.resources[key] = {
+    source: item.source,
+    subject: item.subject,
+    goalId: item.goalId,
+    revision: item.revision,
+    observedAt: item.observedAt,
+    pending: {
+      goalId: item.goalId,
+      revision: item.revision,
+      payload: item.payload,
+    },
+  };
+  return { stored: true, changed: true };
+}
+
 export class DiscoveredEventWatcher {
   constructor({
     statePath,
@@ -292,47 +318,15 @@ export class DiscoveredEventWatcher {
     }
     const known = [];
     const discovered = [];
-    const saturatedSources = new Set();
     for (const item of scan.observations) {
       const key = keyFor(item.source, item.subject);
       (next.resources[key] ? known : discovered).push(item);
     }
+    const deferred = [];
     for (const item of [...known, ...discovered]) {
-      const key = keyFor(item.source, item.subject);
-      const current = next.resources[key];
-      if (current?.goalId === item.goalId && current.revision === item.revision) continue;
-      if (!current && Object.keys(next.resources).length >= this.maxResources) {
-        const removable = removableResourceKeys(next)[0];
-        if (!removable) {
-          saturatedSources.add(item.source);
-          continue;
-        }
-        delete next.resources[removable];
-      }
-      next.resources[key] = {
-        source: item.source,
-        subject: item.subject,
-        goalId: item.goalId,
-        revision: item.revision,
-        observedAt: item.observedAt,
-        pending: {
-          goalId: item.goalId,
-          revision: item.revision,
-          payload: item.payload,
-        },
-      };
-      changed = true;
-    }
-    for (const source of Object.keys(this.sources)) {
-      if (saturatedSources.has(source)) {
-        await this.report(`capacity:${source}`, {
-          kind: "capacity",
-          source,
-          message: `${source} discovery deferred a new resource because all ${this.maxResources} checkpoint entries have pending deliveries`,
-        });
-      } else if (Object.keys(next.resources).length < this.maxResources || removableResourceKeys(next).length) {
-        this.reported.delete(`capacity:${source}`);
-      }
+      const result = storeObservation(next, item, this.maxResources);
+      if (!result.stored) deferred.push(item);
+      if (result.changed) changed = true;
     }
     if (changed) {
       trimResources(next, this.maxResources);
@@ -341,6 +335,38 @@ export class DiscoveredEventWatcher {
       this.state = next;
     }
     await this.deliverPending(observed);
+    if (!deferred.length) {
+      if (Object.keys(this.state.resources).length < this.maxResources
+        || removableResourceKeys(this.state).length) {
+        this.reported.delete("capacity");
+      }
+      return;
+    }
+    const recovered = structuredClone(this.state);
+    const stillDeferred = [];
+    let recoveredChanged = false;
+    for (const item of deferred) {
+      const result = storeObservation(recovered, item, this.maxResources);
+      if (!result.stored) stillDeferred.push(item);
+      if (result.changed) recoveredChanged = true;
+    }
+    if (recoveredChanged) {
+      trimResources(recovered, this.maxResources);
+      validateState(recovered, this.maxResources);
+      await save(this.statePath, recovered);
+      this.state = recovered;
+    }
+    if (!stillDeferred.length) {
+      this.reported.delete("capacity");
+      return;
+    }
+    const examples = stillDeferred.slice(0, 5)
+      .map((item) => `${item.source} ${item.subject}`)
+      .join(", ");
+    await this.report("capacity", {
+      kind: "capacity",
+      message: `event watcher checkpoint is full of pending deliveries; deferred ${stillDeferred.length} newly discovered resources until delivery recovers: ${examples}`,
+    });
   }
 
   runOnce() {
