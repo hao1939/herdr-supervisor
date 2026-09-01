@@ -289,6 +289,10 @@ state, and bounded new evidence are sufficient after restart.
 
 Only the focused worker's evidence can prove its goal complete. Peer status can
 help coordination but cannot satisfy another worker's acceptance criteria.
+Immediately before acceptance, code rechecks the exact worker and rejects the
+decision if its status or Herdr change sequence moved after observation. This
+keeps any concurrent provider wake or ordinary worker activity in the normal
+review loop instead of accepting stale evidence.
 
 Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
@@ -385,7 +389,8 @@ live evidence.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
-configured repositories. Azure DevOps accepts
+configured repositories. One watcher also accepts at most ten Azure DevOps
+pipeline definitions. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
 the runtime environment. Without usable credentials, discovery fails with a
 clear error and the watcher never guesses.

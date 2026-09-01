@@ -865,6 +865,16 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
   assert.equal("lastChangedDate" in refreshed[0].payload, false);
 });
 
+test("ADO discovery keeps configured pipeline scope bounded", () => {
+  assert.throws(
+    () => adoBuildDiscovery({
+      definitions: Array.from({ length: 11 }, (_, index) => `org/project/${index + 1}`),
+      authorization: "Bearer token",
+    }),
+    /at most 10 pipeline definitions/,
+  );
+});
+
 test("ADO authorization preserves the configured CLI failure", async () => {
   await assert.rejects(ambientAdoAuthorization({
     pat: "",

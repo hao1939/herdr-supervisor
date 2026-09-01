@@ -2528,6 +2528,42 @@ test("a working worker cannot be mislabeled as waiting for its own next checkpoi
   pi.events.get("session_shutdown")();
 });
 
+test("acceptance rejects a worker wake that arrived after observation", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let changed = false;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: changed ? "working" : "idle",
+    state_change_seq: changed ? 4 : 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The earlier evidence looked complete.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  changed = true;
+  const finish = await pi.tools.get("supervisor_finish").execute("finish", {
+    pane_id: worker.paneId,
+    summary: "The earlier result appeared complete.",
+    evidence: ["Earlier worker evidence."],
+  });
+
+  assert.equal(finish.isError, true);
+  assert.match(finish.content[0].text, /worker changed after it was observed/);
+  assert.equal((await loadSupervisorGoals(root)).completed.length, 0);
+  pi.events.get("session_shutdown")();
+});
+
 test("leaving rechecks live worker state before recording a wait", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

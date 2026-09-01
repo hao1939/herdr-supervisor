@@ -249,6 +249,10 @@ most 20 annotated pull requests per scan, and refuses truncated check or status
 evidence. Provider failures are diagnosed and the bounded goal review still
 guarantees eventual reconsideration.
 
+One watcher also accepts at most ten ADO pipeline definitions. These scope
+bounds keep the shared scan predictable without adding a provider scheduler or
+rate-limit state machine.
+
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
 must be idempotent or independently verified.

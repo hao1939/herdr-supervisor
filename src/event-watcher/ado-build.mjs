@@ -5,6 +5,7 @@ import { boundedRefreshWindow } from "./refresh-window.mjs";
 
 const ADO_RESOURCE = "499b84ac-1321-427f-aa17-267ca6975798";
 const GOAL_TAG = /^herdr-goal=(g_[a-zA-Z0-9_-]+)$/;
+const MAX_DEFINITIONS = 10;
 const MAX_BUILDS = 500;
 const MAX_REMEMBERED_REREADS = 50;
 const execFileAsync = promisify(execFile);
@@ -77,6 +78,9 @@ export function adoBuildDiscovery({
 } = {}) {
   if (!Array.isArray(definitions) || !definitions.length) {
     throw new Error("ADO discovery requires at least one pipeline definition");
+  }
+  if (definitions.length > MAX_DEFINITIONS) {
+    throw new Error(`ADO discovery supports at most ${MAX_DEFINITIONS} pipeline definitions per watcher`);
   }
   const scopes = definitions.map(parseDefinition);
   const allowedProjects = new Set(scopes.map((scope) => `${scope.organization}/${scope.project}`));

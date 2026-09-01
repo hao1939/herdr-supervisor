@@ -1803,6 +1803,22 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
+      const latestSnapshot = await client.snapshot();
+      const latestAgent = findAgent(latestSnapshot, binding.paneId);
+      const latestMismatch = identityMismatch(
+        binding,
+        latestAgent,
+        findPane(latestSnapshot, binding.paneId),
+      );
+      if (latestMismatch) {
+        return text(`Cannot accept ${params.pane_id}: ${latestMismatch}. Review the current exact worker first.`, true);
+      }
+      const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
+      const latestSequence = Number(latestAgent.state_change_seq || 0);
+      if (latestAgent.agent_status === "working" || latestSequence !== observedSequence) {
+        scheduleReview(binding, 0);
+        return text(`Cannot accept ${params.pane_id}: the worker changed after it was observed. Review its current evidence before deciding again.`, true);
+      }
       let result;
       try {
         result = await recordDecision(binding, "accept", {
