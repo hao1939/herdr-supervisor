@@ -51,6 +51,12 @@ export function captureIdentity(agent) {
   };
 }
 
+export function goalPaneLabel(objective, limit = 60) {
+  const label = objective.replace(/\s+/g, " ").trim();
+  if (!label) throw new Error("worker display label requires a goal objective");
+  return label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+}
+
 export function identityMismatch(binding, agent, pane?) {
   if (!agent && !pane) return "worker pane is no longer present";
   if (!agent && pane.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";

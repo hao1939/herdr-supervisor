@@ -49,6 +49,7 @@ import {
   findAgent,
   findPane,
   formatWorker,
+  goalPaneLabel,
   DEFAULT_REVIEW_INTERVAL_MS,
   dependentBindings,
   dueBindings,
@@ -449,6 +450,38 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       // A failed diagnostic must not become another background failure.
     }
   }
+
+  async function applyWorkerLabel(binding) {
+    const label = goalPaneLabel(binding.goal);
+    try {
+      await client.renamePane(binding.paneId, label);
+      return "";
+    } catch (error) {
+      return ` Worker display name could not be applied: ${error.message}.`;
+    }
+  }
+
+  async function reconcileWorkerLabels(goals) {
+    if (mode() !== "live") return;
+    const snapshot = await client.snapshot();
+    await Promise.all(goals.active.map(async (binding) => {
+      if (identityMismatch(
+        binding,
+        findAgent(snapshot, binding.paneId),
+        findPane(snapshot, binding.paneId),
+      )) return;
+      // Display metadata is best effort. A naming failure cannot block or
+      // compete with supervision of the goal itself.
+      const warning = await applyWorkerLabel(binding);
+      if (warning) {
+        reportBackgroundFailure(
+          `Could not refresh the display name for ${binding.goalId}`,
+          new Error(warning.trim()),
+        );
+      }
+    }));
+  }
+
 
   pi.registerFlag("supervisor-mode", {
     description: "Supervision authority: observe, dry-run, or live",
@@ -883,6 +916,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       warning = ` Monitoring setup failed: ${error.message}`;
     }
     if (mode() === "live") {
+      warning += await applyWorkerLabel(binding);
       try {
         await deliverNativeGoal(binding);
       } catch (error) {
@@ -1001,11 +1035,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         const created = await client.splitPane({ paneId: anchor.pane_id, direction, cwd, focus: false });
         paneId = created?.pane?.pane_id;
       } else if (!paneId) {
-        const label = params.placement.label.trim();
         const created = await client.createTab({
           workspaceId: supervisor.workspace_id,
           cwd,
-          label,
+          label: goalPaneLabel(installed.contract.objective, 40),
           focus: false,
         });
         paneId = created?.root_pane?.pane_id;
@@ -1047,11 +1080,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       throw new Error(`Started identified Codex worker ${paneId}, but could not record its goal: ${error.message}. The goal was not delivered; do not create another worker.`);
     }
 
-    let promptWarning = "";
+    let promptWarning = await applyWorkerLabel(result.binding);
     try {
       await deliverNativeGoal(result.binding);
     } catch (error) {
-      promptWarning = ` Initial native Goal delivery could not be confirmed: ${error.message}.`;
+      promptWarning += ` Initial native Goal delivery could not be confirmed: ${error.message}.`;
     }
     return { ...result, existing: false, warning: `${result.warning}${promptWarning}` };
   }
@@ -1059,7 +1092,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   async function startInstalled(paneId: string, goalId: string, {
     wake = true,
     activateNativeGoal = false,
-  } = {}) {
+  }: { wake?: boolean; activateNativeGoal?: boolean } = {}) {
     const snapshot = await client.snapshot();
     const agent = findAgent(snapshot, paneId);
     if (!agent) throw new Error(`no observable agent in ${paneId}`);
@@ -1075,6 +1108,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       warning = ` Monitoring setup failed: ${error.message}`;
     }
     if (activateNativeGoal && mode() === "live") {
+      warning += await applyWorkerLabel(binding);
       try {
         await deliverNativeGoal(binding);
       } catch (error) {
@@ -1108,7 +1142,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       placement: Type.Union([
         Type.Object({
           mode: Type.Literal("new"),
-          label: Type.String({ minLength: 1, maxLength: 40, description: "Short label for the new worker tab." }),
         }),
         Type.Object({
           mode: Type.Literal("related"),
@@ -1187,6 +1220,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             } else if (typeof agent.name !== "string" || !agent.name.trim()) {
               deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
+              deliveryWarning += await applyWorkerLabel(refinedBinding);
               await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
             }
           } catch (error) {
@@ -1533,6 +1567,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
       let relocatedBinding: ActiveGoal | undefined;
+      let displayWarning = "";
       try {
         const [initialBinding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
         if (!initialBinding) return text(`${params.pane_id} is not supervised.`, true);
@@ -1602,6 +1637,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             } catch (error) {
               reportBackgroundFailure("Could not watch the relocated worker", error);
             }
+            displayWarning = await applyWorkerLabel(binding);
           }
           liveAgent = findAgent(liveSnapshot, binding.paneId);
           livePane = findPane(liveSnapshot, binding.paneId);
@@ -1729,7 +1765,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             : relocated
               ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
               : `Steered ${params.pane_id}: ${params.message.trim()}`;
-          return text(`${resultText}${warning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
+          return text(`${resultText}${warning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);
@@ -2072,7 +2108,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     pi.setActiveTools(supervisorTools);
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
-    await reloadGoals();
+    const storedGoals = await reloadGoals();
     const goals = await activeBindings();
     for (const binding of goals.active) {
       const runtime = runtimeFor(binding);
@@ -2096,6 +2132,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       armGlobalReviewTimer();
     }
     ctx.ui.setStatus("herdr-supervisor", goals.active.length ? `supervising ${goals.active.length}` : undefined);
+    void reconcileWorkerLabels(storedGoals).catch((error) => {
+      reportBackgroundFailure("Could not refresh worker display names", error);
+    });
   });
 
   pi.on("agent_settled", async () => {

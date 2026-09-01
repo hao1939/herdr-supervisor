@@ -109,6 +109,13 @@ export class HerdrClient {
     });
   }
 
+  async renamePane(paneId, label) {
+    return this.request("pane.rename", {
+      pane_id: paneId,
+      label,
+    });
+  }
+
   async startAgent({ name, kind, paneId, args = [] }, timeoutMs = 31_000) {
     const serverTimeoutMs = Math.min(30_000, Math.max(1, timeoutMs - 100));
     return this.request("agent.start", {
