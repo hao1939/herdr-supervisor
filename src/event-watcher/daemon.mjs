@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { adoBuildDiscovery } from "./ado-build.mjs";
+import { adoPullRequestDiscovery } from "./ado-pr.mjs";
 import { MetadataEventWatcher } from "./core.mjs";
 import { githubPullRequestDiscovery } from "./github-pr.mjs";
 import { canonicalActiveGoals, herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
@@ -15,12 +16,14 @@ function list(name) {
 
 const githubRepositories = list("HERDR_WATCH_GITHUB_REPOSITORIES");
 const adoDefinitions = list("HERDR_WATCH_ADO_DEFINITIONS");
+const adoRepositories = list("HERDR_WATCH_ADO_REPOSITORIES");
 const sources = {};
 if (githubRepositories.length) sources["github-pr"] = githubPullRequestDiscovery({ repositories: githubRepositories });
 if (adoDefinitions.length) sources["ado-build"] = adoBuildDiscovery({ definitions: adoDefinitions });
+if (adoRepositories.length) sources["ado-pr"] = adoPullRequestDiscovery({ repositories: adoRepositories });
 const hasSources = Object.keys(sources).length > 0;
 if (!hasSources) {
-  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS");
+  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES, HERDR_WATCH_ADO_DEFINITIONS, or HERDR_WATCH_ADO_REPOSITORIES");
 }
 
 const stateHome = process.env.HERDR_WATCH_STATE_HOME || join(homedir(), ".local", "state", "herdr-supervisor");

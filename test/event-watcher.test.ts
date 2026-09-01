@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
+import { adoPullRequestDiscovery } from "../src/event-watcher/ado-pr.mjs";
 import { MetadataEventWatcher as DiscoveredEventWatcher } from "../src/event-watcher/core.mjs";
 import { githubPullRequestDiscovery, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
@@ -110,10 +111,11 @@ test("watcher daemon rejects an empty source set without changing its checkpoint
   const environment: NodeJS.ProcessEnv = { ...process.env, HERDR_WATCH_STATE_HOME: directory };
   delete environment.HERDR_WATCH_GITHUB_REPOSITORIES;
   delete environment.HERDR_WATCH_ADO_DEFINITIONS;
+  delete environment.HERDR_WATCH_ADO_REPOSITORIES;
 
   await assert.rejects(
     execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
-    /configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS/,
+    /configure HERDR_WATCH_GITHUB_REPOSITORIES, HERDR_WATCH_ADO_DEFINITIONS, or HERDR_WATCH_ADO_REPOSITORIES/,
   );
   assert.equal(await readFile(statePath, "utf8"), checkpoint);
 });
@@ -126,6 +128,7 @@ test("watcher daemon rejects intervals above the Node timer limit", async () => 
     HERDR_WATCH_INTERVAL_MS: "2147483648",
   };
   delete environment.HERDR_WATCH_ADO_DEFINITIONS;
+  delete environment.HERDR_WATCH_ADO_REPOSITORIES;
 
   await assert.rejects(
     execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
@@ -885,6 +888,96 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
   const { observations: refreshed } = await source.scan();
   assert.equal(refreshed[0].revision, found[0].revision);
   assert.equal("lastChangedDate" in refreshed[0].payload, false);
+});
+
+test("ADO pull request discovery observes reviews, discussions, and policies", async () => {
+  let vote = 0;
+  let threadStatus = "active";
+  let commentUpdated = "2026-09-01T00:01:00Z";
+  let policyStatus = "queued";
+  const source = adoPullRequestDiscovery({
+    repositories: ["org/project/repo"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("/threads?")) return response({ count: 1, value: [{
+        id: 7,
+        status: threadStatus,
+        lastUpdatedDate: "2026-09-01T00:01:00Z",
+        comments: [{ id: 1, commentType: "text", lastUpdatedDate: commentUpdated }],
+      }] });
+      if (text.includes("/policy/evaluations?")) return response({ count: 1, value: [{
+        evaluationId: "evaluation-1",
+        configuration: { id: 8 },
+        status: policyStatus,
+        startedDate: "2026-09-01T00:00:00Z",
+      }] });
+      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+        pullRequestId: 42,
+        description: "## Supervision\n- Goal ID: g_pr",
+        lastMergeSourceCommit: { commitId: "abc" },
+        status: "active",
+        isDraft: false,
+        mergeStatus: "succeeded",
+        repository: { project: { id: "project-id" } },
+        reviewers: [{ id: "reviewer-1", vote }],
+      }] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const first = await source.scan();
+  assert.equal(first.observations.length, 1);
+  assert.equal(first.observations[0].subject, "org/project/repo/42");
+  assert.equal(first.observations[0].goalId, "g_pr");
+  assert.equal(first.observations[0].payload.discussions[0].status, "active");
+
+  commentUpdated = "2026-09-01T00:02:00Z";
+  const commentChanged = await source.scan();
+  assert.notEqual(commentChanged.observations[0].revision, first.observations[0].revision);
+
+  vote = 10;
+  threadStatus = "fixed";
+  policyStatus = "approved";
+  const second = await source.scan();
+  assert.notEqual(second.observations[0].revision, commentChanged.observations[0].revision);
+  assert.equal(second.observations[0].payload.reviewers[0].vote, 10);
+  assert.equal(second.observations[0].payload.policies[0].status, "approved");
+});
+
+test("ADO pull request discovery rereads remembered pulls and forgets removed metadata", async () => {
+  const urls = [];
+  const source = adoPullRequestDiscovery({
+    repositories: ["org/project/repo"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      urls.push(text);
+      if (text.includes("/pullRequests?")) return response({ count: 0, value: [] });
+      if (text.includes("/pullRequests/42?")) return response({
+        pullRequestId: 42,
+        description: "Metadata removed",
+        status: "completed",
+        repository: { project: { id: "project-id" } },
+      });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{ subject: "org/project/repo/42", goalId: "g_pr" }]);
+
+  assert.deepEqual(found, { observations: [], absent: ["org/project/repo/42"] });
+  assert.ok(urls.some((url) => url.includes("/pullRequests/42?")));
+});
+
+test("ADO pull request discovery keeps repository scope bounded", () => {
+  assert.throws(
+    () => adoPullRequestDiscovery({
+      repositories: Array.from({ length: 11 }, (_, index) => `org/project/repo-${index}`),
+      authorization: "Bearer token",
+    }),
+    /at most 10 repositories/,
+  );
 });
 
 test("ADO discovery keeps configured pipeline scope bounded", () => {
