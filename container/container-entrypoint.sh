@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 pi_agent_dir="${PI_CODING_AGENT_DIR:-/home/node/.pi/agent}"
@@ -14,7 +14,11 @@ if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}" ]
   watcher_pid=$!
 fi
 
-"$@" &
+if [ -z "$watcher_pid" ]; then
+  exec "$@"
+fi
+
+"$@" <&0 &
 main_pid=$!
 
 trap '
@@ -25,9 +29,14 @@ trap '
 ' INT TERM
 
 set +e
-wait "$main_pid"
+wait -n -p stopped_pid "$main_pid" "$watcher_pid"
 status=$?
-if [ -n "$watcher_pid" ]; then
+if [ "${stopped_pid:-}" = "$watcher_pid" ]; then
+  echo "The shared provider metadata watcher stopped unexpectedly." >&2
+  [ "$status" -ne 0 ] || status=1
+  kill "$main_pid" 2>/dev/null || true
+  wait "$main_pid" 2>/dev/null || true
+else
   kill "$watcher_pid" 2>/dev/null || true
   wait "$watcher_pid" 2>/dev/null || true
 fi

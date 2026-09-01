@@ -1402,7 +1402,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     async execute(_id, params) {
       const fenceError = reviewTurn.guardDecision(params.pane_id);
       if (fenceError) return text(fenceError, true);
-      const [binding, snapshot] = await Promise.all([bindingForPane(params.pane_id), client.snapshot()]);
+      let binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
       const waitingFor = params.waiting_for?.trim();
       const waitingOnPane = params.waiting_on_pane?.trim();
@@ -1416,23 +1416,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         effectiveWaitingOnPane = undefined;
         warning = "\nPeer wake warning: ignored a self-reference; the bounded review deadline remains active.";
       }
-      const agent = findAgent(snapshot, params.pane_id);
-      const mismatch = identityMismatch(binding, agent, findPane(snapshot, params.pane_id));
-      if (mismatch) return text(`Cannot leave this worker working: ${mismatch}.`, true);
-      if (agent.agent_status === "working" && waitingFor) {
-        return text("A working worker is active, not waiting. Use null for waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
-      }
       const previousReviewAt = Date.parse(binding.wait?.reviewAt || "");
-      if (
-        waitingFor
-        && !binding.wait?.paneId
-        && agent.agent_status !== "working"
-        && Number.isFinite(previousReviewAt)
-        && previousReviewAt <= Date.now()
-        && runtimeFor(binding).pendingObservationHasMessages === false
-      ) {
-        return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
-      }
       if (effectiveWaitingOnPane) {
         const peerPane = effectiveWaitingOnPane;
         const peer = await bindingForPane(peerPane);
@@ -1441,16 +1425,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           effectiveWaitingOnPane = undefined;
         } else {
           waitingOnGoalId = peer.goalId;
-          const peerAgent = findAgent(snapshot, peerPane);
-          const peerProblem = identityMismatch(peer, peerAgent, findPane(snapshot, peerPane));
-          if (peerProblem || peerAgent?.agent_status !== "working") {
-            const peerState = peerProblem || `worker is ${peerAgent?.agent_status || "not running"}`;
-            return text(`Cannot leave ${params.pane_id} waiting on ${peerPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
-          }
         }
-      }
-      if (agent.agent_status !== "working" && !waitingFor) {
-        return text(`Cannot leave ${params.pane_id} alone because it is ${agent.agent_status} and no concrete wait condition was supplied. Choose a real next action or name what can resume it.`, true);
       }
       const reviewAt = params.review_at?.trim()
         || (waitingFor ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
@@ -1459,6 +1434,49 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         if (reviewAt) deadline = reviewDeadline(reviewAt);
       } catch (error) {
         return text(`Cannot schedule review_at ${reviewAt}; ${error.message}.`, true);
+      }
+      const [latestGoals, latestSnapshot] = await Promise.all([activeBindings(), client.snapshot()]);
+      const latestBinding = latestGoals.active.find((goal) => (
+        goal.goalId === binding.goalId && goal.paneId === params.pane_id
+      ));
+      if (!latestBinding) return text(`${params.pane_id} is no longer the supervised worker for this goal.`, true);
+      binding = latestBinding;
+      const latestAgent = findAgent(latestSnapshot, params.pane_id);
+      const latestMismatch = identityMismatch(
+        binding,
+        latestAgent,
+        findPane(latestSnapshot, params.pane_id),
+      );
+      if (latestMismatch) return text(`Cannot leave this worker working: ${latestMismatch}.`, true);
+      if (latestAgent.agent_status === "working" && waitingFor) {
+        return text("A working worker is active, not waiting. Use null for waiting_for and record its next checkpoint in progress; use waiting_for only after the worker settles on a concrete external or peer condition.", true);
+      }
+      if (latestAgent.agent_status !== "working" && !waitingFor) {
+        return text(`Cannot leave ${params.pane_id} alone because it is ${latestAgent.agent_status} and no concrete wait condition was supplied. Choose a real next action or name what can resume it.`, true);
+      }
+      if (
+        waitingFor
+        && !binding.wait?.paneId
+        && latestAgent.agent_status !== "working"
+        && Number.isFinite(previousReviewAt)
+        && previousReviewAt <= Date.now()
+        && runtimeFor(binding).pendingObservationHasMessages === false
+      ) {
+        return text("Cannot extend this expired external wait without fresh worker evidence. Continue the same worker to check the condition now, or choose another concrete action.", true);
+      }
+      if (waitingOnGoalId) {
+        const latestPeer = latestGoals.active.find((goal) => goal.goalId === waitingOnGoalId);
+        const latestPeerAgent = latestPeer && findAgent(latestSnapshot, latestPeer.paneId);
+        const latestPeerProblem = latestPeer && identityMismatch(
+          latestPeer,
+          latestPeerAgent,
+          findPane(latestSnapshot, latestPeer.paneId),
+        );
+        if (!latestPeer || latestPeerProblem || latestPeerAgent?.agent_status !== "working") {
+          const peerState = latestPeerProblem || `worker is ${latestPeerAgent?.agent_status || "not running"}`;
+          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
+        }
+        effectiveWaitingOnPane = latestPeer.paneId;
       }
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`

@@ -73,6 +73,19 @@ jobs:
           docker run --rm herdr-supervisor:ci \
             herdr --version
 
+          # Interactive overrides keep stdin when the watcher is disabled
+          printf 'hello\n' | docker run --rm -i herdr-supervisor:ci \
+            sh -c 'IFS= read -r line && test "$line" = hello'
+
+          # An enabled watcher is required: its startup failure stops the service
+          set +e
+          timeout 10 docker run --rm \
+            -e HERDR_WATCH_GITHUB_REPOSITORIES=invalid \
+            herdr-supervisor:ci sh -c 'sleep 30'
+          watcher_status=$?
+          set -e
+          test "$watcher_status" -eq 1
+
       - name: Integration test
         run: |
           # Start Herdr server in the background
