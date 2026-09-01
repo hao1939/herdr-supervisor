@@ -12,6 +12,7 @@ import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
+import { nativeGoalPrompt } from "../src/prompts.ts";
 
 // Default no-op for renamePane so tests that don't care about display
 // labels are not affected by reconcileWorkerLabels during session_start.
@@ -254,6 +255,28 @@ test("pull request traceability stays bounded for a long goal and requires the c
   assert.match(trace, /never leave the placeholder or reuse an earlier objective/);
 });
 
+test("native Goal guidance stays bounded with a long goal-store path", () => {
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = "/Users/runner/work/_temp/herdr-supervisor-session-retry-012345678901234567890123456789/goals";
+  try {
+    const prompt = nativeGoalPrompt({
+      goalId: "g_12345678-1234-1234-1234-123456789012",
+      goal: "Complete one bounded diagnostic.",
+      paneId: "w1:p3",
+      agentSession: {
+        source: "herdr:codex",
+        agent: "codex",
+        kind: "id",
+        value: "session_managed",
+      },
+    }, "goal-diagnostic");
+    assert.ok(prompt.length <= 4_006);
+  } finally {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  }
+});
+
 test("a human goal creates, prompts, and supervises one Codex worker", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -357,7 +380,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.ok(deliveredPrompts[0].prompt.length <= 4006);
   assert.match(deliveredPrompts[0].prompt, /goal\.json/);
   assert.match(deliveredPrompts[0].prompt, /single canonical objective/);
-  assert.match(deliveredPrompts[0].prompt, /README\.md.*guidance, not another goal/);
+  assert.match(deliveredPrompts[0].prompt, /README\.md beside the goal directories.*guidance, not another goal/);
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);

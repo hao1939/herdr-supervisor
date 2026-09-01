@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { goalPaths, goalStoreGuidePath } from "./goal-store.ts";
+import { goalPaths } from "./goal-store.ts";
 import type { GoalBinding } from "./types.ts";
 
 type GoalTrace = Pick<GoalBinding, "goalId" | "goal" | "paneId" | "agentSession">;
@@ -47,11 +47,10 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
 export function nativeGoalPrompt(binding: GoalTrace, workerName: string) {
   const { goalId } = binding;
   const contract = resolve(goalPaths(goalId).contract);
-  const guide = resolve(goalStoreGuidePath());
   const objective = [
     `Pursue the durable goal contract at ${JSON.stringify(contract)}.`,
     "That goal.json file is the single canonical objective, context, completion criteria, and constraints. Re-read it before working and whenever the Supervisor says it changed.",
-    `If this storage contract is unfamiliar, read ${JSON.stringify(guide)} once for the meaning, authority, lifecycle, and portability of the files; it is guidance, not another goal.`,
+    "If the storage layout is unfamiliar, read the README.md beside the goal directories; it is guidance, not another goal.",
     workerExecutionBoundary,
     "Work proactively from current evidence. Keep independent useful paths moving while a pull request, pipeline, or another path is pending. Do not stop after a plan, one attempt, one finished turn, or one intermediate result. Mark the native Codex Goal complete only when current evidence proves every acceptance criterion; if genuinely blocked, report the exact boundary and what would unlock it.",
     pullRequestTraceability(binding, workerName),
