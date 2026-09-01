@@ -459,6 +459,43 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
   assert.match(diagnostics[1].message, /source new/);
 });
 
+test("capacity turnover allows a later distinct deferral diagnostic", async (t) => {
+  const directory = await temporary(t, "event-watch-capacity-turnover-");
+  let result = discovery([
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "two", goalId: "g_same", revision: "one", payload: {} },
+  ]);
+  const diagnostics = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => result } },
+    deliver: async () => {},
+    diagnose: (item) => diagnostics.push(item),
+    maxResources: 2,
+  });
+
+  await watcher.runOnce();
+  result = discovery([
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "deferred-one", goalId: "g_same", revision: "one", payload: {} },
+  ]);
+  await watcher.runOnce();
+  result = discovery([
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "replacement", goalId: "g_same", revision: "one", payload: {} },
+  ], ["two"]);
+  await watcher.runOnce();
+  result = discovery([
+    { subject: "one", goalId: "g_same", revision: "one", payload: {} },
+    { subject: "deferred-two", goalId: "g_same", revision: "one", payload: {} },
+  ]);
+  await watcher.runOnce();
+
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["capacity", "capacity"]);
+  assert.match(diagnostics[0].message, /deferred-one/);
+  assert.match(diagnostics[1].message, /deferred-two/);
+});
+
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
   const directory = await temporary(t, "event-watch-coalesce-");
   const delivered = [];

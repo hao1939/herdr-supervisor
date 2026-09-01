@@ -286,15 +286,18 @@ export class DiscoveredEventWatcher {
     const observed = new Set(scan.observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
+    let capacityFreed = false;
     for (const [key, resource] of Object.entries(next.resources)) {
       if (Object.hasOwn(this.sources, resource.source)) continue;
       delete next.resources[key];
       changed = true;
+      capacityFreed = true;
     }
     for (const key of scan.absent) {
       if (!next.resources[key]) continue;
       delete next.resources[key];
       changed = true;
+      capacityFreed = true;
     }
     const known = [];
     const discovered = [];
@@ -314,6 +317,7 @@ export class DiscoveredEventWatcher {
       this.state = next;
     }
     await this.deliverPending(observed);
+    if (capacityFreed) this.reported.delete("capacity");
     if (!deferred.length) {
       if (Object.keys(this.state.resources).length < this.maxResources) {
         this.reported.delete("capacity");
