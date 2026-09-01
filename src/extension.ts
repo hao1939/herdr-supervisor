@@ -90,6 +90,22 @@ const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const WORKER_EVENT_SETTLE_MS = 250;
 type SupervisorMode = "observe" | "dry-run" | "live";
 type CompletedGoal = Awaited<ReturnType<typeof loadSupervisorGoals>>["completed"][number];
+type ContractFields = {
+  objective: string;
+  context: string[];
+  acceptance: string[];
+  constraints: string[];
+};
+
+// This is deterministic retry protection, not semantic goal admission.
+function sameContractFields(left: ContractFields, right: ContractFields) {
+  const sameItems = (first: string[], second: string[]) =>
+    first.length === second.length && first.every((item, index) => item.trim() === second[index].trim());
+  return left.objective.trim() === right.objective.trim()
+    && sameItems(left.context, right.context)
+    && sameItems(left.acceptance, right.acceptance)
+    && sameItems(left.constraints, right.constraints);
+}
 
 function text(value: string, isError = false) {
   return { content: [{ type: "text" as const, text: value }], isError, details: undefined };
@@ -999,17 +1015,18 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const constraints = (params.constraints || []).map((item) => item.trim()).filter(Boolean);
       if (!objective) throw new Error("The goal cannot be empty.");
       if (!acceptance.length) throw new Error("At least one concrete completion criterion is required.");
-      const existing = goals.active.find((binding) => binding.goal.trim() === objective);
+      const candidate = { objective, acceptance, context, constraints };
+      const existing = goals.active.find((binding) => sameContractFields({
+        objective: binding.goal,
+        acceptance: binding.acceptance,
+        context: binding.context,
+        constraints: binding.constraints,
+      }, candidate));
       if (existing) return { binding: existing, existing: true, warning: "" };
-      installed = goals.unstarted.find((record) => record.contract.objective.trim() === objective);
+      installed = goals.unstarted.find((record) => sameContractFields(record.contract, candidate));
       continuingInstalledGoal = Boolean(installed);
       if (!installed) {
-        installed = await installSupervisorGoal({
-          objective,
-          acceptance,
-          context,
-          constraints,
-        });
+        installed = await installSupervisorGoal(candidate);
         goalCache?.unstarted.push(installed);
       }
     }
@@ -1156,7 +1173,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerTool({
     name: "supervisor_start_goal",
     label: "Start a supervised goal",
-    description: "Start one new or saved goal in a Codex worker and supervise it. For a new goal, supply its contract fields. To resume an exact unstarted saved contract, supply goal_id and omit the contract fields. Continue an active goal instead of creating a sibling. The worker, not the supervisor, chooses and manages any Git worktrees needed by the goal.",
+    description: "Start one new or saved goal in a Codex worker and supervise it. For a new goal, supply its contract fields; only an exact full-contract replay is treated as the same request. To resume or continue an identified existing goal, supply goal_id and omit the contract fields. The worker, not the supervisor, chooses and manages any Git worktrees needed by the goal.",
     parameters: Type.Object({
       goal_id: Optional(Type.String({ minLength: 1, description: "Exact existing goal ID to start or continue. Use null when defining a new goal." })),
       goal: Optional(Type.String({ minLength: 1, description: "The durable outcome for a new goal. Use null when goal_id names a saved goal." })),

@@ -213,6 +213,12 @@ substantially the same. Sharing a topic, source, tool, repository, or worker
 capability does not make two outcomes equivalent, and a constraint inside one
 goal never becomes an admission rule for other goals.
 
+The model owns that semantic comparison. Code provides only idempotency: an
+exact replay of every portable contract field reuses the existing goal. It
+never merges new work by objective text alone. Once the model identifies a
+semantically equivalent goal, it continues that exact goal ID instead of
+restating a new contract.
+
 When the human contradicts, retracts, or disowns a statement already stored in
 a goal contract, the supervisor updates that same contract before asking its
 worker to continue.

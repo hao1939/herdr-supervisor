@@ -161,6 +161,13 @@ test("reconsideration guidance excludes direct human questions", () => {
   );
 });
 
+test("the start tool separates exact replay from semantic goal selection", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  assert.match(pi.tools.get("supervisor_start_goal").description, /only an exact full-contract replay is treated as the same request/);
+  assert.match(pi.tools.get("supervisor_start_goal").description, /continue an identified existing goal, supply goal_id/);
+});
+
 test("status exposes stored goals without filesystem tools or live worker state", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-unstarted-status-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -464,6 +471,115 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.deepEqual(goals.active[0].context, ["Another worker is validating the same repository."]);
   assert.deepEqual(goals.active[0].acceptance, ["The focused test passes.", "The change is reviewed."]);
   assert.deepEqual(goals.active[0].constraints, ["Make changes only in an isolated worktree."]);
+  pi.events.get("session_shutdown")();
+});
+
+test("new-goal idempotency compares the complete contract instead of objective text", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-contract-idempotency-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  process.env.HERDR_PANE_ID = "w1:p1";
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+    else process.env.HERDR_PANE_ID = previousPane;
+  });
+
+  const existingWorker = {
+    paneId: "w1:p2",
+    terminalId: "term_existing",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_existing" },
+  };
+  const existing = await registerSupervisedGoal(existingWorker, {
+    objective: "Investigate agent autonomy.",
+    context: ["Use the general Scout library."],
+    acceptance: ["Publish one finite research recommendation."],
+    constraints: ["Research and synthesis only."],
+  }, root, { goalId: "g_existing" });
+  await installSupervisorGoal({
+    objective: "Investigate agent autonomy.",
+    context: ["Use the general Scout library."],
+    acceptance: ["Produce a one-time literature map."],
+    constraints: ["Research and synthesis only."],
+  }, root, { goalId: "g_unstarted" });
+
+  const managed = {
+    pane_id: "w1:p3",
+    terminal_id: "term_distinct",
+    agent_status: "idle",
+    state_change_seq: 1,
+    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_distinct" },
+    interactive_ready: true,
+    tab_id: "w1:t3",
+    workspace_id: "w1",
+  };
+  let created = 0;
+  t.mock.method(HerdrClient.prototype, "createTab", async () => {
+    created += 1;
+    return { type: "tab_created", tab: { tab_id: "w1:t3" }, root_pane: { pane_id: managed.pane_id } };
+  });
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => managed);
+  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => managed);
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
+    agents: [
+      {
+        pane_id: existing.paneId,
+        terminal_id: existing.terminalId,
+        agent_status: "working",
+        state_change_seq: 1,
+        agent_session: existing.agentSession,
+        interactive_ready: true,
+        tab_id: "w1:t2",
+        workspace_id: "w1",
+      },
+      managed,
+    ],
+    panes: [
+      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
+      { pane_id: existing.paneId, terminal_id: existing.terminalId, tab_id: "w1:t2", workspace_id: "w1" },
+      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, tab_id: "w1:t3", workspace_id: "w1" },
+    ],
+  }));
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const exact = await pi.tools.get("supervisor_start_goal").execute("exact", {
+    goal: "  Investigate agent autonomy.  ",
+    context: [" Use the general Scout library. "],
+    acceptance: [" Publish one finite research recommendation. "],
+    constraints: [" Research and synthesis only. "],
+    placement: { mode: "new" },
+    working_directory: "/app",
+    direction: null,
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(exact.isError, false);
+  assert.match(exact.content[0].text, /Continued existing goal g_existing/);
+  assert.equal(created, 0);
+
+  const distinct = await pi.tools.get("supervisor_start_goal").execute("distinct", {
+    goal: "Investigate agent autonomy.",
+    context: ["Use the general Scout library."],
+    acceptance: ["Continuously maintain tested autonomy methods."],
+    constraints: ["Bounded sandbox experiments are allowed."],
+    placement: { mode: "new" },
+    working_directory: "/app",
+    direction: null,
+  }, undefined, undefined, { ui: { setStatus() {} } });
+  assert.equal(distinct.isError, false);
+  assert.match(distinct.content[0].text, /Started and supervised goal/);
+  assert.equal(created, 1);
+
+  const goals = await loadSupervisorGoals(root);
+  assert.equal(goals.active.length, 2);
+  assert.equal(goals.unstarted.length, 1);
+  assert.equal(goals.unstarted[0].goalId, "g_unstarted");
+  assert.ok(goals.active.some((goal) => goal.goalId === "g_existing"));
+  assert.ok(goals.active.some((goal) => goal.acceptance[0] === "Continuously maintain tested autonomy methods."));
   pi.events.get("session_shutdown")();
 });
 
