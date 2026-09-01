@@ -145,7 +145,6 @@ export function adoBuildDiscovery({
           status: build.status,
           result: build.result || null,
           finishTime: build.finishTime || null,
-          lastChangedDate: build.lastChangedDate || null,
         };
         observations.push({
           subject,

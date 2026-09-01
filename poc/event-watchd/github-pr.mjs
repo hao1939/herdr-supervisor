@@ -19,13 +19,22 @@ function parseSubject(value) {
 
 export function supervisionGoal(body) {
   const lines = String(body || "").split(/\r?\n/);
-  const start = lines.findIndex((line) => line.trim() === "## Supervision");
-  if (start < 0) return undefined;
   const matches = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{1,2}(\s|$)/.test(line)) break;
+  let inSupervision = false;
+  for (const line of lines) {
+    if (line.trim() === "## Supervision") {
+      inSupervision = true;
+      continue;
+    }
+    if (/^#{1,2}(\s|$)/.test(line)) {
+      inSupervision = false;
+      continue;
+    }
+    if (!inSupervision) continue;
+    if (!/^\s*-\s*Goal ID:/.test(line)) continue;
     const match = /^\s*-\s*Goal ID:\s*(?:"(g_[a-zA-Z0-9_-]+)"|(g_[a-zA-Z0-9_-]+))\s*$/.exec(line);
-    const goalId = match?.[1] || match?.[2];
+    if (!match) return undefined;
+    const goalId = match[1] || match[2];
     if (goalId && GOAL_ID.test(goalId)) matches.push(goalId);
   }
   return matches.length === 1 ? matches[0] : undefined;

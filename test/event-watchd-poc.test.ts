@@ -29,6 +29,22 @@ test("provider metadata names one durable goal without a watch registration", ()
     "- Pane: \"w1:p7\"",
   ].join("\n")), "g_exact-1");
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\n- Goal ID: g_two"), undefined);
+  assert.equal(supervisionGoal([
+    "## Supervision",
+    "- Goal ID: g_one",
+    "",
+    "## Other",
+    "",
+    "## Supervision",
+    "- Goal ID: g_two",
+  ].join("\n")), undefined);
+  assert.equal(supervisionGoal([
+    "## Supervision",
+    "- Goal ID: g_one",
+    "",
+    "## Supervision",
+    "- Goal ID: \"g_two",
+  ].join("\n")), undefined);
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: \"g_one"), undefined);
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\""), undefined);
   assert.equal(supervisionGoal("No metadata"), undefined);
@@ -656,6 +672,7 @@ test("GitHub discovery rotates through recent annotated pull requests", async ()
 });
 
 test("ADO discovery uses the durable build tag and current build revision", async () => {
+  let lastChangedDate = "2026-09-01T00:00:00Z";
   const source = adoBuildDiscovery({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
@@ -667,7 +684,7 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
         status: "inProgress",
         result: null,
         finishTime: null,
-        lastChangedDate: "2026-09-01T00:00:00Z",
+        lastChangedDate,
       },
       { id: 102, tags: [], sourceVersion: "def", status: "completed", result: "succeeded" },
     ] }),
@@ -676,6 +693,10 @@ test("ADO discovery uses the durable build tag and current build revision", asyn
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.equal(found[0].goalId, "g_build");
+  lastChangedDate = "2026-09-01T00:01:00Z";
+  const { observations: refreshed } = await source.scan();
+  assert.equal(refreshed[0].revision, found[0].revision);
+  assert.equal("lastChangedDate" in refreshed[0].payload, false);
 });
 
 test("ADO authorization preserves the configured CLI failure", async () => {
