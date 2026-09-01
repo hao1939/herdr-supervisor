@@ -111,7 +111,7 @@ export function shouldWake(binding, agent, pane) {
       wake: true,
       reason: `${change.source} ${change.subject} changed before the metadata watcher upgrade; have this worker reread current provider authority`,
       sequence,
-      key: `legacy-external:${change.source}:${change.subject}:${change.revision}`,
+      key: `legacy-external:${change.source}:${change.subject}:${change.revision}:${sequence}`,
     };
   }
   if (sequence > 0 && sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {

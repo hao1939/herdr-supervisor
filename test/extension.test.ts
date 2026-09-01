@@ -2891,6 +2891,46 @@ test("restart restores a settled wait without a no-change review before its dead
   pi.events.get("session_shutdown")();
 });
 
+test("restart reviews a legacy provider change before a persisted future wait", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const reviewAt = new Date(Date.now() + 60_000).toISOString();
+  await recordDecision(binding, "leave", {
+    progress: "The worker was waiting before the watcher upgrade.",
+    action: "Wait for the old provider boundary.",
+    wait: { condition: "the old provider boundary", reviewAt },
+  }, root);
+  await updateGoalState(binding.goalId, (state) => {
+    state.externalChange = {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    };
+    return state;
+  }, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "done",
+    state_change_seq: 3,
+  }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  assert.match(pi.messages[0].content, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
+  assert.doesNotMatch(pi.messages[0].content, /review deadline elapsed/);
+  pi.events.get("session_shutdown")();
+});
+
 test("only the current automated review remains in model context", () => {
   const pi = fakePi();
   herdrSupervisor(pi);

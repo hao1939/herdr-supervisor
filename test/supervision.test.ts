@@ -148,7 +148,9 @@ test("an unresolved legacy provider change wakes one ordinary focused review", (
 
   assert.equal(result.wake, true);
   assert.match(result.reason, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
-  assert.match(result.key, /legacy-external:ado-build:org\/project\/101:legacy-revision/);
+  assert.match(result.key, /legacy-external:ado-build:org\/project\/101:legacy-revision:10/);
+  const changed = shouldWake(current, agent({ state_change_seq: 11 }), pane);
+  assert.notEqual(changed.key, result.key);
 });
 
 test("a restored idle worker with no transition sequence is reviewed once", () => {

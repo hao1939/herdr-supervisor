@@ -757,6 +757,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const waitingUntil = Date.parse(binding.wait?.reviewAt || "");
     if (
       !signal?.force
+      && !binding.legacyExternalChange
       && Number.isFinite(waitingUntil)
       && waitingUntil > Date.now()
       && (agent?.agent_status === "idle" || agent?.agent_status === "done")
