@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../poc/event-watchd/ado-build.mjs";
 import { DiscoveredEventWatcher } from "../poc/event-watchd/core.mjs";
 import { githubPullRequestDiscovery, supervisionGoal } from "../poc/event-watchd/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../poc/event-watchd/herdr.mjs";
 import { registerSupervisedGoal } from "../src/goal-registry.ts";
+
+const execFileAsync = promisify(execFile);
 
 async function temporary(t, label) {
   const directory = await mkdtemp(join(tmpdir(), label));
@@ -35,6 +39,47 @@ test("provider metadata names one durable goal without a watch registration", ()
   ].join("\n")), undefined);
   assert.equal(taggedGoal(["unrelated", "herdr-goal=g_exact-1"]), "g_exact-1");
   assert.equal(taggedGoal(["herdr-goal=g_one", "herdr-goal=g_two"]), undefined);
+});
+
+test("watcher daemon rejects an empty source set without changing its checkpoint", async (t) => {
+  const directory = await temporary(t, "event-watch-empty-sources-");
+  const statePath = join(directory, "external-events.json");
+  const checkpoint = `${JSON.stringify({
+    version: 1,
+    resources: {
+      "source\0subject": {
+        source: "source",
+        subject: "subject",
+        goalId: "g_preserved",
+        revision: "one",
+        observedAt: "2026-09-01T00:00:00Z",
+      },
+    },
+  }, null, 2)}\n`;
+  await writeFile(statePath, checkpoint);
+  const environment: NodeJS.ProcessEnv = { ...process.env, EVENT_WATCH_HOME: directory };
+  delete environment.HERDR_WATCH_GITHUB_REPOSITORIES;
+  delete environment.HERDR_WATCH_ADO_DEFINITIONS;
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ["poc/event-watchd/daemon.mjs"], { env: environment }),
+    /configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS/,
+  );
+  assert.equal(await readFile(statePath, "utf8"), checkpoint);
+});
+
+test("watcher daemon rejects intervals above the Node timer limit", async () => {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    HERDR_WATCH_GITHUB_REPOSITORIES: "owner/repo",
+    HERDR_WATCH_INTERVAL_MS: "2147483648",
+  };
+  delete environment.HERDR_WATCH_ADO_DEFINITIONS;
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ["poc/event-watchd/daemon.mjs"], { env: environment }),
+    /HERDR_WATCH_INTERVAL_MS must be between 10000 and 2147483647/,
+  );
 });
 
 test("first discovery and every later revision wake the goal without renewal", async (t) => {
