@@ -1933,11 +1933,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       runtimeFor(binding).pendingCursor = undefined;
       cacheCheckpoint(binding, result.state);
       reviewTurn.close(params.pane_id);
+      let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
+      try {
+        await client.closePane(binding.paneId);
+      } catch (error) {
+        warning += `\nPane retirement warning: goal ${binding.goalId} is complete, but ${binding.paneId} could not be closed: ${error.message}`;
+      }
       wakeTerminalDependents(
         binding,
         `goal ${binding.goalId} finished; reconsider whether useful work can proceed`,
       );
-      let warning = result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
       try {
         await connectObserver();
         await armReviewTimer();

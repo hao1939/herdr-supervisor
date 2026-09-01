@@ -374,12 +374,14 @@ genuinely exhausted the safe work it can do now, it reports the exact remaining
 condition once and yields. An idle worker costs nothing.
 
 Idle is not the same as inactive. An unfinished goal keeps its pane because it
-may still own a wait, review, or immediate next action. Herdr preserves native
-Codex sessions when a human closes a settled pane, but the supervisor does not
-close panes automatically: the current `pane.close` operation cannot require
-the expected terminal and native session, so a client-side identity check could
-race pane reuse. Automatic retirement should wait for that small atomic Herdr
-primitive rather than add a second parked lifecycle or risk closing live work.
+may still own a wait, review, or immediate next action. After the supervisor
+accepts a terminal goal, it first persists the result and evidence, then makes
+one best-effort request to close the exact settled pane it just verified. A
+close failure leaves the goal complete and returns a visible warning; it does
+not create retries, timers, cleanup work, or another lifecycle. Standing goals
+remain open until the human explicitly stops or replaces them. Herdr preserves
+the native Codex session, while the goal record, branch, and worktree remain
+available for later inspection.
 
 When the pull request or build later changes, the watch or the bounded review
 wakes that exact session. The worker rereads the current provider state,

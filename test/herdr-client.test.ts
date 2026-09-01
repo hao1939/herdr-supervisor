@@ -221,6 +221,22 @@ test("pane display names keep their exact pane target", async (t) => {
   ]);
 });
 
+test("closePane requests closure of one exact pane", async (t) => {
+  const client = new HerdrClient();
+  let observed;
+  t.mock.method(client, "request", async (method, params) => {
+    observed = { method, params };
+    return { type: "pane_closed" };
+  });
+
+  await client.closePane("w1:p2");
+
+  assert.deepEqual(observed, {
+    method: "pane.close",
+    params: { pane_id: "w1:p2" },
+  });
+});
+
 test("startAndWaitAgent follows Herdr's bounded readiness handshake", async () => {
   let launched = false;
   let checks = 0;
