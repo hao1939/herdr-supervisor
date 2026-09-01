@@ -238,14 +238,24 @@ set of workflow-specific branches.
 
 ## Goal data
 
-Each goal keeps three files in one stable directory:
+The goal-store root explains itself, and each goal keeps up to three files in
+one stable directory:
 
 ```text
-goals/g_<id>/
-├── goal.json
-├── current.json
-└── journal.jsonl
+goals/
+├── README.md
+├── g_<id>/
+│   ├── goal.json
+│   ├── current.json
+│   └── journal.jsonl
+└── .supervisor/
 ```
+
+The supervisor places the concise root guide when it first writes to a goal
+store; reads never create or change files. The guide documents file authority,
+lifecycle, safe inspection, and portability for any agent or human with direct
+filesystem access. It is one shared explanation, not repeated metadata or a
+skill inside every goal. Existing root files are never overwritten.
 
 `goal.json` is the portable contract. It contains only:
 
@@ -296,6 +306,9 @@ then belongs only to the shared watcher checkpoint.
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
 recovery; an invalid goal or checkpoint fails closed.
+
+`.supervisor/` holds local supervisor checkpoints. It is neither portable goal
+authority nor live runtime truth.
 
 In-memory runtime data holds only disposable scheduling details such as the
 next review time, coalesced signal, and one-turn observation fence. Durable

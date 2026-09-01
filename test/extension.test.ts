@@ -357,6 +357,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.ok(deliveredPrompts[0].prompt.length <= 4006);
   assert.match(deliveredPrompts[0].prompt, /goal\.json/);
   assert.match(deliveredPrompts[0].prompt, /single canonical objective/);
+  assert.match(deliveredPrompts[0].prompt, /README\.md.*guidance, not another goal/);
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
