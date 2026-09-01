@@ -151,7 +151,7 @@ export function adoPullRequestDiscovery({
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
       const pullsBySubject = new Map();
-      const listedSubjects = new Set();
+      const listedPulls = new Map();
       const absent = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
@@ -169,7 +169,7 @@ export function adoPullRequestDiscovery({
         for (const pull of pulls) {
           const subject = subjectFor(scope, pull.pullRequestId);
           pullsBySubject.set(subject, pull);
-          listedSubjects.add(subject);
+          listedPulls.set(subject, { scope, pullRequestId: pull.pullRequestId });
         }
       }
       for (const resource of remembered) {
@@ -192,12 +192,10 @@ export function adoPullRequestDiscovery({
           else throw error;
         }
       }
-      const fullPulls = await Promise.all([...listedSubjects].map(async (subject) => {
-        const scope = parseSubject(subject);
-        if (!scope) throw new Error("ADO pull request discovery returned an invalid pull request subject");
+      const fullPulls = await Promise.all([...listedPulls].map(async ([subject, { scope, pullRequestId }]) => {
         return [subject, await json(
           fetchImpl,
-          `${pullUrl(scope, `/${scope.pullRequestId}`)}?api-version=7.1`,
+          `${pullUrl(scope, `/${pullRequestId}`)}?api-version=7.1`,
           auth,
           "ADO pull request",
         )];
