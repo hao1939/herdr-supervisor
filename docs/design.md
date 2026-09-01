@@ -325,9 +325,10 @@ durable outcome, such as an ongoing project-wide review program—not merely
 because one implementation reached a review step.
 
 The PoC GitHub adapter notices head, state, draft state, PR update time, checks,
-and commit-status changes. A mergeability-only change waits for the ordinary
-bounded review, where the worker rereads the current PR. That fallback preserves
-correctness without making the watcher another review system.
+and commit-status changes. Review-only and mergeability-only changes wait for
+the ordinary bounded review, where the worker rereads the current PR. That
+fallback preserves correctness without making the watcher another review
+system.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and

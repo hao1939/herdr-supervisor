@@ -125,11 +125,12 @@ The worker path is therefore ordinary provider work:
 4. It continues useful goal work without calling the watcher.
 
 A rerun that creates a new build ID is a new resource, so its ordinary creation
-path attaches the same goal tag once. Commits, reviews, statuses, and other
-revisions of an existing resource need no worker action. Moving the goal to
-another pane or native session also needs no metadata update because delivery
-resolves current canonical goal state. Only an intentional move to a different
-durable goal changes ownership metadata.
+path attaches the same goal tag once. Provider-side revisions of an existing
+resource need no metadata update; changes supported by the adapter wake the
+worker, while the bounded goal review covers unsupported signals. Moving the
+goal to another pane or native session also needs no metadata update because
+delivery resolves current canonical goal state. Only an intentional move to a
+different durable goal changes ownership metadata.
 
 There is no matching unregister operation. The metadata remains useful across
 every later revision of that resource. Removing metadata merely makes the
@@ -188,16 +189,17 @@ The payload is bounded context for the wake hint, not completion evidence.
 
 A revision includes only fields whose changes may matter to a worker. Examples:
 
-- PR head, state, draft state, mergeability, reviews, checks, and statuses;
+- PR head, state, draft state, update time, checks, and statuses;
 - build source version, status, result, and finish time.
 
 The PoC GitHub adapter derives its revision from the listed pull-request
-metadata, which already moves when a review is submitted or dismissed, plus the
-head commit's checks and statuses. It does not read mergeability, because that
-field is absent from the list response and would cost one extra request per
-selected pull request. A mergeability recomputation that changes nothing else,
-such as a new base-branch conflict, therefore waits for the bounded goal review
-until that request budget is settled.
+metadata plus the head commit's checks and statuses. It does not read reviews
+or mergeability. GitHub does not reliably change the parent pull request's
+update time for review-only activity, and mergeability is absent from the list
+response. An approval, dismissal, or base-branch conflict that changes nothing
+else therefore waits for the bounded goal review. This keeps the provider
+budget and implementation small without claiming a wake the adapter cannot
+produce.
 
 On first discovery, the daemon records the revision and emits one wake. This
 may produce a harmless extra review when a resource was just created, but it
