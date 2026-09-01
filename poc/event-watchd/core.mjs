@@ -117,24 +117,6 @@ async function save(path, state) {
   }
 }
 
-function removableResourceKeys(state) {
-  return Object.entries(state.resources)
-    .filter(([, resource]) => !resource.pending)
-    .sort((left, right) => Date.parse(left[1].observedAt) - Date.parse(right[1].observedAt))
-    .map(([key]) => key);
-}
-
-function trimResources(state, maxResources) {
-  if (Object.keys(state.resources).length <= maxResources) return;
-  const removable = removableResourceKeys(state);
-  while (Object.keys(state.resources).length > maxResources && removable.length) {
-    delete state.resources[removable.shift()];
-  }
-  if (Object.keys(state.resources).length > maxResources) {
-    throw new Error("pending event deliveries exceed the resource limit");
-  }
-}
-
 function storeObservation(state, item, maxResources) {
   const key = keyFor(item.source, item.subject);
   const current = state.resources[key];
@@ -142,9 +124,7 @@ function storeObservation(state, item, maxResources) {
     return { stored: true, changed: false };
   }
   if (!current && Object.keys(state.resources).length >= maxResources) {
-    const removable = removableResourceKeys(state)[0];
-    if (!removable) return { stored: false, changed: false };
-    delete state.resources[removable];
+    return { stored: false, changed: false };
   }
   state.resources[key] = {
     source: item.source,
@@ -329,43 +309,23 @@ export class DiscoveredEventWatcher {
       if (result.changed) changed = true;
     }
     if (changed) {
-      trimResources(next, this.maxResources);
       validateState(next, this.maxResources);
       await save(this.statePath, next);
       this.state = next;
     }
     await this.deliverPending(observed);
     if (!deferred.length) {
-      if (Object.keys(this.state.resources).length < this.maxResources
-        || removableResourceKeys(this.state).length) {
+      if (Object.keys(this.state.resources).length < this.maxResources) {
         this.reported.delete("capacity");
       }
       return;
     }
-    const recovered = structuredClone(this.state);
-    const stillDeferred = [];
-    let recoveredChanged = false;
-    for (const item of deferred) {
-      const result = storeObservation(recovered, item, this.maxResources);
-      if (!result.stored) stillDeferred.push(item);
-      if (result.changed) recoveredChanged = true;
-    }
-    if (recoveredChanged) {
-      trimResources(recovered, this.maxResources);
-      validateState(recovered, this.maxResources);
-      await save(this.statePath, recovered);
-      this.state = recovered;
-    }
-    if (!stillDeferred.length) {
-      this.reported.delete("capacity");
-      return;
-    }
-    const examples = stillDeferred.slice(0, 5)
+    const examples = deferred.slice(0, 5)
       .map((item) => `${item.source} ${item.subject}`)
       .join(", ");
     await this.report("capacity", {
       kind: "capacity",
-      message: `event watcher checkpoint is full of pending deliveries; deferred ${stillDeferred.length} newly discovered resources until delivery recovers: ${examples}`,
+      message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a remembered resource is authoritatively absent or capacity is increased: ${examples}`,
     });
   }
 

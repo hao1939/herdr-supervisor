@@ -135,9 +135,10 @@ There is no matching unregister operation. The metadata remains useful across
 every later revision of that resource. Removing metadata merely makes the
 adapter report that resource absent and the watcher forgets its cache entry;
 provider retention and a removed configured scope work the same way. Completing
-a goal makes later delivery irrelevant, and evicting an old checkpoint entry
-is ordinary bounded-cache cleanup. None of those cases needs a worker-owned
-lifecycle.
+a goal makes later delivery irrelevant. A size bound never evicts another live
+resource: the daemon preserves existing exact rereads and visibly defers a new
+discovery until authority removes an entry or capacity is increased. None of
+those cases needs a worker-owned lifecycle.
 
 ## Discovery
 
@@ -252,12 +253,12 @@ daemon keeps the pending revision and sends nothing. This prevents an older
 remembered revision from being delivered after the provider may already have
 advanced.
 
-If every checkpoint entry is pending when a new resource appears, the daemon
-first retries currently observed pending deliveries. When one succeeds, the
-new resource takes the recovered bounded slot and remains pending for its next
-authoritative read. If none succeeds, the daemon sends one coalesced capacity
-diagnostic naming the deferred current resources. It never silently exceeds the
-bound or evicts an unresolved delivery.
+When the checkpoint is full and a new resource appears, the daemon still retries
+currently observed pending deliveries, preserves every remembered resource, and
+sends one coalesced capacity diagnostic naming the deferred current resources.
+An authoritative absence or configured-scope removal frees a slot naturally.
+The daemon never silently exceeds the bound or drops the only address for a
+later exact reread.
 
 ## Minimal state
 
@@ -277,9 +278,10 @@ It does not persist:
 - task, attempt, review, or workflow state;
 - provider credentials.
 
-Old entries are removed by a simple size bound. If an evicted resource is
-rediscovered, it produces one duplicate wake. That is safe and much simpler
-than perfect retention or a registration cleanup protocol.
+Entries are removed only when provider authority reports the resource absent or
+its provider scope is removed. At the size bound, new discoveries are deferred
+with one coalesced diagnostic. This keeps resource lifetime exact without a
+registration cleanup protocol.
 
 Provider schedules, open connections, and retry timers are disposable. On
 restart the daemon reloads the checkpoint, rescans configured scopes, and

@@ -278,8 +278,9 @@ test("a failed diagnostic delivery is retried without blocking observation", asy
   assert.equal(attempts, 2);
 });
 
-test("the checkpoint stays bounded and prefers pending deliveries", async (t) => {
+test("the checkpoint stays bounded without evicting remembered resources", async (t) => {
   const directory = await temporary(t, "event-watch-bound-");
+  const diagnostics = [];
   let observations = [
     { subject: "old", goalId: "g_old", revision: "one", payload: {} },
     { subject: "pending", goalId: "g_pending", revision: "one", payload: {} },
@@ -290,7 +291,7 @@ test("the checkpoint stays bounded and prefers pending deliveries", async (t) =>
     deliver: async (goalId) => {
       if (goalId === "g_pending") throw new Error("keep pending");
     },
-    diagnose: () => {},
+    diagnose: (item) => diagnostics.push(item),
     maxResources: 2,
   });
   await watcher.runOnce();
@@ -298,10 +299,12 @@ test("the checkpoint stays bounded and prefers pending deliveries", async (t) =>
   await watcher.runOnce();
   const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
   assert.equal(resources.length, 2);
-  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "pending"]);
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["old", "pending"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.match(diagnostics[1].message, /preserved existing monitoring/);
 });
 
-test("checkpoint saturation does not block recovery of observed pending deliveries", async (t) => {
+test("authoritative absence frees checkpoint capacity without losing pending delivery", async (t) => {
   const directory = await temporary(t, "event-watch-pending-capacity-");
   const statePath = join(directory, "state.json");
   let failing = true;
@@ -323,21 +326,17 @@ test("checkpoint saturation does not block recovery of observed pending deliveri
 
   await watcher.runOnce();
   failing = false;
-  observations = [
+  const source = watcher.sources.source;
+  source.scan = async () => discovery([
     { subject: "one", goalId: "g_same", revision: "one", payload: {} },
     { subject: "new", goalId: "g_same", revision: "one", payload: {} },
-  ];
+  ], ["two"]);
   await watcher.runOnce();
 
-  assert.deepEqual(delivered, [["one"]]);
-  let resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
-  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "two"]);
-  assert.ok(resources.find((resource) => resource.subject === "new").pending);
-
-  await watcher.runOnce();
-  assert.deepEqual(delivered, [["one"], ["new"]]);
-  resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
-  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["one", "two"]);
+  assert.deepEqual(delivered, [["one", "new"]]);
+  const resources = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources) as any[];
+  assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["new", "one"]);
+  assert.ok(resources.every((resource) => !resource.pending));
 });
 
 test("checkpoint saturation is visible when pending delivery cannot recover", async (t) => {
