@@ -912,7 +912,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
         status: policyStatus,
         startedDate: "2026-09-01T00:00:00Z",
       }] });
-      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+      if (text.includes("/pullRequests/42?")) return response({
         pullRequestId: 42,
         description: "## Supervision\n- Goal ID: g_pr",
         lastMergeSourceCommit: { commitId: "abc" },
@@ -921,6 +921,10 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
         mergeStatus: "succeeded",
         repository: { project: { id: "project-id" } },
         reviewers: [{ id: "reviewer-1", vote }],
+      });
+      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+        pullRequestId: 42,
+        description: "List descriptions are not authoritative.",
       }] });
       throw new Error(`unexpected URL ${url}`);
     },
@@ -995,11 +999,15 @@ test("ADO pull request discovery refuses a partial policy revision", async () =>
           status: "approved",
         })),
       });
-      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+      if (text.includes("/pullRequests/42?")) return response({
         pullRequestId: 42,
         description: "## Supervision\n- Goal ID: g_pr",
         status: "active",
         repository: { project: { id: "project-id" } },
+      });
+      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+        pullRequestId: 42,
+        description: "List descriptions are not authoritative.",
       }] });
       throw new Error(`unexpected URL ${url}`);
     },

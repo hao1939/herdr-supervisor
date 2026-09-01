@@ -151,6 +151,7 @@ export function adoPullRequestDiscovery({
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
       const pullsBySubject = new Map();
+      const fullPullSubjects = new Set();
       const absent = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
@@ -182,10 +183,23 @@ export function adoPullRequestDiscovery({
             "ADO pull request",
           );
           pullsBySubject.set(resource.subject, pull);
+          fullPullSubjects.add(resource.subject);
         } catch (error) {
           if (error?.status === 404) absent.push(resource.subject);
           else throw error;
         }
+      }
+      for (const [subject] of pullsBySubject) {
+        if (fullPullSubjects.has(subject)) continue;
+        const scope = parseSubject(subject);
+        if (!scope) throw new Error("ADO pull request discovery returned an invalid pull request subject");
+        const pull = await json(
+          fetchImpl,
+          `${pullUrl(scope, `/${scope.pullRequestId}`)}?api-version=7.1`,
+          auth,
+          "ADO pull request",
+        );
+        pullsBySubject.set(subject, pull);
       }
       for (const resource of known) {
         const pull = pullsBySubject.get(resource.subject);
