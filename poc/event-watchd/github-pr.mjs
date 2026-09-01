@@ -23,7 +23,7 @@ export function supervisionGoal(body) {
   if (start < 0) return undefined;
   const matches = [];
   for (const line of lines.slice(start + 1)) {
-    if (/^##\s+/.test(line)) break;
+    if (/^#{1,2}(\s|$)/.test(line)) break;
     const match = /^\s*-\s*Goal ID:\s*"?(g_[a-zA-Z0-9_-]+)"?\s*$/.exec(line);
     if (match && GOAL_ID.test(match[1])) matches.push(match[1]);
   }

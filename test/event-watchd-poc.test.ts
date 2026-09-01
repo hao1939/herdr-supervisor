@@ -26,6 +26,13 @@ test("provider metadata names one durable goal without a watch registration", ()
   ].join("\n")), "g_exact-1");
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\n- Goal ID: g_two"), undefined);
   assert.equal(supervisionGoal("No metadata"), undefined);
+  assert.equal(supervisionGoal([
+    "## Supervision",
+    "- Goal: Improve the watcher.",
+    "",
+    "# Unrelated later section",
+    "- Goal ID: \"g_other-1\"",
+  ].join("\n")), undefined);
   assert.equal(taggedGoal(["unrelated", "herdr-goal=g_exact-1"]), "g_exact-1");
   assert.equal(taggedGoal(["herdr-goal=g_one", "herdr-goal=g_two"]), undefined);
 });
