@@ -47,6 +47,16 @@ function hash(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function completeCollection(result, field, label) {
+  const items = result?.[field];
+  if (!Array.isArray(items)) throw new Error(`${label} returned an invalid collection`);
+  const total = result.total_count;
+  if ((Number.isInteger(total) && total > items.length) || (!Number.isInteger(total) && items.length >= 100)) {
+    throw new Error(`${label} returned truncated state; refusing a partial revision`);
+  }
+  return items;
+}
+
 export function githubPullRequestDiscovery({
   repositories,
   fetchImpl = fetch,
@@ -117,13 +127,13 @@ export function githubPullRequestDiscovery({
           json(fetchImpl, `${commit}/check-runs?filter=latest&per_page=100`, headers, "GitHub checks"),
           json(fetchImpl, `${commit}/status?per_page=100`, headers, "GitHub statuses"),
         ]);
-        const checks = (checksResult.check_runs || []).map((check) => ({
+        const checks = completeCollection(checksResult, "check_runs", "GitHub checks").map((check) => ({
           id: check.id,
           name: check.name,
           status: check.status,
           conclusion: check.conclusion,
         })).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-        const statuses = (statusesResult.statuses || []).map((status) => ({
+        const statuses = completeCollection(statusesResult, "statuses", "GitHub statuses").map((status) => ({
           id: status.id,
           context: status.context,
           state: status.state,

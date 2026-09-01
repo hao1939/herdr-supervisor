@@ -159,7 +159,11 @@ runtime state: after a restart it simply starts again from the beginning.
 Recently closed or completed resources stay in the discovery window long enough
 to observe their final transition.
 
-Adapters own provider syntax and pagination. The core sees only normalized
+Adapters own provider syntax and pagination. The PoC GitHub adapter reads one
+maximum-size page of checks and statuses. If GitHub reports more items than
+that page contains, the scan fails visibly instead of hashing partial state.
+Full pagination can be added if real usage justifies its request and complexity
+cost; it is not a correctness shortcut. The core sees only normalized
 observations and exact remembered subjects that are now absent:
 
 ```json

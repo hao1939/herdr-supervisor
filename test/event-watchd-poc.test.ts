@@ -451,6 +451,43 @@ test("GitHub discovery reads only annotated pull requests", async () => {
   assert.equal(urls.some((url) => url.includes("/commits/def/")), false);
 });
 
+for (const truncated of ["checks", "statuses"]) {
+  test(`GitHub discovery rejects truncated ${truncated} instead of hashing partial state`, async () => {
+    const items = Array.from({ length: 100 }, (_, id) => ({
+      id,
+      name: `check-${id}`,
+      status: "completed",
+      conclusion: "success",
+      context: `status-${id}`,
+      state: "success",
+    }));
+    const source = githubPullRequestDiscovery({
+      repositories: ["owner/repo"],
+      token: "token",
+      fetchImpl: async (url) => {
+        const text = String(url);
+        if (text.includes("/pulls?")) return response([{
+          number: 42,
+          body: "## Supervision\n- Goal ID: g_pr",
+          head: { sha: "abc" },
+          state: "open",
+          draft: false,
+          updated_at: "2026-09-01T00:00:00Z",
+        }]);
+        if (text.includes("check-runs")) {
+          return response({ check_runs: truncated === "checks" ? items : [], total_count: truncated === "checks" ? 101 : 0 });
+        }
+        if (text.includes("/status?")) {
+          return response({ statuses: truncated === "statuses" ? items : [], total_count: truncated === "statuses" ? 101 : 0 });
+        }
+        throw new Error(`unexpected URL ${url}`);
+      },
+    });
+
+    await assert.rejects(source.scan(), new RegExp(`GitHub ${truncated} returned truncated state`));
+  });
+}
+
 test("GitHub discovery refreshes a remembered pull request outside the recent window", async () => {
   const urls = [];
   const pull = {
