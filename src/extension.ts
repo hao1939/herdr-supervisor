@@ -48,6 +48,7 @@ import {
   captureIdentity,
   findAgent,
   findPane,
+  formatCompletedGoal,
   formatStoredGoal,
   formatUnstartedGoal,
   formatWorker,
@@ -88,6 +89,7 @@ const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const WORKER_EVENT_SETTLE_MS = 250;
 type SupervisorMode = "observe" | "dry-run" | "live";
+type CompletedGoal = Awaited<ReturnType<typeof loadSupervisorGoals>>["completed"][number];
 
 function text(value: string, isError = false) {
   return { content: [{ type: "text" as const, text: value }], isError, details: undefined };
@@ -170,6 +172,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let goalCache: undefined | {
     active: Map<string, GoalBinding>;
     unstarted: InstalledGoal[];
+    completed: CompletedGoal[];
     errors: GoalLoadError[];
   };
 
@@ -192,6 +195,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     goalCache = {
       active: new Map(goals.active.map((binding) => [binding.goalId, binding])),
       unstarted: goals.unstarted,
+      completed: goals.completed,
       errors: goals.errors,
     };
     const activeIds = new Set(goals.active.map((binding) => binding.goalId));
@@ -206,6 +210,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     return {
       active: [...goalCache!.active.values()].map((binding): ActiveGoal => ({ ...binding, ...runtimeFor(binding) })),
       unstarted: goalCache!.unstarted,
+      completed: goalCache!.completed,
       errors: goalCache!.errors,
     };
   }
@@ -254,6 +259,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   function cacheCheckpoint(binding, state) {
     if (state.terminal) {
       goalCache?.active.delete(binding.goalId);
+      goalCache = undefined;
       runtimeGoals.delete(binding.goalId);
       return;
     }
@@ -585,8 +591,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (goalId) {
       const unstarted = goals.unstarted.find((goal) => goal.goalId === goalId);
       if (unstarted) return formatUnstartedGoal(unstarted);
+      const completed = goals.completed.find((goal) => goal.goalId === goalId);
+      if (completed) return formatCompletedGoal(completed);
       const binding = goals.active.find((goal) => goal.goalId === goalId);
-      if (!binding) return `${goalId} is not an active or unstarted goal.`;
+      if (!binding) return `${goalId} was not found.`;
       let snapshot;
       try {
         snapshot = await client.snapshot();
@@ -1266,10 +1274,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerTool({
     name: "supervisor_status",
     label: "Supervised goals",
-    description: "List active and unstarted goals with their exact IDs and objectives. Pass goal_id for any active or unstarted goal's full contract, or pane_id for one active goal's full contract and fresh worker state. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
+    description: "List active and unstarted goals with their exact IDs and objectives. Pass goal_id for any saved, active, or completed goal's full stored state, or pane_id for one active goal's full contract and fresh worker state. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
     parameters: Type.Object({
       pane_id: Optional(Pane),
-      goal_id: Optional(Type.String({ minLength: 1, description: "Exact active or unstarted goal ID. Use null for the all-goal view." })),
+      goal_id: Optional(Type.String({ minLength: 1, description: "Exact saved, active, or completed goal ID. Use null for the all-goal view." })),
     }),
     executionMode: "parallel",
     async execute(_id, params, _signal, _onUpdate, ctx) {

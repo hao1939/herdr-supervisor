@@ -190,6 +190,27 @@ export function formatStoredGoal(binding, { detailed = true } = {}) {
   return lines.join("\n");
 }
 
+export function formatCompletedGoal({ goalId, contract, state }) {
+  const terminal = state.terminal;
+  const lines = [
+    `Goal ${goalId} · ${terminal.state}`,
+    `  Objective: ${contract.objective}`,
+    ...contractLines(contract),
+    `  Result: ${terminal.summary}`,
+  ];
+  if (state.progress && state.progress !== terminal.summary) {
+    lines.push(`  Progress: ${state.progress}`);
+  }
+  if (state.evidence.length) {
+    lines.push("  Evidence:", ...state.evidence.map((item) => `  - ${item}`));
+  }
+  lines.push(
+    `  Worker: ${state.worker.agentSession.agent} ${state.worker.paneId}`,
+    `  Finished: ${terminal.at}`,
+  );
+  return lines.join("\n");
+}
+
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const paneMissing = mismatch === "worker pane is no longer present";

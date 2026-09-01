@@ -172,6 +172,20 @@ test("status exposes stored goals without filesystem tools or live worker state"
     acceptance: ["Fresh runtime state is observed."],
     constraints: ["Do not guess worker state."],
   }, root, { goalId: "g_active" });
+  const completed = await registerSupervisedGoal({
+    paneId: "w1:p3",
+    terminalId: "term_completed",
+    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
+  }, {
+    objective: "Complete the Scout integration.",
+    acceptance: ["The integration branch is validated."],
+  }, root, { goalId: "g_completed", at: "2026-09-01T09:00:00.000Z" });
+  await recordDecision(completed, "accept", {
+    progress: "The isolated integration branch passed validation.",
+    action: "Accepted the goal.",
+    evidence: ["Commit abc123 passed 70 tests."],
+    terminal: { state: "accepted", summary: "The Scout integration is ready for review." },
+  }, root, () => "2026-09-01T09:05:00.000Z");
   t.mock.method(HerdrClient.prototype, "snapshot", async () => {
     throw new Error("Herdr is unavailable");
   });
@@ -205,11 +219,23 @@ test("status exposes stored goals without filesystem tools or live worker state"
     pane_id: null,
     goal_id: "g_active",
   });
-  assert.equal(activeDetail.isError, false);
+  assert.equal(activeDetail.isError, false, activeDetail.content[0].text);
   assert.match(activeDetail.content[0].text, /live state unavailable/);
   assert.match(activeDetail.content[0].text, /Context: Its stored contract remains authoritative during a Herdr outage/);
   assert.match(activeDetail.content[0].text, /Accept when: Fresh runtime state is observed/);
   assert.match(activeDetail.content[0].text, /Constraints: Do not guess worker state/);
+
+  const completedDetail = await pi.tools.get("supervisor_status").execute("completed-detail", {
+    pane_id: null,
+    goal_id: "g_completed",
+  });
+  assert.equal(completedDetail.isError, false, completedDetail.content[0].text);
+  assert.match(completedDetail.content[0].text, /Goal g_completed · accepted/);
+  assert.match(completedDetail.content[0].text, /Objective: Complete the Scout integration/);
+  assert.match(completedDetail.content[0].text, /Accept when: The integration branch is validated/);
+  assert.match(completedDetail.content[0].text, /Result: The Scout integration is ready for review/);
+  assert.match(completedDetail.content[0].text, /Commit abc123 passed 70 tests/);
+  assert.match(completedDetail.content[0].text, /Finished: 2026-09-01T09:05:00.000Z/);
 
   const ambiguous = await pi.tools.get("supervisor_status").execute("ambiguous", {
     pane_id: "w1:p2",

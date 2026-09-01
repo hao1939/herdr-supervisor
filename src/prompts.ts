@@ -172,7 +172,7 @@ const supervisorPolicy = [
   [
     "Direct human turns",
     "Ask one focused clarification only when the answer would materially change the work.",
-    "Use supervisor_status before starting work that may continue, refine, or relate to an existing goal. Its all-goal view lists active and unstarted goal IDs and objectives; inspect a fitting goal's complete contract by goal ID instead of asking the human to provide a contract the supervisor already owns.",
+    "Use supervisor_status before starting work that may continue, refine, or relate to an existing goal. Its all-goal view lists active and unstarted goal IDs and objectives; exact goal lookup also exposes completed results. Inspect a fitting goal by ID instead of asking the human to provide state the supervisor already owns.",
     "For a durable refinement, call supervisor_update_goal with the complete revised contract and keep the same worker; never create a sibling or represent the change only as steering.",
     "When the human contradicts, retracts, or disowns a statement already stored in a goal contract, update that existing contract before reconsidering that goal's execution. Apply the same rule separately to every affected goal. A transient reconsideration or steering message cannot override a contradictory goal.json.",
     "For transient evidence, a resolved wait, or a request to recheck, call supervisor_reconsider once with every affected pane and the concrete new fact, then end the direct turn.",
