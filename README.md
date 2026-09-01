@@ -158,6 +158,8 @@ revision resolves that goal's current exact worker and sends a short wake hint.
 The worker rereads provider authority, continues useful work, and its normal
 Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
 goal review remains the safety net after a missed signal or provider failure.
+One short per-goal execution lock prevents a notification from crossing an
+accept or stop decision; it contains no workflow state.
 
 The container starts the watcher automatically when either provider-scope
 variable is set. For local use, export the same variables and run

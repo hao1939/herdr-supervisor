@@ -377,7 +377,11 @@ small contracts:
 5. **Delivery:** the goal ID is resolved through current canonical goal and
    Herdr state. The current exact worker receives a short wake hint and rereads
    provider authority; a saved pane is never a routing authority.
-6. **Failure:** observation or delivery failures produce one bounded supervisor
+6. **Terminal boundary:** one short per-goal execution lock serializes delivery
+   with accept and stop. If delivery wins, the terminal decision sees the new
+   worker sequence; if the terminal decision wins, delivery sees the completed
+   goal and sends nothing. The lock carries no workflow state.
+7. **Failure:** observation or delivery failures produce one bounded supervisor
    diagnostic. The ordinary bounded goal review remains the safety net for a
    missed or unsupported provider signal.
 

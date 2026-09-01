@@ -87,6 +87,10 @@ The system has four small responsibilities:
 4. **Herdr delivery adapter:** resolves the durable goal to its current exact
    worker and sends a wake hint.
 
+Delivery and terminal goal decisions share one short per-goal execution lock.
+This closes the only cross-process decision boundary without putting provider
+state into the goal or turning the watcher into another workflow engine.
+
 Code observes, remembers, and wakes. It does not decide whether a check passed,
 a review is resolved, a PR should merge, or a goal is complete. The worker and
 supervisor make those decisions with the goal contract and current evidence.
@@ -220,11 +224,18 @@ provider authority. The watcher is not an audit log.
 
 The delivery input is a durable goal ID, never a pane ID:
 
-1. Load the active goal record.
-2. Read its current worker binding.
-3. Resolve and verify that exact native session in fresh Herdr state.
-4. Resume its native Goal if it is settled.
-5. Send a short hint naming the changed resource.
+1. Enter the goal's short execution boundary shared with accept and stop.
+2. Load the active goal record.
+3. Read its current worker binding.
+4. Resolve and verify that exact native session in fresh Herdr state.
+5. Resume its native Goal if it is settled.
+6. Send a short hint naming the changed resource.
+
+Acceptance performs its final worker-sequence check and commits the terminal
+goal record inside the same boundary. Therefore delivery either happens first
+and invalidates stale completion evidence, or completion happens first and the
+delivery reread ignores the terminal goal. The lock is disposable execution
+coordination; it stores no resource, provider, worker, or decision state.
 
 If the goal is already complete when delivery begins, the change is safely
 ignored. If the goal is missing, ambiguous, unreadable, or temporarily has no

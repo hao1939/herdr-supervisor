@@ -8,6 +8,7 @@ import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit, updateGoalState } from "../src/goal-store.ts";
+import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
@@ -2551,12 +2552,24 @@ test("acceptance rejects a worker wake that arrived after observation", async (t
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  changed = true;
-  const finish = await pi.tools.get("supervisor_finish").execute("finish", {
+  let unlock;
+  let locked;
+  const entered = new Promise((resolve) => { locked = resolve; });
+  const gate = new Promise((resolve) => { unlock = resolve; });
+  const delivery = withGoalActionLock(root, "g_test", async () => {
+    locked();
+    await gate;
+  });
+  await entered;
+  const finishing = pi.tools.get("supervisor_finish").execute("finish", {
     pane_id: worker.paneId,
     summary: "The earlier result appeared complete.",
     evidence: ["Earlier worker evidence."],
   });
+  changed = true;
+  unlock();
+  await delivery;
+  const finish = await finishing;
 
   assert.equal(finish.isError, true);
   assert.match(finish.content[0].text, /worker changed after it was observed/);

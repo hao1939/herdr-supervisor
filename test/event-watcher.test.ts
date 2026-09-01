@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,8 @@ import { MetadataEventWatcher as DiscoveredEventWatcher } from "../src/event-wat
 import { githubPullRequestDiscovery, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
-import { registerSupervisedGoal } from "../src/goal-registry.ts";
+import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
+import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +36,20 @@ async function temporary(t, label) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("goal action locks recover after their owning process is gone", async (t) => {
+  const root = await temporary(t, "event-watch-stale-action-");
+  const lock = join(root, ".action-locks", "g_stale");
+  await mkdir(lock, { recursive: true });
+  await writeFile(join(lock, "owner.json"), `${JSON.stringify({
+    token: "dead-owner",
+    pid: 2_147_483_647,
+    startTime: "missing",
+  })}\n`);
+  let ran = false;
+  await withGoalActionLock(root, "g_stale", async () => { ran = true; });
+  assert.equal(ran, true);
+});
 
 test("provider metadata names one durable goal without a watch registration", () => {
   assert.equal(supervisionGoal([
@@ -1017,6 +1032,49 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   assert.equal(prompts[1].target, "w1:p9");
   assert.match(prompts[1].text, /owner\/repo#42/);
   assert.match(prompts[1].text, /wake hint, not completion proof/);
+});
+
+test("goal acceptance and external delivery share one atomic action boundary", async (t) => {
+  const root = await temporary(t, "event-watch-goal-action-");
+  const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" };
+  const binding = await registerSupervisedGoal({
+    paneId: "w1:p1",
+    terminalId: "terminal-1",
+    agentSession: session,
+  }, {
+    objective: "Finish without losing a concurrent provider update.",
+    acceptance: ["Acceptance and notification cannot pass each other."],
+  }, root, { goalId: "g_atomic" });
+  let unlock;
+  let locked;
+  const entered = new Promise((resolve) => { locked = resolve; });
+  const gate = new Promise((resolve) => { unlock = resolve; });
+  const accepting = withGoalActionLock(root, binding.goalId, async () => {
+    locked();
+    await gate;
+    return recordDecision(binding, "accept", {
+      progress: "Verified before the provider delivery began.",
+      action: "Accepted the verified goal.",
+      evidence: ["Current evidence."],
+      terminal: { state: "accepted", summary: "Complete." },
+    }, root);
+  });
+  await entered;
+  const calls = [];
+  const deliver = herdrGoalDelivery({
+    goalsRoot: root,
+    request: async (method, params) => {
+      calls.push([method, params]);
+      return { snapshot: { agents: [] } };
+    },
+  });
+  const delivery = deliver("g_atomic", [{ source: "github-pr", subject: "owner/repo#42" }]);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(calls.length, 0, "delivery must wait behind the terminal decision");
+  unlock();
+  await accepting;
+  assert.deepEqual(await delivery, { ignored: "goal completed" });
+  assert.equal(calls.length, 0, "a completed goal must not be woken");
 });
 
 test("Herdr delivery fails closed when canonical goal ownership is missing", async (t) => {

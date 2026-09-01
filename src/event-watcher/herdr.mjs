@@ -1,6 +1,8 @@
 import { loadSupervisorGoals } from "../goal-registry.ts";
 import { HerdrClient } from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
+import { withGoalActionLock } from "../goal-action-lock.mjs";
+import { defaultGoalsRoot } from "../goal-store.ts";
 
 export function herdrRequest(method, params = {}, {
   socketPath,
@@ -23,9 +25,10 @@ export function herdrGoalDelivery({
   request = herdrRequest,
   ...options
 } = {}) {
-  return async (goalId, events) => {
+  const root = goalsRoot || defaultGoalsRoot();
+  return async (goalId, events) => withGoalActionLock(root, goalId, async () => {
     if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource change");
-    const goals = await loadSupervisorGoals(goalsRoot);
+    const goals = await loadSupervisorGoals(root);
     const binding = goals.active.find((goal) => goal.goalId === goalId);
     if (!binding) {
       if (goals.completed.some((goal) => goal.goalId === goalId)) return { ignored: "goal completed" };
@@ -62,7 +65,7 @@ export function herdrGoalDelivery({
       ].join("\n"),
     }, options);
     return { paneId: agent.pane_id };
-  };
+  });
 }
 
 export function herdrSupervisorDiagnostic({

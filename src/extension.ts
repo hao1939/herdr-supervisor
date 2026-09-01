@@ -15,6 +15,8 @@ import {
 import { formatObservation, observeWorker } from "./observation.ts";
 import { ReviewTurnFence } from "./review-turn.ts";
 import { canRecoverAgentSession, sameAgentSession } from "./identity.ts";
+import { defaultGoalsRoot } from "./goal-store.ts";
+import { withGoalActionLock } from "./goal-action-lock.mjs";
 import {
   nativeGoalPrompt,
   refinedGoalPrompt,
@@ -1816,31 +1818,35 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         reviewTurn.close(params.pane_id);
         return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       }
-      const latestSnapshot = await client.snapshot();
-      const latestAgent = findAgent(latestSnapshot, binding.paneId);
-      const latestMismatch = identityMismatch(
-        binding,
-        latestAgent,
-        findPane(latestSnapshot, binding.paneId),
-      );
-      if (latestMismatch) {
-        return text(`Cannot accept ${params.pane_id}: ${latestMismatch}. Review the current exact worker first.`, true);
-      }
-      const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
-      const latestSequence = Number(latestAgent.state_change_seq || 0);
-      if (latestAgent.agent_status === "working" || latestSequence !== observedSequence) {
-        scheduleReview(binding, 0);
-        return text(`Cannot accept ${params.pane_id}: the worker changed after it was observed. Review its current evidence before deciding again.`, true);
-      }
       let result;
       try {
-        result = await recordDecision(binding, "accept", {
-          progress: params.summary.trim(),
-          action: "Accepted the verified goal.",
-          evidence: params.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-          terminal: { state: "accepted", summary: params.summary.trim() },
+        const decision = await withGoalActionLock(defaultGoalsRoot(), binding.goalId, async () => {
+          const latestSnapshot = await client.snapshot();
+          const latestAgent = findAgent(latestSnapshot, binding.paneId);
+          const latestMismatch = identityMismatch(
+            binding,
+            latestAgent,
+            findPane(latestSnapshot, binding.paneId),
+          );
+          if (latestMismatch) {
+            return { error: text(`Cannot accept ${params.pane_id}: ${latestMismatch}. Review the current exact worker first.`, true) };
+          }
+          const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
+          const latestSequence = Number(latestAgent.state_change_seq || 0);
+          if (latestAgent.agent_status === "working" || latestSequence !== observedSequence) {
+            scheduleReview(binding, 0);
+            return { error: text(`Cannot accept ${params.pane_id}: the worker changed after it was observed. Review its current evidence before deciding again.`, true) };
+          }
+          return { result: await recordDecision(binding, "accept", {
+            progress: params.summary.trim(),
+            action: "Accepted the verified goal.",
+            evidence: params.evidence,
+            observationCursor: runtimeFor(binding).pendingCursor,
+            terminal: { state: "accepted", summary: params.summary.trim() },
+          }) };
         });
+        if (decision.error) return decision.error;
+        result = decision.result;
       } catch (error) {
         const reloadWarning = await reconcileCacheAfterWriteFailure();
         scheduleReview(binding);
@@ -1907,12 +1913,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         if (!binding) return ctx.ui.notify(`${paneId} was not supervised.`, "info");
         let result;
         try {
-          result = await recordDecision(binding, "stop", {
-            progress: "The human stopped supervision.",
-            action: "Stopped supervision without stopping the worker.",
-            evidence: binding.evidence,
-            terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
-          });
+          result = await withGoalActionLock(defaultGoalsRoot(), binding.goalId, () => (
+            recordDecision(binding, "stop", {
+              progress: "The human stopped supervision.",
+              action: "Stopped supervision without stopping the worker.",
+              evidence: binding.evidence,
+              terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
+            })
+          ));
           cacheCheckpoint(binding, result.state);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
