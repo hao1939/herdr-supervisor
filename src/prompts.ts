@@ -47,7 +47,8 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     "## Supervision",
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
-    "Keep this supervision metadata secondary: it identifies the originating work but is not completion evidence. Never publish a local session path or another private native-session locator.",
+    "Keep supervision metadata secondary; it identifies origin, not completion proof. Never publish a local path-backed session locator.",
+    `For each new ADO build owned by this goal, add and verify ${JSON.stringify(`herdr-goal=${binding.goalId}`)} once. Never tag another goal's build or register a watch.`,
   ].join("\n");
 }
 

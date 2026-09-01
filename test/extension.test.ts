@@ -306,6 +306,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.equal(goals.active.length, 1);
   assert.equal(goals.active[0].paneId, managed.pane_id);
   assert.ok(deliveredPrompts[0].prompt.includes(`- Goal ID: ${JSON.stringify(goals.active[0].goalId)}`));
+  assert.ok(deliveredPrompts[0].prompt.includes(`herdr-goal=${goals.active[0].goalId}`));
+  assert.match(deliveredPrompts[0].prompt, /Never tag another goal's build or register a watch/);
   assert.match(deliveredPrompts[0].prompt, /copy the current objective from the canonical goal\.json/);
   assert.ok(deliveredPrompts[0].prompt.includes(`- Worker: ${JSON.stringify(goalWorkerName(goals.active[0].goalId))}`));
   assert.ok(deliveredPrompts[0].prompt.includes(`- Codex session: ${JSON.stringify(managed.agent_session.value)}`));
@@ -731,6 +733,8 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /## Supervision/);
   assert.match(prompts[0].prompt, /copy the current objective from the canonical goal\.json/);
   assert.match(prompts[0].prompt, /- Worker: "refined-worker"/);
+  assert.match(prompts[0].prompt, /herdr-goal=g_test/);
+  assert.match(prompts[0].prompt, /Never tag another goal's build or register a watch/);
   assert.doesNotMatch(prompts[0].prompt, /Fix the focused regression\./);
   assert.match(prompts[0].prompt, /plain language/);
   assert.equal((await readAudit("g_test", root)).at(-1).type, "goal_refined");
