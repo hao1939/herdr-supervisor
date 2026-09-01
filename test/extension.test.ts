@@ -148,7 +148,7 @@ test("optional supervisor tool fields accept null without placeholder values", (
   }), true);
 });
 
-test("status exposes unstarted goals without filesystem tools or live worker state", async (t) => {
+test("status exposes stored goals without filesystem tools or live worker state", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-unstarted-status-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -166,6 +166,12 @@ test("status exposes unstarted goals without filesystem tools or live worker sta
     objective: "Prepare the Scout integration branch.",
     acceptance: ["The branch is ready for review."],
   }, root, { goalId: "g_integration" });
+  await registerSupervisedGoal(worker, {
+    objective: "Validate the active Scout worker.",
+    context: ["Its stored contract remains authoritative during a Herdr outage."],
+    acceptance: ["Fresh runtime state is observed."],
+    constraints: ["Do not guess worker state."],
+  }, root, { goalId: "g_active" });
   t.mock.method(HerdrClient.prototype, "snapshot", async () => {
     throw new Error("Herdr is unavailable");
   });
@@ -181,6 +187,8 @@ test("status exposes unstarted goals without filesystem tools or live worker sta
   assert.match(summary.content[0].text, /Goal g_recovery · unstarted/);
   assert.match(summary.content[0].text, /Recover the saved Scout goals/);
   assert.match(summary.content[0].text, /Goal g_integration · unstarted/);
+  assert.match(summary.content[0].text, /Goal g_active · active · live state unavailable/);
+  assert.match(summary.content[0].text, /Validate the active Scout worker/);
   assert.doesNotMatch(summary.content[0].text, /earlier bootstrap goal is obsolete/);
 
   const detail = await pi.tools.get("supervisor_status").execute("detail", {
@@ -192,6 +200,16 @@ test("status exposes unstarted goals without filesystem tools or live worker sta
   assert.match(detail.content[0].text, /Accept when: Both original goals have workers/);
   assert.match(detail.content[0].text, /Constraints: Do not create duplicate goals/);
   assert.match(detail.content[0].text, /Worker: not started/);
+
+  const activeDetail = await pi.tools.get("supervisor_status").execute("active-detail", {
+    pane_id: null,
+    goal_id: "g_active",
+  });
+  assert.equal(activeDetail.isError, false);
+  assert.match(activeDetail.content[0].text, /live state unavailable/);
+  assert.match(activeDetail.content[0].text, /Context: Its stored contract remains authoritative during a Herdr outage/);
+  assert.match(activeDetail.content[0].text, /Accept when: Fresh runtime state is observed/);
+  assert.match(activeDetail.content[0].text, /Constraints: Do not guess worker state/);
 
   const ambiguous = await pi.tools.get("supervisor_status").execute("ambiguous", {
     pane_id: "w1:p2",

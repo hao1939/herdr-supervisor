@@ -279,6 +279,9 @@ including context, acceptance criteria, and constraints. This is supervised
 goal data the model already owns, not general filesystem access. The summary
 stays compact while the exact read gives the model enough information to compare,
 resume, or discuss saved goals without asking the human to paste them again.
+If Herdr is temporarily unavailable, the goal views still return stored active
+and unstarted contracts while clearly marking live worker state unavailable.
+An exact pane query still requires Herdr because it is a runtime observation.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding and its optional display label, concise progress, retained evidence, observation cursor, last

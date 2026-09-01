@@ -48,6 +48,7 @@ import {
   captureIdentity,
   findAgent,
   findPane,
+  formatStoredGoal,
   formatUnstartedGoal,
   formatWorker,
   goalPaneLabel,
@@ -586,15 +587,27 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       if (unstarted) return formatUnstartedGoal(unstarted);
       const binding = goals.active.find((goal) => goal.goalId === goalId);
       if (!binding) return `${goalId} is not an active or unstarted goal.`;
-      return formatWorker(liveWorker(binding, await client.snapshot()));
+      let snapshot;
+      try {
+        snapshot = await client.snapshot();
+      } catch {
+        return formatStoredGoal(binding);
+      }
+      return formatWorker(liveWorker(binding, snapshot));
     }
     const bindings = paneId ? goals.active.filter((worker) => worker.paneId === paneId) : goals.active;
     if (paneId && !bindings.length) return `${paneId} is not supervised.`;
-    const snapshot = bindings.length ? await client.snapshot() : undefined;
-    const lines = bindings.map((binding) => formatWorker(
-      liveWorker(binding, snapshot),
-      { detailed: Boolean(paneId) },
-    ));
+    let snapshot;
+    if (bindings.length) {
+      try {
+        snapshot = await client.snapshot();
+      } catch (error) {
+        if (paneId) throw error;
+      }
+    }
+    const lines = bindings.map((binding) => snapshot
+      ? formatWorker(liveWorker(binding, snapshot), { detailed: Boolean(paneId) })
+      : formatStoredGoal(binding, { detailed: false }));
     if (!paneId && goals.unstarted.length) {
       lines.push(`Saved goals without workers:\n\n${goals.unstarted.map((goal) => (
         formatUnstartedGoal(goal, { detailed: false })

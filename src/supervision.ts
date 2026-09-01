@@ -177,6 +177,19 @@ export function formatUnstartedGoal({ goalId, contract }, { detailed = true } = 
   return lines.join("\n");
 }
 
+export function formatStoredGoal(binding, { detailed = true } = {}) {
+  const objective = detailed ? binding.goal : compact(binding.goal, 240);
+  const lines = [
+    `Goal ${binding.goalId} · active · live state unavailable`,
+    `  Objective: ${objective}`,
+    `  Worker: ${binding.agentSession.agent} ${binding.paneId} · state unavailable`,
+  ];
+  if (detailed) lines.push(...contractLines(binding));
+  if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
+  lines.push("  Next: read fresh Herdr state before acting on this worker");
+  return lines.join("\n");
+}
+
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const paneMissing = mismatch === "worker pane is no longer present";
