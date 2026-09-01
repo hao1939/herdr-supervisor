@@ -158,6 +158,38 @@ function compact(value, limit) {
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 
+function contractLines({ context = [], acceptance = [], constraints = [] }) {
+  const lines = [];
+  if (context.length) lines.push(`  Context: ${context.join("; ")}`);
+  if (acceptance.length) lines.push(`  Accept when: ${acceptance.join("; ")}`);
+  if (constraints.length) lines.push(`  Constraints: ${constraints.join("; ")}`);
+  return lines;
+}
+
+export function formatUnstartedGoal({ goalId, contract }, { detailed = true } = {}) {
+  const objective = detailed ? contract.objective : compact(contract.objective, 240);
+  const lines = [
+    `Goal ${goalId} · unstarted`,
+    `  Objective: ${objective}`,
+  ];
+  if (detailed) lines.push(...contractLines(contract));
+  lines.push("  Worker: not started");
+  return lines.join("\n");
+}
+
+export function formatStoredGoal(binding, { detailed = true } = {}) {
+  const objective = detailed ? binding.goal : compact(binding.goal, 240);
+  const lines = [
+    `Goal ${binding.goalId} · active · live state unavailable`,
+    `  Objective: ${objective}`,
+    `  Worker: ${binding.agentSession.agent} ${binding.paneId} · state unavailable`,
+  ];
+  if (detailed) lines.push(...contractLines(binding));
+  if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
+  lines.push("  Next: read fresh Herdr state before acting on this worker");
+  return lines.join("\n");
+}
+
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const paneMissing = mismatch === "worker pane is no longer present";
@@ -196,7 +228,7 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
     `  Objective: ${goal}`,
     `  Worker: ${worker} · ${workerState}`,
   ];
-  if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
+  if (detailed) lines.push(...contractLines(binding));
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (workerUnavailable && awaitingHuman) {
     lines.push(sessionRecoverable

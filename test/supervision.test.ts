@@ -7,6 +7,7 @@ import {
   dependentBindings,
   dueBindings,
   findPane,
+  formatStoredGoal,
   formatWorker,
   goalPaneLabel,
   identityMismatch,
@@ -341,7 +342,9 @@ test("a human question does not promise recovery for an unsupported missing sess
 test("the all-worker view stays bounded while one-worker detail stays complete", () => {
   const current = binding({
     goal: `Review the system ${"goal detail ".repeat(80)}`,
+    context: ["The complete stable context remains available in detail."],
     acceptance: ["The complete acceptance evidence remains available in detail."],
+    constraints: ["The complete lasting constraint remains available in detail."],
     progress: `Current finding ${"progress detail ".repeat(80)}`,
   });
   const live = liveWorker(current, snapshot());
@@ -351,9 +354,30 @@ test("the all-worker view stays bounded while one-worker detail stays complete",
   assert.ok(summary.length < 1000);
   assert.match(summary, /Review the system goal detail/);
   assert.doesNotMatch(summary, /Accept when:/);
+  assert.doesNotMatch(summary, /Context:/);
+  assert.doesNotMatch(summary, /Constraints:/);
   assert.match(summary, /…/);
+  assert.match(detail, /Context: The complete stable context remains available in detail/);
   assert.match(detail, /Accept when: The complete acceptance evidence remains available in detail/);
+  assert.match(detail, /Constraints: The complete lasting constraint remains available in detail/);
   assert.ok(detail.length > summary.length);
+});
+
+test("stored goal facts remain readable without live worker state", () => {
+  const current = binding({
+    context: ["The durable context remains available."],
+    acceptance: ["Fresh runtime state is observed."],
+    constraints: ["Do not guess worker state."],
+    progress: "The last stored review found useful work in progress.",
+  });
+  const output = formatStoredGoal(current);
+
+  assert.match(output, /^Goal g_test · active · live state unavailable$/m);
+  assert.match(output, /Context: The durable context remains available/);
+  assert.match(output, /Accept when: Fresh runtime state is observed/);
+  assert.match(output, /Constraints: Do not guess worker state/);
+  assert.match(output, /Progress: The last stored review found useful work in progress/);
+  assert.match(output, /Next: read fresh Herdr state before acting/);
 });
 
 test("a settled future wait shows its condition and review time", () => {

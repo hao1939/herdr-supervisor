@@ -177,10 +177,13 @@ variable is set. For local use, export the same variables and run
 `npm run watch` beside Herdr. Configure only scopes where the supervision
 metadata is written by trusted workers or maintainers.
 
-Each goal gets one directory: `goal.json` (portable contract), `current.json`
-(execution checkpoint), and `journal.jsonl` (audit). The contract file is the
+The goal-store root includes a concise `README.md` explaining its layout,
+authority, lifecycle, safe inspection, and portability. Each goal directory has
+`goal.json` (portable contract) and, when relevant, `current.json` (local
+execution checkpoint) and `journal.jsonl` (audit). The contract file is the
 only goal data another instance needs; place it in a valid goal directory there
-before starting a new worker.
+before starting a new worker. Store reads never generate files, and
+initialization never overwrites an existing root guide.
 
 The human may refine an active goal in conversation. The supervisor updates the
 durable contract and informs the same worker — no sibling goals or temporary

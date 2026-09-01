@@ -48,6 +48,8 @@ import {
   captureIdentity,
   findAgent,
   findPane,
+  formatStoredGoal,
+  formatUnstartedGoal,
   formatWorker,
   goalPaneLabel,
   DEFAULT_REVIEW_INTERVAL_MS,
@@ -577,17 +579,41 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     }
   }
 
-  async function status(paneId?: string) {
-    const [goals, snapshot] = await Promise.all([activeBindings(), client.snapshot()]);
-    const bindings = paneId ? goals.active.filter((worker) => worker.paneId === paneId) : goals.active;
-    const lines = bindings.map((binding) => formatWorker(
-      liveWorker(binding, snapshot),
-      { detailed: Boolean(paneId) },
-    ));
-    if (!lines.length) lines.push(paneId ? `${paneId} is not supervised.` : "No supervised workers.");
-    if (!paneId && goals.unstarted.length) {
-      lines.push(`${goals.unstarted.length} portable goal contract(s) have no local worker yet.`);
+  async function status({ paneId, goalId }: { paneId?: string; goalId?: string } = {}) {
+    if (paneId && goalId) throw new Error("pass either pane_id or goal_id, not both");
+    const goals = await activeBindings();
+    if (goalId) {
+      const unstarted = goals.unstarted.find((goal) => goal.goalId === goalId);
+      if (unstarted) return formatUnstartedGoal(unstarted);
+      const binding = goals.active.find((goal) => goal.goalId === goalId);
+      if (!binding) return `${goalId} is not an active or unstarted goal.`;
+      let snapshot;
+      try {
+        snapshot = await client.snapshot();
+      } catch {
+        return formatStoredGoal(binding);
+      }
+      return formatWorker(liveWorker(binding, snapshot));
     }
+    const bindings = paneId ? goals.active.filter((worker) => worker.paneId === paneId) : goals.active;
+    if (paneId && !bindings.length) return `${paneId} is not supervised.`;
+    let snapshot;
+    if (bindings.length) {
+      try {
+        snapshot = await client.snapshot();
+      } catch (error) {
+        if (paneId) throw error;
+      }
+    }
+    const lines = bindings.map((binding) => snapshot
+      ? formatWorker(liveWorker(binding, snapshot), { detailed: Boolean(paneId) })
+      : formatStoredGoal(binding, { detailed: false }));
+    if (!paneId && goals.unstarted.length) {
+      lines.push(`Saved goals without workers:\n\n${goals.unstarted.map((goal) => (
+        formatUnstartedGoal(goal, { detailed: false })
+      )).join("\n\n")}`);
+    }
+    if (!lines.length) lines.push("No supervised goals.");
     if (!paneId && goals.errors.length) {
       lines.push(`Needs repair: ${goals.errors.map((record) => record.goalId).join(", ")}.`);
     }
@@ -1239,14 +1265,22 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.registerTool({
     name: "supervisor_status",
-    label: "Supervised workers",
-    description: "Show supervised goals against fresh Herdr worker state. The all-worker view is bounded; pass pane_id for that goal's full contract. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
-    parameters: Type.Object({ pane_id: Optional(Pane) }),
+    label: "Supervised goals",
+    description: "List active and unstarted goals with their exact IDs and objectives. Pass goal_id for any active or unstarted goal's full contract, or pane_id for one active goal's full contract and fresh worker state. During a focused review, peer progress is coordination context, not completion evidence for the focused goal.",
+    parameters: Type.Object({
+      pane_id: Optional(Pane),
+      goal_id: Optional(Type.String({ minLength: 1, description: "Exact active or unstarted goal ID. Use null for the all-goal view." })),
+    }),
     executionMode: "parallel",
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const fenceError = reviewTurn.guard();
       if (fenceError) return text(fenceError, true);
-      try { return text(await status(params.pane_id)); }
+      try {
+        return text(await status({
+          paneId: params.pane_id || undefined,
+          goalId: params.goal_id || undefined,
+        }));
+      }
       catch (error) { return text(`Could not read supervisor status: ${error.message}`, true); }
     },
   });

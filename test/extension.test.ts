@@ -12,6 +12,7 @@ import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
+import { nativeGoalPrompt } from "../src/prompts.ts";
 
 // Default no-op for renamePane so tests that don't care about display
 // labels are not affected by reconcileWorkerLabels during session_start.
@@ -141,6 +142,81 @@ test("optional supervisor tool fields accept null without placeholder values", (
     evidence: null,
     review_at: null,
   }), true);
+  assert.equal(Compile(pi.tools.get("supervisor_status").parameters).Check({
+    pane_id: null,
+    goal_id: "g_saved",
+  }), true);
+});
+
+test("status exposes stored goals without filesystem tools or live worker state", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-unstarted-status-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Recover the saved Scout goals.",
+    context: ["The earlier bootstrap goal is obsolete."],
+    acceptance: ["Both original goals have workers."],
+    constraints: ["Do not create duplicate goals."],
+  }, root, { goalId: "g_recovery" });
+  await installSupervisorGoal({
+    objective: "Prepare the Scout integration branch.",
+    acceptance: ["The branch is ready for review."],
+  }, root, { goalId: "g_integration" });
+  await registerSupervisedGoal(worker, {
+    objective: "Validate the active Scout worker.",
+    context: ["Its stored contract remains authoritative during a Herdr outage."],
+    acceptance: ["Fresh runtime state is observed."],
+    constraints: ["Do not guess worker state."],
+  }, root, { goalId: "g_active" });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    throw new Error("Herdr is unavailable");
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const summary = await pi.tools.get("supervisor_status").execute("summary", {
+    pane_id: null,
+    goal_id: null,
+  });
+  assert.equal(summary.isError, false);
+  assert.match(summary.content[0].text, /Saved goals without workers:/);
+  assert.match(summary.content[0].text, /Goal g_recovery · unstarted/);
+  assert.match(summary.content[0].text, /Recover the saved Scout goals/);
+  assert.match(summary.content[0].text, /Goal g_integration · unstarted/);
+  assert.match(summary.content[0].text, /Goal g_active · active · live state unavailable/);
+  assert.match(summary.content[0].text, /Validate the active Scout worker/);
+  assert.doesNotMatch(summary.content[0].text, /earlier bootstrap goal is obsolete/);
+
+  const detail = await pi.tools.get("supervisor_status").execute("detail", {
+    pane_id: null,
+    goal_id: "g_recovery",
+  });
+  assert.equal(detail.isError, false);
+  assert.match(detail.content[0].text, /Context: The earlier bootstrap goal is obsolete/);
+  assert.match(detail.content[0].text, /Accept when: Both original goals have workers/);
+  assert.match(detail.content[0].text, /Constraints: Do not create duplicate goals/);
+  assert.match(detail.content[0].text, /Worker: not started/);
+
+  const activeDetail = await pi.tools.get("supervisor_status").execute("active-detail", {
+    pane_id: null,
+    goal_id: "g_active",
+  });
+  assert.equal(activeDetail.isError, false);
+  assert.match(activeDetail.content[0].text, /live state unavailable/);
+  assert.match(activeDetail.content[0].text, /Context: Its stored contract remains authoritative during a Herdr outage/);
+  assert.match(activeDetail.content[0].text, /Accept when: Fresh runtime state is observed/);
+  assert.match(activeDetail.content[0].text, /Constraints: Do not guess worker state/);
+
+  const ambiguous = await pi.tools.get("supervisor_status").execute("ambiguous", {
+    pane_id: "w1:p2",
+    goal_id: "g_recovery",
+  });
+  assert.equal(ambiguous.isError, true);
+  assert.match(ambiguous.content[0].text, /either pane_id or goal_id/);
 });
 
 test("pull request traceability never publishes a path-backed session locator", () => {
@@ -195,6 +271,28 @@ test("pull request traceability stays bounded for a long goal and requires the c
   assert.doesNotMatch(trace, /Old objective/);
   assert.match(trace, /re-read the canonical goal\.json/);
   assert.match(trace, /never leave the placeholder or reuse an earlier objective/);
+});
+
+test("native Goal guidance stays bounded with a long goal-store path", () => {
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = "/Users/runner/work/_temp/herdr-supervisor-session-retry-012345678901234567890123456789/goals";
+  try {
+    const prompt = nativeGoalPrompt({
+      goalId: "g_12345678-1234-1234-1234-123456789012",
+      goal: "Complete one bounded diagnostic.",
+      paneId: "w1:p3",
+      agentSession: {
+        source: "herdr:codex",
+        agent: "codex",
+        kind: "id",
+        value: "session_managed",
+      },
+    }, "goal-diagnostic");
+    assert.ok(prompt.length <= 4_006);
+  } finally {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  }
 });
 
 test("a human goal creates, prompts, and supervises one Codex worker", async (t) => {
@@ -300,6 +398,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.ok(deliveredPrompts[0].prompt.length <= 4006);
   assert.match(deliveredPrompts[0].prompt, /goal\.json/);
   assert.match(deliveredPrompts[0].prompt, /single canonical objective/);
+  assert.match(deliveredPrompts[0].prompt, /README\.md beside the goal directories.*guidance, not another goal/);
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);

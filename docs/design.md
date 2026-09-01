@@ -238,14 +238,24 @@ set of workflow-specific branches.
 
 ## Goal data
 
-Each goal keeps three files in one stable directory:
+The goal-store root explains itself, and each goal keeps up to three files in
+one stable directory:
 
 ```text
-goals/g_<id>/
-├── goal.json
-├── current.json
-└── journal.jsonl
+goals/
+├── README.md
+├── g_<id>/
+│   ├── goal.json
+│   ├── current.json
+│   └── journal.jsonl
+└── .supervisor/
 ```
+
+The supervisor places the concise root guide when it first writes to a goal
+store; reads never create or change files. The guide documents file authority,
+lifecycle, safe inspection, and portability for any agent or human with direct
+filesystem access. It is one shared explanation, not repeated metadata or a
+skill inside every goal. Existing root files are never overwritten.
 
 `goal.json` is the portable contract. It contains only:
 
@@ -262,6 +272,16 @@ Within one instance, an unstarted saved contract is resumed by passing its exact
 goal ID to the same start operation used for a new goal. Code loads that contract
 and creates its worker; the model does not restate the contract or create a
 sibling merely because the goal has no worker yet.
+
+The supervisor's ordinary status view lists the exact IDs and objectives of
+active and unstarted goals. Reading one exact goal returns its complete contract,
+including context, acceptance criteria, and constraints. This is supervised
+goal data the model already owns, not general filesystem access. The summary
+stays compact while the exact read gives the model enough information to compare,
+resume, or discuss saved goals without asking the human to paste them again.
+If Herdr is temporarily unavailable, the goal views still return stored active
+and unstarted contracts while clearly marking live worker state unavailable.
+An exact pane query still requires Herdr because it is a runtime observation.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding and its optional display label, concise progress, retained evidence, observation cursor, last
@@ -289,6 +309,9 @@ then belongs only to the shared watcher checkpoint.
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
 recovery; an invalid goal or checkpoint fails closed.
+
+`.supervisor/` holds local supervisor checkpoints. It is neither portable goal
+authority nor live runtime truth.
 
 In-memory runtime data holds only disposable scheduling details such as the
 next review time, coalesced signal, and one-turn observation fence. Durable
