@@ -163,6 +163,40 @@ test("first discovery and every later revision wake the goal without renewal", a
   assert.equal((Object.values(state.resources)[0] as any).pending, undefined);
 });
 
+test("provider scans receive the remembered revision and delivery state", async (t) => {
+  const directory = await temporary(t, "event-watch-provider-state-");
+  const known = [];
+  let deliveries = 0;
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: {
+        async scan(resources) {
+          known.push(resources);
+          return discovery([{
+            subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
+          }]);
+        },
+      },
+    },
+    deliver: async () => {
+      deliveries += 1;
+      if (deliveries === 1) throw new Error("worker unavailable");
+    },
+    diagnose: () => {},
+  });
+
+  await watcher.runOnce();
+  await watcher.runOnce();
+  await watcher.runOnce();
+
+  assert.deepEqual(known, [
+    [],
+    [{ subject: "resource-1", goalId: "g_owner", revision: "one", pending: true }],
+    [{ subject: "resource-1", goalId: "g_owner", revision: "one", pending: false }],
+  ]);
+});
+
 test("completed goal metadata does not consume watcher capacity", async (t) => {
   const directory = await temporary(t, "event-watch-completed-goal-");
   const delivered = [];
@@ -776,6 +810,51 @@ test("GitHub discovery refreshes a remembered pull request outside the recent wi
   assert.ok(urls.some((url) => url.endsWith("/pulls/42")));
 });
 
+test("GitHub discovery retires a delivered closed revision outside the recent window", async () => {
+  const pull = {
+    number: 42,
+    body: "## Supervision\n- Goal ID: g_pr",
+    head: { sha: "abc" },
+    state: "closed",
+    draft: false,
+    updated_at: "2026-09-01T00:01:00Z",
+  };
+  const source = githubPullRequestDiscovery({
+    repositories: ["owner/repo"],
+    token: "token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("/pulls?")) return response([]);
+      if (String(url).endsWith("/pulls/42")) return response(pull);
+      if (String(url).includes("check-runs")) return response({ check_runs: [] });
+      if (String(url).includes("/status?")) return response({ statuses: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const first = await source.scan([{ subject: "owner/repo#42", goalId: "g_pr", revision: "old" }]);
+  assert.equal(first.observations.length, 1);
+  assert.deepEqual(first.absent, []);
+
+  const retargeted = await source.scan([{
+    subject: "owner/repo#42", goalId: "g_old", revision: first.observations[0].revision,
+  }]);
+  assert.equal(retargeted.observations[0].goalId, "g_pr");
+  assert.deepEqual(retargeted.absent, []);
+
+  const pending = await source.scan([{
+    subject: "owner/repo#42", goalId: "g_pr", revision: first.observations[0].revision, pending: true,
+  }]);
+  assert.equal(pending.observations.length, 1);
+  assert.deepEqual(pending.absent, []);
+
+  const settled = await source.scan([{
+    subject: "owner/repo#42",
+    goalId: "g_pr",
+    revision: first.observations[0].revision,
+  }]);
+  assert.deepEqual(settled, { observations: [], absent: ["owner/repo#42"] });
+});
+
 test("GitHub discovery reports removed goal metadata as authoritative absence", async () => {
   const source = githubPullRequestDiscovery({
     repositories: ["owner/repo"],
@@ -974,6 +1053,65 @@ test("ADO pull request discovery rereads remembered pulls and forgets removed me
   assert.ok(urls.some((url) => url.includes("/pullRequests/42?")));
 });
 
+test("ADO pull request discovery retires a delivered terminal revision", async () => {
+  let listedAsActive = true;
+  const source = adoPullRequestDiscovery({
+    repositories: ["org/project/repo"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("/pullRequests?")) {
+        const value = listedAsActive ? [{ pullRequestId: 42 }] : [];
+        return response({ count: value.length, value });
+      }
+      if (text.includes("/pullRequests/42?")) return response({
+        pullRequestId: 42,
+        description: "## Supervision\n- Goal ID: g_pr",
+        lastMergeSourceCommit: { commitId: "abc" },
+        status: "completed",
+        isDraft: false,
+        mergeStatus: "succeeded",
+        closedDate: "2026-09-01T00:01:00Z",
+        repository: { project: { id: "project-id" } },
+      });
+      if (text.includes("/threads?")) return response({ count: 0, value: [] });
+      if (text.includes("/policy/evaluations?")) return response({ count: 0, value: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const first = await source.scan([{ subject: "org/project/repo/42", goalId: "g_pr", revision: "old" }]);
+  assert.equal(first.observations.length, 1);
+  assert.deepEqual(first.absent, []);
+
+  const retargeted = await source.scan([{
+    subject: "org/project/repo/42", goalId: "g_old", revision: first.observations[0].revision,
+  }]);
+  assert.equal(retargeted.observations[0].goalId, "g_pr");
+  assert.deepEqual(retargeted.absent, []);
+
+  const pending = await source.scan([{
+    subject: "org/project/repo/42", goalId: "g_pr",
+    revision: first.observations[0].revision, pending: true,
+  }]);
+  assert.equal(pending.observations.length, 1);
+  assert.deepEqual(pending.absent, []);
+
+  const staleList = await source.scan([{
+    subject: "org/project/repo/42", goalId: "g_pr", revision: first.observations[0].revision,
+  }]);
+  assert.equal(staleList.observations.length, 1);
+  assert.deepEqual(staleList.absent, []);
+
+  listedAsActive = false;
+  const settled = await source.scan([{
+    subject: "org/project/repo/42",
+    goalId: "g_pr",
+    revision: first.observations[0].revision,
+  }]);
+  assert.deepEqual(settled, { observations: [], absent: ["org/project/repo/42"] });
+});
+
 test("ADO pull request discovery fails when reading a full listed pull request fails", async () => {
   const source = adoPullRequestDiscovery({
     repositories: ["org/project/repo"],
@@ -1074,6 +1212,51 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "org/project/101");
   assert.ok(urls.some((url) => url.includes("/builds/101?")));
+
+  const retargeted = await source.scan([{
+    subject: "org/project/101", goalId: "g_old", revision: found[0].revision,
+  }]);
+  assert.equal(retargeted.observations[0].goalId, "g_build");
+  assert.deepEqual(retargeted.absent, []);
+
+  const settled = await source.scan([{
+    subject: "org/project/101",
+    goalId: "g_build",
+    revision: found[0].revision,
+  }]);
+  assert.deepEqual(settled, { observations: [], absent: ["org/project/101"] });
+});
+
+test("ADO discovery keeps an undelivered terminal build", async () => {
+  const source = adoBuildDiscovery({
+    definitions: ["org/project/77"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      if (String(url).includes("builds?")) return response({ value: [] });
+      return response({
+        id: 101,
+        definition: { id: 77 },
+        tags: ["herdr-goal=g_build"],
+        sourceVersion: "abc",
+        status: "completed",
+        result: "succeeded",
+        finishTime: "2026-09-01T00:01:00Z",
+      });
+    },
+  });
+  const first = await source.scan([{ subject: "org/project/101", goalId: "g_build", revision: "old" }]);
+  const pending = await source.scan([{
+    subject: "org/project/101",
+    goalId: "g_build",
+    revision: first.observations[0].revision,
+    pending: {
+      goalId: "g_build",
+      revision: first.observations[0].revision,
+      payload: first.observations[0].payload,
+    },
+  }]);
+  assert.equal(pending.observations.length, 1);
+  assert.deepEqual(pending.absent, []);
 });
 
 test("ADO discovery forgets a retained build without hiding valid recent observations", async () => {

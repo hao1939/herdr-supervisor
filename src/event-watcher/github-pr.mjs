@@ -79,6 +79,8 @@ export function githubPullRequestDiscovery({
       const pullsBySubject = new Map();
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
+      const knownBySubject = new Map(known.map((resource) => [resource.subject, resource]));
+      const recentSubjects = new Set();
       for (const { owner, repository } of scopes) {
         const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`;
         const pulls = await json(
@@ -88,7 +90,11 @@ export function githubPullRequestDiscovery({
           "GitHub pull request discovery",
         );
         if (!Array.isArray(pulls)) throw new Error("GitHub pull request discovery returned an invalid list");
-        for (const pull of pulls) pullsBySubject.set(`${owner}/${repository}#${pull.number}`, pull);
+        for (const pull of pulls) {
+          const subject = `${owner}/${repository}#${pull.number}`;
+          pullsBySubject.set(subject, pull);
+          recentSubjects.add(subject);
+        }
       }
       for (const resource of remembered) {
         if (pullsBySubject.has(resource.subject)) continue;
@@ -143,10 +149,18 @@ export function githubPullRequestDiscovery({
           checks,
           statuses,
         };
+        const revision = hash(stable);
+        const knownResource = knownBySubject.get(subject);
+        if (pull.state !== "open" && !recentSubjects.has(subject) && knownResource
+          && knownResource.goalId === goalId && !knownResource.pending
+          && knownResource.revision === revision) {
+          absent.push(subject);
+          continue;
+        }
         observations.push({
           subject,
           goalId,
-          revision: hash(stable),
+          revision,
           payload: {
             head: stable.head,
             state: stable.state,

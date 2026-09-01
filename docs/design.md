@@ -457,8 +457,11 @@ One shared watcher replaces per-goal registration. Its public contract is only:
 
 There is no register, renew, unregister, predicate, or provider workflow in a
 goal. The watcher keeps a bounded revision checkpoint so unchanged reads stay
-quiet. A short per-goal action boundary prevents a notification from crossing
-goal acceptance or an explicit stop. These are safety details, not additional
+quiet. After it delivers a terminal revision, provider discovery naturally
+forgets that finished resource once it leaves the provider's active or recent
+window; standing goals therefore do not retain every historical PR and build.
+A short per-goal action boundary prevents a notification from crossing goal
+acceptance or an explicit stop. These are safety details, not additional
 product concepts.
 
 The watcher detects change; it does not interpret it. It computes a compact

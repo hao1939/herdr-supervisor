@@ -315,9 +315,12 @@ It does not persist:
 
 Entries are removed when canonical goal authority says the goal is no longer
 active, provider authority reports the resource absent, or its provider scope is
-removed. At the size bound, new discoveries are deferred with one coalesced
-diagnostic. This keeps resource lifetime exact without a registration cleanup
-protocol.
+removed. A remembered pull request or build outside normal active or recent
+discovery is also absent after its terminal revision has been delivered. This
+keeps standing goals from retaining finished resources forever while preserving
+the final wake and restart retry. At the size bound, new discoveries are
+deferred with one coalesced diagnostic. This keeps resource lifetime exact
+without a registration cleanup protocol.
 
 Provider schedules, open connections, and retry timers are disposable. On
 restart the daemon reloads the checkpoint, rescans configured scopes, and
