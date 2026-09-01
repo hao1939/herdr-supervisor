@@ -13,6 +13,12 @@ import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
 
+// Default no-op for renamePane so tests that don't care about display
+// labels are not affected by reconcileWorkerLabels during session_start.
+const originalRenamePane = HerdrClient.prototype.renamePane;
+HerdrClient.prototype.renamePane = async function () {};
+test.after(() => { HerdrClient.prototype.renamePane = originalRenamePane; });
+
 const worker = {
   paneId: "w1:p2",
   terminalId: "term_test",
@@ -2717,6 +2723,7 @@ test("an external revision change wakes the exact goal while unchanged polls sta
     panes: [focused, unrelated].map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: workerText, truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
     if (message === "/goal resume") resumed = true;
   });
@@ -3472,6 +3479,7 @@ test("a slow failing provider stays single-flight while the bounded review still
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The worker is waiting for PR checks.", truncated: false } }));
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
 
   const pi = fakePi({ reviewMs: "1000", externalWatchMs: "1000" });
   herdrSupervisor(pi);
