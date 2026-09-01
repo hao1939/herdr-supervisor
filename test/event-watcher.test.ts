@@ -980,6 +980,34 @@ test("ADO pull request discovery keeps repository scope bounded", () => {
   );
 });
 
+test("ADO pull request discovery refuses a partial policy revision", async () => {
+  const source = adoPullRequestDiscovery({
+    repositories: ["org/project/repo"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("/threads?")) return response({ count: 0, value: [] });
+      if (text.includes("/policy/evaluations?")) return response({
+        count: 100,
+        value: Array.from({ length: 100 }, (_, index) => ({
+          evaluationId: `evaluation-${index}`,
+          configuration: { id: index },
+          status: "approved",
+        })),
+      });
+      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+        pullRequestId: 42,
+        description: "## Supervision\n- Goal ID: g_pr",
+        status: "active",
+        repository: { project: { id: "project-id" } },
+      }] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  await assert.rejects(source.scan(), /policies reached their 100-evaluation limit/);
+});
+
 test("ADO discovery keeps configured pipeline scope bounded", () => {
   assert.throws(
     () => adoBuildDiscovery({

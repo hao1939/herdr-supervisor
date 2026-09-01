@@ -8,6 +8,7 @@ const MAX_ACTIVE_PULLS = 100;
 const MAX_ANNOTATED_PULLS = 20;
 const MAX_REMEMBERED_REFRESH = 10;
 const MAX_EVIDENCE_ITEMS = 25;
+const MAX_POLICIES = 100;
 
 function parseRepository(value) {
   const match = /^([^/]+)\/([^/]+)\/([^/]+)$/.exec(value);
@@ -212,16 +213,17 @@ export function adoPullRequestDiscovery({
           ),
           json(
             fetchImpl,
-            `${baseUrl(scope)}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&api-version=7.1-preview.1`,
+            `${baseUrl(scope)}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&$top=${MAX_POLICIES}&api-version=7.1-preview.1`,
             auth,
             "ADO pull request policies",
           ),
         ]);
-        const current = pullRevision(
-          pull,
-          completeCollection(threadResult, "ADO pull request threads"),
-          completeCollection(policyResult, "ADO pull request policies"),
-        );
+        const threads = completeCollection(threadResult, "ADO pull request threads");
+        const policies = completeCollection(policyResult, "ADO pull request policies");
+        if (policies.length >= MAX_POLICIES) {
+          throw new Error(`ADO pull request policies reached their ${MAX_POLICIES}-evaluation limit; refusing a partial revision`);
+        }
+        const current = pullRevision(pull, threads, policies);
         observations.push({ subject, goalId, ...current });
       }
       return { observations, absent: [...new Set(absent)] };
