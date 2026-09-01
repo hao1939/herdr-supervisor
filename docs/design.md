@@ -193,7 +193,9 @@ In plain language:
    a new kind of work, deliverable, external effect, or authority. Otherwise
    the model proceeds without ceremony. Research and synthesis, building and
    experimentation, and external operation are distinct work modes rather than
-   interchangeable defaults.
+   interchangeable defaults. A finite deliverable and a standing loop are also
+   distinct horizons; if the stopping condition is materially unclear, the
+   model recommends one and asks before starting.
 4. Only then does the model compare the candidate with existing goals. It
    reuses an equivalent outcome, updates a true refinement, or defines one new
    distinct goal.
@@ -212,6 +214,11 @@ continuity horizon, expected artifacts, and acceptance evidence must be
 substantially the same. Sharing a topic, source, tool, repository, or worker
 capability does not make two outcomes equivalent, and a constraint inside one
 goal never becomes an admission rule for other goals.
+
+A new distinct goal owns its own duties. Its creation does not authorize
+rewriting a related goal to permit coexistence or adding coordination work to
+that goal. If the new outcome truly depends on changing what another worker
+must do, that expansion requires the human's decision.
 
 The model owns that semantic comparison. Code provides only idempotency: an
 exact replay of every portable contract field reuses the existing goal. It

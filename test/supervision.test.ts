@@ -533,6 +533,14 @@ test("goal formation precedes comparison with existing work", () => {
   assert.match(prompt, /Research and synthesis, building and experimentation, and external operation are materially different work modes/);
   assert.match(prompt, /keep the candidate within the stated mode, present the broader mode as your one question/);
   assert.match(prompt, /do not authorize or start that broader work before the human answers/);
+  assert.match(prompt, /finite deliverable and a standing loop are materially different continuity horizons/);
+  assert.match(prompt, /request reasonably supports either and does not make the stopping condition clear/);
+  assert.match(prompt, /recommend one horizon and ask before starting instead of silently choosing one/);
+  assert.match(prompt, /does not authorize changing a related goal to permit coexistence or add coordination duties/);
+  assert.match(prompt, /Put the new outcome's duties in its own contract/);
+  assert.match(prompt, /Update another goal only when the human has changed that goal/);
+  assert.match(prompt, /new work from that other goal's worker/);
+  assert.match(prompt, /make that expansion the material question/);
   assert.match(prompt, /that authority survives any necessary clarification/);
   assert.match(prompt, /act without asking for start permission again/);
   assert.doesNotMatch(prompt, /no existing goal fits/);
