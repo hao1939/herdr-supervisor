@@ -141,6 +141,63 @@ test("optional supervisor tool fields accept null without placeholder values", (
     evidence: null,
     review_at: null,
   }), true);
+  assert.equal(Compile(pi.tools.get("supervisor_status").parameters).Check({
+    pane_id: null,
+    goal_id: "g_saved",
+  }), true);
+});
+
+test("status exposes unstarted goals without filesystem tools or live worker state", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-unstarted-status-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Recover the saved Scout goals.",
+    context: ["The earlier bootstrap goal is obsolete."],
+    acceptance: ["Both original goals have workers."],
+    constraints: ["Do not create duplicate goals."],
+  }, root, { goalId: "g_recovery" });
+  await installSupervisorGoal({
+    objective: "Prepare the Scout integration branch.",
+    acceptance: ["The branch is ready for review."],
+  }, root, { goalId: "g_integration" });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    throw new Error("Herdr is unavailable");
+  });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const summary = await pi.tools.get("supervisor_status").execute("summary", {
+    pane_id: null,
+    goal_id: null,
+  });
+  assert.equal(summary.isError, false);
+  assert.match(summary.content[0].text, /Saved goals without workers:/);
+  assert.match(summary.content[0].text, /Goal g_recovery · unstarted/);
+  assert.match(summary.content[0].text, /Recover the saved Scout goals/);
+  assert.match(summary.content[0].text, /Goal g_integration · unstarted/);
+  assert.doesNotMatch(summary.content[0].text, /earlier bootstrap goal is obsolete/);
+
+  const detail = await pi.tools.get("supervisor_status").execute("detail", {
+    pane_id: null,
+    goal_id: "g_recovery",
+  });
+  assert.equal(detail.isError, false);
+  assert.match(detail.content[0].text, /Context: The earlier bootstrap goal is obsolete/);
+  assert.match(detail.content[0].text, /Accept when: Both original goals have workers/);
+  assert.match(detail.content[0].text, /Constraints: Do not create duplicate goals/);
+  assert.match(detail.content[0].text, /Worker: not started/);
+
+  const ambiguous = await pi.tools.get("supervisor_status").execute("ambiguous", {
+    pane_id: "w1:p2",
+    goal_id: "g_recovery",
+  });
+  assert.equal(ambiguous.isError, true);
+  assert.match(ambiguous.content[0].text, /either pane_id or goal_id/);
 });
 
 test("pull request traceability never publishes a path-backed session locator", () => {

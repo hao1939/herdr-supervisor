@@ -263,6 +263,13 @@ goal ID to the same start operation used for a new goal. Code loads that contrac
 and creates its worker; the model does not restate the contract or create a
 sibling merely because the goal has no worker yet.
 
+The supervisor's ordinary status view lists the exact IDs and objectives of
+active and unstarted goals. Reading one exact goal returns its complete contract,
+including context, acceptance criteria, and constraints. This is supervised
+goal data the model already owns, not general filesystem access. The summary
+stays compact while the exact read gives the model enough information to compare,
+resume, or discuss saved goals without asking the human to paste them again.
+
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding and its optional display label, concise progress, retained evidence, observation cursor, last
 decision, optional wait, and optional terminal result. It does not copy live

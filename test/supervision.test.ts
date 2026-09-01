@@ -341,7 +341,9 @@ test("a human question does not promise recovery for an unsupported missing sess
 test("the all-worker view stays bounded while one-worker detail stays complete", () => {
   const current = binding({
     goal: `Review the system ${"goal detail ".repeat(80)}`,
+    context: ["The complete stable context remains available in detail."],
     acceptance: ["The complete acceptance evidence remains available in detail."],
+    constraints: ["The complete lasting constraint remains available in detail."],
     progress: `Current finding ${"progress detail ".repeat(80)}`,
   });
   const live = liveWorker(current, snapshot());
@@ -351,8 +353,12 @@ test("the all-worker view stays bounded while one-worker detail stays complete",
   assert.ok(summary.length < 1000);
   assert.match(summary, /Review the system goal detail/);
   assert.doesNotMatch(summary, /Accept when:/);
+  assert.doesNotMatch(summary, /Context:/);
+  assert.doesNotMatch(summary, /Constraints:/);
   assert.match(summary, /…/);
+  assert.match(detail, /Context: The complete stable context remains available in detail/);
   assert.match(detail, /Accept when: The complete acceptance evidence remains available in detail/);
+  assert.match(detail, /Constraints: The complete lasting constraint remains available in detail/);
   assert.ok(detail.length > summary.length);
 });
 
