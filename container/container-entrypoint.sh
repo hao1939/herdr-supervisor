@@ -7,4 +7,28 @@ extension_dir="${pi_agent_dir}/extensions"
 mkdir -p "$extension_dir"
 ln -sfn /opt/herdr-supervisor/container/pi-extension.ts "$extension_dir/herdr-supervisor.ts"
 
-exec "$@"
+watcher_pid=""
+if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}" ]; then
+  echo "Starting the shared provider metadata watcher." >&2
+  node /opt/herdr-supervisor/src/event-watcher/daemon.mjs &
+  watcher_pid=$!
+fi
+
+"$@" &
+main_pid=$!
+
+trap '
+  kill "$main_pid" 2>/dev/null || true
+  if [ -n "$watcher_pid" ]; then
+    kill "$watcher_pid" 2>/dev/null || true
+  fi
+' INT TERM
+
+set +e
+wait "$main_pid"
+status=$?
+if [ -n "$watcher_pid" ]; then
+  kill "$watcher_pid" 2>/dev/null || true
+  wait "$watcher_pid" 2>/dev/null || true
+fi
+exit "$status"

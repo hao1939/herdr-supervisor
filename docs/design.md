@@ -118,18 +118,15 @@ flowchart LR
     A[Worker state changed] --> Q[Review signal]
     B[Review deadline] --> Q
     C[Selected peer goal changed] --> Q
-    D[Compatibility watch changed] --> Q
-    M[Metadata daemon found a change] --> W[Current worker rereads it]
+    D[Provider metadata changed] --> W[Current worker wakes and rereads]
     W --> A
     Q --> R[Focused review]
     E[Bounded global check] --> G[Compact global review]
     G -. selected goals .-> Q
 ```
 
-The supervisor sleeps otherwise. It never polls a worker.
-`Q` is the current supervisor path. The metadata-daemon branch is the PoC path:
-it wakes the worker, and only the worker's later Herdr state change reaches `Q`.
-The daemon does not write supervisor review state directly.
+The supervisor sleeps otherwise. It never polls a worker or provider. One
+shared metadata watcher performs bounded provider reads without model turns.
 
 ### One review, one decision
 
@@ -250,41 +247,22 @@ sibling merely because the goal has no worker yet.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
 binding, concise progress, retained evidence, observation cursor, last
-decision, optional wait, optional unresolved external change, and optional
-terminal result. It does not copy live worker status; that always comes from
-Herdr.
-
-Polling schedules remain disposable memory. If the compatibility in-process
-watch sees a PR or build change, only that unresolved fact is saved in
-`current.json`. It survives restart and
-cannot be cleared by merely sending a prompt or receiving a worker reply. After
-the reread delivery attempt, the supervisor saves the current transcript cursor
-or terminal fingerprint. A later native final response, or a later settled
-Herdr transition with a changed fixed terminal fingerprint, establishes only a
-fresh result candidate. The model decides whether that result actually proves
-the authoritative reread and acknowledges the exact pending revision in its
-ordinary `leave`, `steer`, `ask_human`, or `accept` decision. Code then clears
-the matching revision atomically with that decision. This keeps semantic
-judgment in the model while code rejects stale revisions and old output. If the
-post-delivery observation itself fails, the supervisor saves a fail-closed
-boundary that cannot produce a candidate; a later bounded review may steer the
-same worker again and replace it with a real boundary.
+decision, optional wait, and optional terminal result. It does not copy live
+worker or provider status; those facts stay with Herdr and the provider.
 
 Tool arguments keep the same boundary explicit. An optional value that does not
 apply is `null`; the model never invents a placeholder identity, revision,
 watch, wait, or deadline merely to fill a field. Code validates real values and
 executes the decision, while `null` carries no semantic claim.
 
-A decision that acknowledges an external revision briefly holds its exact subject:
-it drains any in-flight read and prevents another one from starting until the
-state change commits. An unrelated slow provider does not delay it. The final
-state write also compares the exact external revision, so polling cannot race
-with steering, clearing, or acceptance and lose a newer change.
-
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside
 `steer`. This keeps restart compatibility without restoring a fifth model
 decision.
+
+The v1 reader also accepts the retired `externalChange` field. The next
+ordinary decision removes it. New code never writes it; external revision state
+belongs only to the shared watcher checkpoint.
 
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
@@ -316,19 +294,12 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; the PoC metadata observer may wake the current worker when a PR or
-build changes. The worker rereads provider authority, and its resulting Herdr
-state change wakes the supervisor's normal focused review. There is no second
-review lifecycle, reviewer state machine, attempt budget, or goal schema. A
-separate review goal exists only when review itself is the human's distinct
-durable outcome, such as an ongoing project-wide review program—not merely
-because one implementation reached a review step.
-
-The PoC GitHub adapter notices head, state, draft state, PR update time, checks,
-and commit-status changes. Review-only and mergeability-only changes wait for
-the ordinary bounded review, where the worker rereads the current PR. That
-fallback preserves correctness without making the watcher another review
-system.
+findings; the metadata watcher may wake the current worker when a PR or build
+changes. The worker rereads provider authority, and its ordinary Herdr event
+wakes the supervisor. There is no second review lifecycle, reviewer state
+machine, attempt budget, or goal schema. A separate review goal exists only when
+review itself is the human's distinct durable outcome—not merely because one
+implementation reached a review step.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -369,8 +340,8 @@ promise to reconsider, not permission to forget the goal:
   when a peer review proves that condition materially changed, the model
   selects the exact affected waits for early review, and a terminal peer wakes
   all remaining dependents after either worker is relocated;
-- a wait on a GitHub PR or ADO build relies on its durable goal metadata for an
-  early wake, with the bounded goal review as the safety net;
+- a wait on a supported GitHub PR or ADO build relies on its durable goal
+  metadata for an early wake;
 - every wait has a bounded recheck;
 - the model chooses an evidence-appropriate safety time; a selected peer effect
   or external update still wakes the goal earlier, avoiding repeated short
@@ -383,34 +354,34 @@ unrelated useful work can continue.
 
 ### External updates
 
-External updates are discovered from provider metadata, not worker-owned watch
-registrations. When a worker creates a pull request or queues a build, that
-resource carries only its durable goal ID. One shared daemon scans configured
-provider scopes and remembers a bounded latest revision for each annotated
-resource. It resolves the goal's current worker only when a changed revision
-needs delivery.
+One shared daemon replaces per-goal watch registration. Its design has six
+small contracts:
 
-The daemon detects change; it does not interpret it. It computes one compact
-revision identity from provider authority: GitHub PR head, state, draft state,
-update time, checks, and commit statuses; or Azure DevOps build status, ID,
-result, source version, and finish time. An unchanged identity costs no model
-turn. A changed identity wakes the worker, which rereads provider authority and
-decides what the change means for its goal.
+1. **Scope:** the deployment lists the trusted GitHub repositories and ADO
+   pipeline definitions it wants observed.
+2. **Metadata:** a created PR or build carries only `herdr-goal=<goal-id>` (the
+   GitHub supervision block expresses the same value). There is no register,
+   renew, or unregister operation.
+3. **Adapter:** each provider adapter returns one normalized resource identity,
+   current revision, goal ID, and bounded payload.
+4. **Checkpoint:** the watcher atomically remembers only the latest revision
+   and optional undelivered revision for each bounded resource.
+5. **Delivery:** the goal ID is resolved through current canonical goal and
+   Herdr state. The current exact worker receives a short wake hint and rereads
+   provider authority; a saved pane is never a routing authority.
+6. **Failure:** observation or delivery failures produce one bounded supervisor
+   diagnostic. The ordinary bounded goal review remains the safety net for a
+   missed or unsupported provider signal.
 
-The metadata is attached once per created resource. Every later revision of
-that resource needs no renewal. A rerun with a new build ID receives the same
-goal metadata through its normal creation path. Goal completion needs no
-unregister operation; later delivery is ignored. A live remembered resource is
-never evicted: only authoritative absence or configured-scope removal deletes
-its checkpoint entry.
-
-The current in-process explicit watcher remains a compatibility path until the
-shared metadata-discovery daemon passes its documented production gates. It is
-not the target lifecycle and must not grow new registration semantics. See
-`docs/proposals/shared-event-watcher.md`.
+The watcher detects change; it does not interpret it. It computes a compact
+revision from authoritative provider fields. An unchanged revision costs no
+model turn. A changed revision wakes the worker directly, and its normal Herdr
+state change enters the existing supervisor review loop.
 
 Deciding what a review comment, failed check, or merged branch means for the
-goal belongs to the worker, not the supervisor and not the daemon.
+goal belongs to the worker, not the supervisor or watcher. See
+`docs/proposals/shared-event-watcher.md` for the exact provider contract and
+live evidence.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
@@ -513,6 +484,8 @@ events and internal metadata do not compete with the useful outcome.
 ## Implementation boundary
 
 - `extension.ts` wires Pi tools, Herdr events, timers, and validated effects.
+- `event-watcher/` owns metadata discovery, bounded revision state, provider
+  adapters, and goal-addressed wake delivery outside the Pi process.
 - `prompts.ts` contains readable model and worker policy.
 - `types.ts` distinguishes durable goal bindings from transient runtime state.
 - `identity.ts` owns exact native-session equality shared across boundaries.

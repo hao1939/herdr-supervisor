@@ -141,21 +141,24 @@ function storeObservation(state, item, maxResources) {
   return { stored: true, changed: true };
 }
 
-export class DiscoveredEventWatcher {
+export class MetadataEventWatcher {
   constructor({
     statePath,
     sources,
     deliver,
+    activeGoals,
     diagnose = (diagnostic) => console.error(diagnostic.message),
     now = () => new Date(),
     maxResources = DEFAULT_MAX_RESOURCES,
   }) {
-    if (!statePath || !sources || typeof deliver !== "function") {
-      throw new Error("statePath, sources, and deliver are required");
+    if (!statePath || !sources || typeof deliver !== "function"
+      || (activeGoals !== undefined && typeof activeGoals !== "function")) {
+      throw new Error("statePath, sources, and deliver are required; activeGoals must be a function");
     }
     this.statePath = statePath;
     this.sources = sources;
     this.deliver = deliver;
+    this.activeGoals = activeGoals;
     this.diagnose = diagnose;
     this.now = now;
     this.maxResources = maxResources;
@@ -283,15 +286,35 @@ export class DiscoveredEventWatcher {
   async run() {
     await this.ready;
     const scan = await this.scan();
-    const observed = new Set(scan.observations.map((item) => keyFor(item.source, item.subject)));
+    const goalIds = [...new Set([
+      ...Object.values(this.state.resources).map((resource) => resource.goalId),
+      ...scan.observations.map((item) => item.goalId),
+    ])];
+    let active;
+    try {
+      active = this.activeGoals ? await this.activeGoals() : new Set(goalIds);
+      if (!(active instanceof Set) || [...active].some((goalId) => typeof goalId !== "string")) {
+        throw new Error("active goal resolver returned an invalid set");
+      }
+      this.reported.delete("goals");
+    } catch (error) {
+      await this.report("goals", {
+        kind: "goals",
+        message: `could not resolve active goal ownership: ${error instanceof Error ? error.message : error}`,
+      });
+      return;
+    }
+    const observations = scan.observations.filter((item) => active.has(item.goalId));
+    const observed = new Set(observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
     let capacityFreed = false;
     for (const [key, resource] of Object.entries(next.resources)) {
-      if (Object.hasOwn(this.sources, resource.source)) continue;
-      delete next.resources[key];
-      changed = true;
-      capacityFreed = true;
+      if (!Object.hasOwn(this.sources, resource.source) || !active.has(resource.goalId)) {
+        delete next.resources[key];
+        changed = true;
+        capacityFreed = true;
+      }
     }
     for (const key of scan.absent) {
       if (!next.resources[key]) continue;
@@ -301,7 +324,7 @@ export class DiscoveredEventWatcher {
     }
     const known = [];
     const discovered = [];
-    for (const item of scan.observations) {
+    for (const item of observations) {
       const key = keyFor(item.source, item.subject);
       (next.resources[key] ? known : discovered).push(item);
     }
@@ -329,7 +352,7 @@ export class DiscoveredEventWatcher {
       .join(", ");
     await this.report("capacity", {
       kind: "capacity",
-      message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a remembered resource is authoritatively absent or capacity is increased: ${examples}`,
+      message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a goal completes, a remembered resource is authoritatively absent, or capacity is increased: ${examples}`,
     });
   }
 

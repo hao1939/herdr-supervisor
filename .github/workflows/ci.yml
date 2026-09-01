@@ -61,6 +61,10 @@ jobs:
           docker run --rm herdr-supervisor:ci \
             sh -c 'for f in extension goal-store goal-registry herdr-client observation review-turn supervision global-review; do test -f /opt/herdr-supervisor/src/$f.ts || exit 1; done'
 
+          # Verify the replacement metadata watcher is packaged
+          docker run --rm herdr-supervisor:ci \
+            test -f /opt/herdr-supervisor/src/event-watcher/daemon.mjs
+
           # Verify the Pi and Codex shims are executable
           docker run --rm herdr-supervisor:ci \
             sh -c 'test -x /usr/local/bin/pi && test -x /usr/local/bin/codex'

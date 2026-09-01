@@ -1,6 +1,6 @@
-import { loadSupervisorGoals } from "../../src/goal-registry.ts";
-import { HerdrClient } from "../../src/herdr-client.ts";
-import { identityMismatch } from "../../src/supervision.ts";
+import { loadSupervisorGoals } from "../goal-registry.ts";
+import { HerdrClient } from "../herdr-client.ts";
+import { identityMismatch } from "../supervision.ts";
 
 export function herdrRequest(method, params = {}, {
   socketPath,
@@ -8,6 +8,14 @@ export function herdrRequest(method, params = {}, {
 } = {}) {
   const client = new HerdrClient({ ...(socketPath ? { socketPath } : {}), timeoutMs });
   return client.request(method, params, timeoutMs);
+}
+
+export async function canonicalActiveGoals(goalsRoot) {
+  const goals = await loadSupervisorGoals(goalsRoot);
+  if (goals.errors.length) {
+    throw new Error(`canonical goal state is unreadable for ${goals.errors.map((goal) => goal.goalId).join(", ")}`);
+  }
+  return new Set(goals.active.map((goal) => goal.goalId));
 }
 
 export function herdrGoalDelivery({

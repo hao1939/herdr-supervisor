@@ -3,9 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { adoBuildDiscovery } from "./ado-build.mjs";
-import { DiscoveredEventWatcher } from "./core.mjs";
+import { MetadataEventWatcher } from "./core.mjs";
 import { githubPullRequestDiscovery } from "./github-pr.mjs";
-import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
+import { canonicalActiveGoals, herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -23,15 +23,16 @@ if (!hasSources) {
   throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS");
 }
 
-const stateHome = process.env.EVENT_WATCH_HOME || join(homedir(), ".local", "state", "herdr-supervisor");
+const stateHome = process.env.HERDR_WATCH_STATE_HOME || join(homedir(), ".local", "state", "herdr-supervisor");
 const intervalMs = Number(process.env.HERDR_WATCH_INTERVAL_MS || 60_000);
 if (!Number.isFinite(intervalMs) || intervalMs < 10_000 || intervalMs > MAX_TIMER_DELAY_MS) {
   throw new Error(`HERDR_WATCH_INTERVAL_MS must be between 10000 and ${MAX_TIMER_DELAY_MS}`);
 }
-const watcher = new DiscoveredEventWatcher({
+const watcher = new MetadataEventWatcher({
   statePath: join(stateHome, "external-events.json"),
   sources,
   deliver: herdrGoalDelivery(),
+  activeGoals: canonicalActiveGoals,
   diagnose: herdrSupervisorDiagnostic(),
 });
 

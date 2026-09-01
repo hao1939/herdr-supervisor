@@ -18,14 +18,6 @@ const workerExecutionBoundary = [
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
 ].join(" ");
 
-const externalWatchPolicy = [
-  "External watches",
-  "When one exact GitHub PR or ADO build can resume the goal, add external_watch to supervisor_leave.",
-  "Choose its exact source and subject semantically; never infer it with keyword routing.",
-  "An external-watch change is only a wake hint. Have the same worker reread the authoritative PR or build before deciding whether to continue, wait again, or finish.",
-  "When the review trigger says an external watch changed, steer that same worker to reread authority; do not renew the external wait before the worker has interpreted the change.",
-].join(" ");
-
 export const workerInitializationPrompt =
   "Initialize this worker session only. Do not inspect or change files. Wait for the goal.";
 
@@ -204,8 +196,8 @@ const supervisorPolicy = [
     "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
-    "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; the supervisor's watch and bounded review will resume the same native Goal.",
-    "Supply review_at when current evidence justifies a specific safety-check time. A peer review can select a materially affected wait and an external watch wakes on change, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
+    "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; provider metadata notifications and bounded review will resume the same native Goal.",
+    "Supply review_at when current evidence justifies a specific safety-check time. A peer review can select a materially affected wait and an external notification can wake the worker earlier, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",
     "A human question also receives bounded reconsideration and does not prevent unrelated useful work.",
   ],
@@ -239,5 +231,5 @@ const globalReviewPolicy =
   "A global supervision review is a compact, low-frequency health check across goals. In that turn, call supervisor_global_result exactly once. Identify relationships and affected existing goals, but never inspect logs, steer workers, create goals, or make focused decisions.";
 
 export function supervisorSystemPrompt(basePrompt: string) {
-  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}\n\n${externalWatchPolicy}`;
+  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}`;
 }

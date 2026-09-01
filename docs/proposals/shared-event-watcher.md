@@ -1,6 +1,6 @@
 # Shared external event watcher
 
-**Status:** Revised PoC design
+**Status:** Implemented replacement for per-goal external watches
 **Reviewed:** 2026-09-01
 
 ## Decision
@@ -39,8 +39,9 @@ configured provider adapter scans resources
 observation or delivery failure -> supervisor diagnostic
 ```
 
-This is a shared observation optimization. It does not replace native Codex
-Goals, Herdr runtime events, supervisor reviews, or bounded health checks.
+This replaces the former in-process, model-registered watcher. It does not
+replace native Codex Goals, Herdr runtime events, supervisor reviews, or
+bounded health checks.
 
 ## Why metadata instead of subscriptions
 
@@ -133,13 +134,14 @@ delivery resolves current canonical goal state. Only an intentional move to a
 different durable goal changes ownership metadata.
 
 There is no matching unregister operation. The metadata remains useful across
-every later revision of that resource. Removing metadata merely makes the
-adapter report that resource absent and the watcher forgets its cache entry;
-provider retention and a removed configured scope work the same way. Completing
-a goal makes later delivery irrelevant. A size bound never evicts another live
-resource: the daemon preserves existing exact rereads and visibly defers a new
-discovery until authority removes an entry or capacity is increased. None of
-those cases needs a worker-owned lifecycle.
+every later revision while its goal is active. Each scan admits only canonical
+active goal IDs; completing or removing a goal therefore makes the watcher
+forget its resources without changing provider metadata. Removing metadata,
+removing the provider resource, or removing its configured scope has the same
+effect. A size bound never evicts another active resource: the daemon preserves
+existing exact rereads and visibly defers a new discovery until authority frees
+space or capacity is increased. None of those cases needs a worker-owned
+lifecycle.
 
 ## Discovery
 
@@ -163,7 +165,7 @@ after a restart it simply starts again from the beginning.
 Recently closed or completed resources stay in the discovery window long enough
 to observe their final transition.
 
-Adapters own provider syntax and pagination. The PoC GitHub adapter reads one
+Adapters own provider syntax and pagination. The GitHub adapter reads one
 maximum-size page of checks and statuses. If GitHub reports more items than
 that page contains, the scan fails visibly instead of hashing partial state.
 Full pagination can be added if real usage justifies its request and complexity
@@ -194,7 +196,7 @@ A revision includes only fields whose changes may matter to a worker. Examples:
 - PR head, state, draft state, update time, checks, and statuses;
 - build source version, status, result, and finish time.
 
-The PoC GitHub adapter derives its revision from the listed pull-request
+The GitHub adapter derives its revision from the listed pull-request
 metadata plus the head commit's checks and statuses. It does not read reviews
 or mergeability. GitHub does not reliably change the parent pull request's
 update time for review-only activity, and mergeability is absent from the list
@@ -235,18 +237,17 @@ and sends it a bounded diagnostic. It persists no supervisor destination. If
 the supervisor is missing or ambiguous, the diagnostic fails closed, remains
 visible in service stderr, and is retried on the next failing scan.
 
-Replacing the current watcher still has several production gates:
+Herdr currently verifies the exact native session and prompts its pane in
+separate requests. The watcher uses the same fail-closed identity contract as
+the supervisor immediately before delivery. A later Herdr session-addressed
+prompt can tighten that boundary without changing metadata, adapters,
+checkpoint state, or worker behavior.
 
-- canonical activity, the final exact-worker check, and Herdr prompts are
-  separate requests, so default enablement needs a cross-process-safe active
-  goal/revision precondition plus a session-addressed or atomic prompt boundary;
-- an in-progress provider scan needs bounded cancellation during shutdown;
-- GitHub discovery needs an authenticated request budget and provider-directed
-  backoff before it is enabled continuously.
-
-These are delivery and observation hardening requirements, not reasons to add
-watch registration. The PoC stays draft until live frequency and deployment
-scale justify the smallest fixes.
+Provider reads have bounded request and process timeouts. GitHub discovery is
+bounded to 20 annotated pull requests per scan and refuses truncated check or
+status evidence. Deployments should use an authenticated token and an interval
+appropriate for their configured scope. Provider failures are diagnosed and
+the bounded goal review still guarantees eventual reconsideration.
 
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions
@@ -259,11 +260,11 @@ remembered revision from being delivered after the provider may already have
 advanced.
 
 When the checkpoint is full and a new resource appears, the daemon still retries
-currently observed pending deliveries, preserves every remembered resource, and
-sends one coalesced capacity diagnostic naming the deferred current resources.
-An authoritative absence or configured-scope removal frees a slot naturally.
-The daemon never silently exceeds the bound or drops the only address for a
-later exact reread.
+currently observed pending deliveries, preserves every active remembered
+resource, and sends one coalesced capacity diagnostic naming the deferred
+current resources. Goal completion, authoritative absence, or configured-scope
+removal frees a slot naturally. The daemon never silently exceeds the bound or
+drops the only address for a later exact reread.
 
 ## Minimal state
 
@@ -283,10 +284,11 @@ It does not persist:
 - task, attempt, review, or workflow state;
 - provider credentials.
 
-Entries are removed only when provider authority reports the resource absent or
-its provider scope is removed. At the size bound, new discoveries are deferred
-with one coalesced diagnostic. This keeps resource lifetime exact without a
-registration cleanup protocol.
+Entries are removed when canonical goal authority says the goal is no longer
+active, provider authority reports the resource absent, or its provider scope is
+removed. At the size bound, new discoveries are deferred with one coalesced
+diagnostic. This keeps resource lifetime exact without a registration cleanup
+protocol.
 
 Provider schedules, open connections, and retry timers are disposable. On
 restart the daemon reloads the checkpoint, rescans configured scopes, and
@@ -295,10 +297,11 @@ environment.
 
 ## Process placement
 
-Run one daemon per trusted Herdr environment. The container or service manager
-owns its lifetime. The watcher is not hosted by an interactive worker and does
-not require a worker-facing socket because workers have no register, renew,
-unregister, list, or read operations.
+Run one daemon per trusted Herdr environment. The container entrypoint starts it
+when at least one provider scope is configured and stops it with the Herdr
+process. Local deployments can run `npm run watch`. The watcher is not hosted
+by an interactive worker and does not require a worker-facing socket because
+workers have no register, renew, unregister, list, or read operations.
 
 Herdr Supervisor supplies the goal resolver and wake adapter. Provider adapters
 remain small modules that can later consume webhooks or service hooks instead
@@ -338,7 +341,7 @@ The MLVM experiment now proves the metadata path end to end for goal
   proof event-driven.
 - The shared daemon remained healthy and retained all three latest revisions in
   its bounded checkpoint.
-- The current PoC runtime was then deployed over the same checkpoint. A direct
+- The current watcher runtime was then deployed over the same checkpoint. A direct
   container start initially lacked the user-local Azure CLI on `PATH`; the
   existing `AZURE_CLI` environment setting fixed that deployment boundary
   without adding credentials or watcher state. The resulting provider failure
@@ -351,12 +354,12 @@ The MLVM experiment now proves the metadata path end to end for goal
   readiness checkpoint, and moved to another independent route instead of
   polling. Later unchanged scans left the checkpoint timestamp unchanged.
 
-The metadata lifecycle and live ADO path are proven. The production gates above
-remain open, so this PoC does not replace the current watcher yet.
+The metadata lifecycle and live ADO path are proven. The old per-goal watcher
+has been removed; this is now the only early external-update path.
 
-## PoC acceptance
+## Replacement acceptance
 
-The revised PoC is useful only if it proves all of these with a real goal:
+The replacement is useful only if it proves all of these with a real goal:
 
 1. Creating an annotated PR or build requires no watcher registration.
 2. First discovery wakes the exact current worker once.

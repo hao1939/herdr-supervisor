@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../poc/event-watchd/ado-build.mjs";
-import { DiscoveredEventWatcher } from "../poc/event-watchd/core.mjs";
-import { githubPullRequestDiscovery, supervisionGoal } from "../poc/event-watchd/github-pr.mjs";
-import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../poc/event-watchd/herdr.mjs";
-import { boundedRefreshWindow } from "../poc/event-watchd/refresh-window.mjs";
+import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
+import { MetadataEventWatcher as DiscoveredEventWatcher } from "../src/event-watcher/core.mjs";
+import { githubPullRequestDiscovery, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
+import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
+import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
 import { registerSupervisedGoal } from "../src/goal-registry.ts";
 
 const execFileAsync = promisify(execFile);
@@ -92,12 +92,12 @@ test("watcher daemon rejects an empty source set without changing its checkpoint
     },
   }, null, 2)}\n`;
   await writeFile(statePath, checkpoint);
-  const environment: NodeJS.ProcessEnv = { ...process.env, EVENT_WATCH_HOME: directory };
+  const environment: NodeJS.ProcessEnv = { ...process.env, HERDR_WATCH_STATE_HOME: directory };
   delete environment.HERDR_WATCH_GITHUB_REPOSITORIES;
   delete environment.HERDR_WATCH_ADO_DEFINITIONS;
 
   await assert.rejects(
-    execFileAsync(process.execPath, ["poc/event-watchd/daemon.mjs"], { env: environment }),
+    execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
     /configure HERDR_WATCH_GITHUB_REPOSITORIES or HERDR_WATCH_ADO_DEFINITIONS/,
   );
   assert.equal(await readFile(statePath, "utf8"), checkpoint);
@@ -112,7 +112,7 @@ test("watcher daemon rejects intervals above the Node timer limit", async () => 
   delete environment.HERDR_WATCH_ADO_DEFINITIONS;
 
   await assert.rejects(
-    execFileAsync(process.execPath, ["poc/event-watchd/daemon.mjs"], { env: environment }),
+    execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
     /HERDR_WATCH_INTERVAL_MS must be between 10000 and 2147483647/,
   );
 });
@@ -142,6 +142,71 @@ test("first discovery and every later revision wake the goal without renewal", a
   assert.equal(Object.keys(state.resources).length, 1);
   assert.equal((Object.values(state.resources)[0] as any).revision, "two");
   assert.equal((Object.values(state.resources)[0] as any).pending, undefined);
+});
+
+test("completed goal metadata does not consume watcher capacity", async (t) => {
+  const directory = await temporary(t, "event-watch-completed-goal-");
+  const delivered = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      provider: {
+        async scan() {
+          return {
+            observations: [
+              { subject: "active", goalId: "g_active", revision: "one", payload: {} },
+              { subject: "completed", goalId: "g_completed", revision: "one", payload: {} },
+            ],
+            absent: [],
+          };
+        },
+      },
+    },
+    activeGoals: async (...args) => {
+      assert.equal(args.length, 0, "metadata must not be passed to canonical goal authority");
+      return new Set(["g_active"]);
+    },
+    deliver: async (goalId) => delivered.push(goalId),
+  });
+
+  await watcher.runOnce();
+
+  assert.deepEqual(delivered, ["g_active"]);
+  const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
+  assert.deepEqual(Object.keys(state.resources), ["provider\0active"]);
+});
+
+test("goal ownership failure preserves the current watcher checkpoint", async (t) => {
+  const directory = await temporary(t, "event-watch-goal-authority-");
+  const statePath = join(directory, "state.json");
+  const original = {
+    version: 1,
+    resources: {
+      "provider\0kept": {
+        source: "provider",
+        subject: "kept",
+        goalId: "g_kept",
+        revision: "one",
+        observedAt: "2026-09-01T00:00:00.000Z",
+      },
+    },
+  };
+  await writeFile(statePath, `${JSON.stringify(original, null, 2)}\n`);
+  const diagnostics = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath,
+    sources: {
+      provider: { async scan() { return { observations: [], absent: [] }; } },
+    },
+    activeGoals: async () => { throw new Error("goal store unavailable"); },
+    deliver: async () => assert.fail("delivery must not run without goal authority"),
+    diagnose: async (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  await watcher.runOnce();
+
+  assert.deepEqual(JSON.parse(await readFile(statePath, "utf8")), original);
+  assert.match(diagnostics[0].message, /could not resolve active goal ownership: goal store unavailable/);
 });
 
 test("a failed delivery survives restart and retries from the bounded revision checkpoint", async (t) => {

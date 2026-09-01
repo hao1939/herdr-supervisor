@@ -59,11 +59,15 @@ state at any time.
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
-| `GITHUB_TOKEN` | — | Required for private GitHub PR watches; optional for public PRs to avoid the 60/hour unauthenticated limit. `GH_TOKEN` also works |
-| `AZURE_DEVOPS_EXT_PAT` | — | Required for Azure DevOps build watch (the `az` CLI is not in the image) |
+| `GITHUB_TOKEN` | — | GitHub API token for configured metadata discovery. `GH_TOKEN` also works |
+| `AZURE_DEVOPS_EXT_PAT` | — | Azure DevOps token for configured build discovery (the `az` CLI is not in the image) |
+| `AZURE_CLI` | `az` | Optional Azure CLI executable used when no ADO token is configured |
 | `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
 | `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
-| `HERDR_SUPERVISOR_EXTERNAL_WATCH_MS` | `300000` | Interval for PR and build observations |
+| `HERDR_WATCH_GITHUB_REPOSITORIES` | — | Comma-separated trusted `owner/repository` scopes; enables the shared watcher |
+| `HERDR_WATCH_ADO_DEFINITIONS` | — | Comma-separated `organization/project/definition-id` scopes; enables the shared watcher |
+| `HERDR_WATCH_INTERVAL_MS` | `60000` | Interval between bounded provider scans |
+| `HERDR_WATCH_STATE_HOME` | user state directory | Directory for the bounded revision checkpoint |
 
 Codex runs sandboxed with its normal approval prompts by default. Set
 `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1` to pass `--dangerously-bypass-approvals-and-sandbox`
@@ -147,14 +151,18 @@ that same session and paused native Goal before delivering the instruction. If
 its pane disappeared and the recorded session supports exact resume, the
 executor may create a new routing pane, but only for that saved session.
 
-For a settled goal waiting on one exact GitHub pull request or Azure DevOps
-build, the supervisor can observe that resource between model turns. Unchanged
-reads stay quiet. A changed revision wakes the ordinary focused review, and the
-worker rereads the provider before the supervisor decides what the change
-means. When that condition is the worker's only blocker, it reports the wait
-once and yields instead of sleeping or polling. This uses the existing timer
-and review path; it is not another daemon or task system. The normal bounded
-review remains the fallback after restart or a provider failure.
+For GitHub and Azure DevOps, one shared metadata watcher observes configured
+provider scopes without model turns. Workers attach their durable goal ID when
+they create a PR or build; they never register or renew a watch. A changed
+revision resolves that goal's current exact worker and sends a short wake hint.
+The worker rereads provider authority, continues useful work, and its normal
+Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
+goal review remains the safety net after a missed signal or provider failure.
+
+The container starts the watcher automatically when either provider-scope
+variable is set. For local use, export the same variables and run
+`npm run watch` beside Herdr. Configure only scopes where the supervision
+metadata is written by trusted workers or maintainers.
 
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
 (execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is
