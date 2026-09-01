@@ -183,7 +183,12 @@ export class MetadataEventWatcher {
     for (const [source, adapter] of Object.entries(this.sources)) {
       const known = Object.values(this.state.resources)
         .filter((resource) => resource.source === source)
-        .map((resource) => ({ subject: resource.subject, goalId: resource.goalId }));
+        .map((resource) => ({
+          subject: resource.subject,
+          goalId: resource.goalId,
+          revision: resource.revision,
+          pending: Boolean(resource.pending),
+        }));
       try {
         const result = await adapter.scan(known);
         if (!result || typeof result !== "object" || Array.isArray(result)

@@ -152,10 +152,12 @@ export function adoPullRequestDiscovery({
       const auth = authorization || await getAuthorization();
       const pullsBySubject = new Map();
       const active = [];
+      const activeSubjects = new Set();
       const absent = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
       const knownSubjects = new Set(known.map((resource) => resource.subject));
+      const knownBySubject = new Map(known.map((resource) => [resource.subject, resource]));
       for (const scope of scopes) {
         const result = await json(
           fetchImpl,
@@ -167,9 +169,11 @@ export function adoPullRequestDiscovery({
         if (pulls.length >= MAX_ACTIVE_PULLS) {
           throw new Error(`ADO pull request discovery reached its ${MAX_ACTIVE_PULLS}-pull limit; narrow the configured repository scope`);
         }
-        for (const pull of pulls) active.push({
-          subject: subjectFor(scope, pull.pullRequestId),
-        });
+        for (const pull of pulls) {
+          const subject = subjectFor(scope, pull.pullRequestId);
+          active.push({ subject });
+          activeSubjects.add(subject);
+        }
       }
       const exact = async (subject, scope, knownResource) => {
         try {
@@ -233,6 +237,13 @@ export function adoPullRequestDiscovery({
           throw new Error(`ADO pull request policies reached their ${MAX_POLICIES}-evaluation limit; refusing a partial revision`);
         }
         const current = pullRevision(pull, threads, policies);
+        const knownResource = knownBySubject.get(subject);
+        if (pull.status !== "active" && !activeSubjects.has(subject)
+          && knownResource && !knownResource.pending
+          && knownResource.goalId === goalId && knownResource.revision === current.revision) {
+          absent.push(subject);
+          continue;
+        }
         observations.push({ subject, goalId, ...current });
       }
       return { observations, absent: [...new Set(absent)] };

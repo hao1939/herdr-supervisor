@@ -70,6 +70,17 @@ function hash(value) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+function currentBuild(build) {
+  const payload = {
+    id: build.id,
+    sourceVersion: build.sourceVersion,
+    status: build.status,
+    result: build.result || null,
+    finishTime: build.finishTime || null,
+  };
+  return { revision: hash(payload), payload };
+}
+
 export function adoBuildDiscovery({
   definitions,
   fetchImpl = fetch,
@@ -116,9 +127,9 @@ export function adoBuildDiscovery({
           if (!taggedGoal(current.tags)) absent.push(resource.subject);
           continue;
         }
-        missing.push({ subject: resource.subject, parsed });
+        missing.push({ subject: resource.subject, resource, parsed });
       }
-      for (const { subject, parsed } of rereadWindow(missing)) {
+      for (const { subject, resource, parsed } of rereadWindow(missing)) {
         if (selected.size >= MAX_BUILDS) break;
         const base = `https://dev.azure.com/${encodeURIComponent(parsed.organization)}/${encodeURIComponent(parsed.project)}`;
         try {
@@ -128,8 +139,17 @@ export function adoBuildDiscovery({
             auth,
           );
           const definition = `${parsed.organization}/${parsed.project}/${build.definition?.id}`;
-          if (!taggedGoal(build.tags) || !allowedDefinitions.has(definition)) absent.push(subject);
-          else selected.set(subject, build);
+          const goalId = taggedGoal(build.tags);
+          if (!goalId || !allowedDefinitions.has(definition)) absent.push(subject);
+          else {
+            const current = currentBuild(build);
+            if (build.status === "completed" && resource.goalId === goalId
+              && !resource.pending && resource.revision === current.revision) {
+              absent.push(subject);
+            } else {
+              selected.set(subject, build);
+            }
+          }
         } catch (error) {
           if (error?.status === 404) absent.push(subject);
           else throw error;
@@ -143,18 +163,11 @@ export function adoBuildDiscovery({
       for (const [subject, build] of selected) {
         const goalId = taggedGoal(build.tags);
         if (!goalId) continue;
-        const stable = {
-          id: build.id,
-          sourceVersion: build.sourceVersion,
-          status: build.status,
-          result: build.result || null,
-          finishTime: build.finishTime || null,
-        };
+        const current = currentBuild(build);
         observations.push({
           subject,
           goalId,
-          revision: hash(stable),
-          payload: stable,
+          ...current,
         });
       }
       return { observations, absent: [...new Set(absent)] };
