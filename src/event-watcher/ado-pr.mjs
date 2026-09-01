@@ -103,6 +103,13 @@ function pullRevision(pull, threads, policies) {
     discussions,
     evaluations,
   };
+  const discussionSummary = discussions.map((discussion) => ({
+    id: discussion.id,
+    status: discussion.status,
+    isDeleted: discussion.isDeleted,
+    lastUpdatedDate: discussion.lastUpdatedDate,
+    commentCount: discussion.comments.length,
+  }));
   return {
     revision: hash(stable),
     payload: {
@@ -111,7 +118,7 @@ function pullRevision(pull, threads, policies) {
       draft: stable.draft,
       mergeStatus: stable.mergeStatus,
       reviewers: reviewers.slice(0, MAX_EVIDENCE_ITEMS),
-      discussions: discussions.slice(0, MAX_EVIDENCE_ITEMS),
+      discussions: discussionSummary.slice(0, MAX_EVIDENCE_ITEMS),
       policies: evaluations.slice(0, MAX_EVIDENCE_ITEMS),
       truncated: reviewers.length > MAX_EVIDENCE_ITEMS
         || discussions.length > MAX_EVIDENCE_ITEMS
