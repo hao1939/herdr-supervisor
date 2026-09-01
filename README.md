@@ -132,10 +132,12 @@ the supervisor cannot become a second worker.
 
 ## How it works
 
-The supervisor creates goals conversationally. It forms explicit completion
-criteria, places a Codex worker in a new or related tab, records the binding,
-gives its pane a short goal-based label, and projects the canonical contract
-into that worker's native Codex Goal.
+The supervisor creates goals conversationally. It first turns the human's
+intent into a concrete outcome and completion proof, then compares that
+candidate with existing goals. Related subjects or tools are not enough to
+merge outcomes. It places a Codex worker in a new or related tab, records the
+binding, gives its pane a short goal-based label, and projects the canonical
+contract into that worker's native Codex Goal.
 Codex owns the ordinary work-check-continue loop. The supervisor sleeps until a
 Herdr event or review deadline wakes it, then observes the worker once and makes
 exactly one decision:

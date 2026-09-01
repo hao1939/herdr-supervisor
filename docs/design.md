@@ -184,18 +184,34 @@ In plain language:
 ## Normal flow
 
 1. The human describes an outcome.
-2. The model compares it with active goals.
-3. The model updates a fitting goal or defines one new goal with objective,
-   stable context, acceptance criteria, and constraints.
-4. Code validates that contract, creates or selects one meaningfully labelled
+2. The model forms a concrete candidate goal: objective, continuity horizon,
+   expected artifacts, acceptance evidence, stable context, and constraints.
+   It leads with a useful interpretation and recommended defaults.
+3. If one answer would materially change that candidate's outcome, proof,
+   authority, or risk, the model shows the candidate and asks one focused
+   question. Recommended defaults may fill ordinary detail, but cannot invent
+   a new kind of work, deliverable, external effect, or authority. Otherwise
+   the model proceeds without ceremony. Research and synthesis, building and
+   experimentation, and external operation are distinct work modes rather than
+   interchangeable defaults.
+4. Only then does the model compare the candidate with existing goals. It
+   reuses an equivalent outcome, updates a true refinement, or defines one new
+   distinct goal.
+5. Code validates that contract, creates or selects one meaningfully labelled
    worker space, starts Codex, records its exact native session, and gives it
    the native `/goal`.
-5. The worker keeps working without supervisor model turns.
-6. A Herdr event or bounded deadline asks the supervisor to review that goal.
-7. Code supplies the goal, fresh Herdr state, and bounded new worker evidence.
-8. The model chooses one review decision. Code validates and applies it.
-9. Supervision ends only when evidence proves the complete outcome or the human
+6. The worker keeps working without supervisor model turns.
+7. A Herdr event or bounded deadline asks the supervisor to review that goal.
+8. Code supplies the goal, fresh Herdr state, and bounded new worker evidence.
+9. The model chooses one review decision. Code validates and applies it.
+10. Supervision ends only when evidence proves the complete outcome or the human
    explicitly stops it.
+
+Goal equivalence is intentionally stricter than relatedness. The objective,
+continuity horizon, expected artifacts, and acceptance evidence must be
+substantially the same. Sharing a topic, source, tool, repository, or worker
+capability does not make two outcomes equivalent, and a constraint inside one
+goal never becomes an admission rule for other goals.
 
 When the human contradicts, retracts, or disowns a statement already stored in
 a goal contract, the supervisor updates that same contract before asking its
@@ -567,9 +583,16 @@ work. Observation does not imply mutation.
 The supervisor applies an effect only when the human clearly requests an
 execution change or when fulfilling the requested outcome actually requires
 durable work. If the available evidence cannot distinguish materially different
-actions, it states what is known and asks one focused question before changing
-state. Words such as "review" do not select a workflow; the meaning of the
-human's request does.
+actions, it presents a concrete candidate and recommended default, then asks
+one focused question before changing state. Words such as "review" do not
+select a workflow; the meaning of the human's request does.
+
+When the human asks for help shaping a goal, conversation is the drafting
+space. The supervisor first helps make the intended outcome and proof concrete;
+it does not add a draft record or force the request into the nearest broad
+goal. Existing state becomes comparison evidence only after that candidate is
+clear. If the human has already said to work on it, the supervisor starts the
+agreed goal once clear instead of asking for permission twice.
 
 The supervisor speaks in plain language. It explains:
 
