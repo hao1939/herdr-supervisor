@@ -384,12 +384,11 @@ goal belongs to the worker, not the supervisor or watcher. See
 live evidence.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
-accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
+requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
+configured repositories. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
-the runtime environment. Without usable credentials, a watch degrades to
-unauthenticated limits for a public GitHub PR. A private GitHub PR or Azure
-DevOps build instead fails with a clear credential error; the watch never
-guesses.
+the runtime environment. Without usable credentials, discovery fails with a
+clear error and the watcher never guesses.
 
 ## Concurrency
 

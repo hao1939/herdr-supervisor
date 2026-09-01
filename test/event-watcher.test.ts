@@ -106,6 +106,7 @@ test("watcher daemon rejects an empty source set without changing its checkpoint
 test("watcher daemon rejects intervals above the Node timer limit", async () => {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
+    GITHUB_TOKEN: "test-token",
     HERDR_WATCH_GITHUB_REPOSITORIES: "owner/repo",
     HERDR_WATCH_INTERVAL_MS: "2147483648",
   };
@@ -174,6 +175,38 @@ test("completed goal metadata does not consume watcher capacity", async (t) => {
   assert.deepEqual(delivered, ["g_active"]);
   const state = JSON.parse(await readFile(join(directory, "state.json"), "utf8"));
   assert.deepEqual(Object.keys(state.resources), ["provider\0active"]);
+});
+
+test("metadata moved to an inactive goal removes its former active-owner checkpoint", async (t) => {
+  const directory = await temporary(t, "event-watch-retargeted-goal-");
+  const statePath = join(directory, "state.json");
+  await writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    resources: {
+      "provider\0resource": {
+        source: "provider",
+        subject: "resource",
+        goalId: "g_active",
+        revision: "old",
+        observedAt: "2026-09-01T00:00:00.000Z",
+      },
+    },
+  }, null, 2)}\n`);
+  const watcher = new DiscoveredEventWatcher({
+    statePath,
+    sources: {
+      provider: { scan: async () => discovery([
+        { subject: "resource", goalId: "g_completed", revision: "new", payload: {} },
+      ]) },
+    },
+    activeGoals: async () => new Set(["g_active"]),
+    deliver: async () => assert.fail("inactive metadata must not wake the former owner"),
+  });
+
+  await watcher.runOnce();
+
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  assert.deepEqual(state.resources, {});
 });
 
 test("goal ownership failure preserves the current watcher checkpoint", async (t) => {
@@ -637,6 +670,20 @@ test("GitHub discovery reads only annotated pull requests", async () => {
   assert.equal(found[0].subject, "owner/repo#42");
   assert.equal(found[0].goalId, "g_pr");
   assert.equal(urls.some((url) => url.includes("/commits/def/")), false);
+});
+
+test("GitHub discovery requires credentials and a bounded repository scope", () => {
+  assert.throws(
+    () => githubPullRequestDiscovery({ repositories: ["owner/repo"], token: "" }),
+    /requires GITHUB_TOKEN or GH_TOKEN/,
+  );
+  assert.throws(
+    () => githubPullRequestDiscovery({
+      repositories: Array.from({ length: 11 }, (_, index) => `owner/repo-${index}`),
+      token: "token",
+    }),
+    /at most 10 repositories/,
+  );
 });
 
 for (const truncated of ["checks", "statuses"]) {

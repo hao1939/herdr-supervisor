@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { boundedRefreshWindow } from "./refresh-window.mjs";
 
 const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
+const MAX_REPOSITORIES = 10;
 const MAX_ANNOTATED_PULLS = 20;
 const MAX_REMEMBERED_REFRESH = 10;
 const MAX_EVIDENCE_ITEMS = 25;
@@ -75,6 +76,10 @@ export function githubPullRequestDiscovery({
   if (!Array.isArray(repositories) || !repositories.length) {
     throw new Error("GitHub discovery requires at least one repository");
   }
+  if (repositories.length > MAX_REPOSITORIES) {
+    throw new Error(`GitHub discovery supports at most ${MAX_REPOSITORIES} repositories per watcher`);
+  }
+  if (!token) throw new Error("GitHub discovery requires GITHUB_TOKEN or GH_TOKEN");
   const scopes = repositories.map(parseRepository);
   const allowedRepositories = new Set(repositories);
   const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH, (resource) => resource.subject);

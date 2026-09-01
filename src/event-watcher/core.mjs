@@ -304,13 +304,18 @@ export class MetadataEventWatcher {
       });
       return;
     }
+    const inactiveObserved = new Set(scan.observations
+      .filter((item) => !active.has(item.goalId))
+      .map((item) => keyFor(item.source, item.subject)));
     const observations = scan.observations.filter((item) => active.has(item.goalId));
     const observed = new Set(observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
     let capacityFreed = false;
     for (const [key, resource] of Object.entries(next.resources)) {
-      if (!Object.hasOwn(this.sources, resource.source) || !active.has(resource.goalId)) {
+      if (!Object.hasOwn(this.sources, resource.source)
+        || !active.has(resource.goalId)
+        || inactiveObserved.has(key)) {
         delete next.resources[key];
         changed = true;
         capacityFreed = true;
@@ -352,7 +357,7 @@ export class MetadataEventWatcher {
       .join(", ");
     await this.report("capacity", {
       kind: "capacity",
-      message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a goal completes, a remembered resource is authoritatively absent, or capacity is increased: ${examples}`,
+      message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a goal completes, a remembered resource is authoritatively absent, or its provider scope is removed: ${examples}`,
     });
   }
 

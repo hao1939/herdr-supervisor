@@ -140,7 +140,7 @@ forget its resources without changing provider metadata. Removing metadata,
 removing the provider resource, or removing its configured scope has the same
 effect. A size bound never evicts another active resource: the daemon preserves
 existing exact rereads and visibly defers a new discovery until authority frees
-space or capacity is increased. None of those cases needs a worker-owned
+space. None of those cases needs a worker-owned
 lifecycle.
 
 ## Discovery
@@ -243,11 +243,11 @@ the supervisor immediately before delivery. A later Herdr session-addressed
 prompt can tighten that boundary without changing metadata, adapters,
 checkpoint state, or worker behavior.
 
-Provider reads have bounded request and process timeouts. GitHub discovery is
-bounded to 20 annotated pull requests per scan and refuses truncated check or
-status evidence. Deployments should use an authenticated token and an interval
-appropriate for their configured scope. Provider failures are diagnosed and
-the bounded goal review still guarantees eventual reconsideration.
+Provider reads have bounded request and process timeouts. GitHub discovery
+requires an authenticated token, accepts at most ten repositories, reads at
+most 20 annotated pull requests per scan, and refuses truncated check or status
+evidence. Provider failures are diagnosed and the bounded goal review still
+guarantees eventual reconsideration.
 
 A wake is at-least-once. A crash near delivery may produce the same hint again.
 That is acceptable because the worker rereads authority and provider actions

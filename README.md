@@ -64,7 +64,7 @@ state at any time.
 | `AZURE_CLI` | `az` | Optional Azure CLI executable used when no ADO token is configured |
 | `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
 | `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
-| `HERDR_WATCH_GITHUB_REPOSITORIES` | — | Comma-separated trusted `owner/repository` scopes; enables the shared watcher |
+| `HERDR_WATCH_GITHUB_REPOSITORIES` | — | Up to ten comma-separated trusted `owner/repository` scopes; requires a GitHub token and enables the shared watcher |
 | `HERDR_WATCH_ADO_DEFINITIONS` | — | Comma-separated `organization/project/definition-id` scopes; enables the shared watcher |
 | `HERDR_WATCH_INTERVAL_MS` | `60000` | Interval between bounded provider scans |
 | `HERDR_WATCH_STATE_HOME` | user state directory | Directory for the bounded revision checkpoint |
