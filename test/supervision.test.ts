@@ -494,6 +494,26 @@ test("a human correction updates durable authority before execution", () => {
   assert.match(prompt, /cannot override a contradictory goal\.json/);
   assert.match(prompt, /answers an earlier question with execution evidence that does not change the durable contract/);
   assert.match(prompt, /If the answer changes the contract, apply the durable-update rule instead/);
+  assert.match(prompt, /Use a fresh-start test for human refinements/);
+  assert.match(prompt, /losing conversation history and the current checkpoint would change what future cycles must do/);
+  assert.match(prompt, /persist the complete refinement in goal\.json with supervisor_update_goal/);
+  assert.match(prompt, /reconsideration or steering checkpoint is not durable authority/);
+});
+
+test("a direct human question can be answered without changing goal execution", () => {
+  const prompt = supervisorSystemPrompt("Base prompt.");
+  assert.match(prompt, /ordinary conversation, not automatically a goal-lifecycle event/);
+  assert.match(prompt, /When a direct human request requires durable work/);
+  assert.doesNotMatch(prompt, /For a direct human request, understand the durable outcome/);
+  assert.match(prompt, /observations may support an answer without requiring any state-changing tool/);
+  assert.match(prompt, /request for explanation, design review, status review, or suggestion is not by itself a request/);
+  assert.match(prompt, /answer directly/);
+  assert.match(prompt, /Do not use reconsideration merely to answer or discuss the goal/);
+  assert.match(prompt, /transient execution evidence that materially affects current execution/);
+  assert.match(prompt, /only when the human wants a new durable outcome/);
+  assert.match(prompt, /This is distinct from a direct question the human asks the supervisor/);
+  assert.doesNotMatch(prompt, /A human question also receives bounded reconsideration/);
+  assert.doesNotMatch(prompt, /Otherwise call supervisor_start_goal/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {

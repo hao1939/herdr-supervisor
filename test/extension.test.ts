@@ -148,6 +148,19 @@ test("optional supervisor tool fields accept null without placeholder values", (
   }), true);
 });
 
+test("reconsideration guidance excludes direct human questions", () => {
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  assert.match(
+    pi.tools.get("supervisor_reconsider").description,
+    /new transient execution evidence materially affects current execution, a wait resolves/,
+  );
+  assert.match(
+    pi.tools.get("supervisor_reconsider").description,
+    /Do not use it merely to answer a question, explain or review a goal, provide a suggestion, or inspect stored status/,
+  );
+});
+
 test("status exposes stored goals without filesystem tools or live worker state", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-unstarted-status-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

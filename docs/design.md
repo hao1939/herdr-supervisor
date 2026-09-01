@@ -264,6 +264,12 @@ skill inside every goal. Existing root files are never overwritten.
 - acceptance criteria;
 - lasting constraints.
 
+A human refinement belongs in this contract when it must still govern a fresh
+worker that has no conversation history or local checkpoint. This fresh-start
+test separates lasting outcome scope, recurring behavior, proof, and boundaries
+from transient execution evidence. Reconsidering or steering the current worker
+cannot substitute for updating durable authority.
+
 `goal.json` is the only goal data needed to start fresh on another instance.
 Place it in a valid goal directory there before starting a worker. It contains
 no pane, session, progress, wait, cursor, or history.
@@ -405,9 +411,11 @@ promise to reconsider, not permission to forget the goal:
   reviews of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
-A human question follows the same rule. It is concrete, asks for the minimum
-input that changes the work, and receives a bounded reconsideration so
-unrelated useful work can continue.
+A question the supervisor asks the human because execution needs input follows
+the same rule. It is concrete, asks for the minimum input that changes the
+work, and receives a bounded reconsideration so unrelated useful work can
+continue. This does not apply to a direct question the human asks the
+supervisor; ordinary conversation does not imply an execution effect.
 
 ### External updates
 
@@ -550,6 +558,18 @@ The design favors a safe retry or some repeated model cost over elaborate
 perfect reconstruction. Simplicity and robust eventual progress come first.
 
 ## Human experience
+
+Human conversation is not a goal-lifecycle event by default. The supervisor may
+read the goal state and answer a question, explain the design, review what is
+known, or offer a suggestion without starting, updating, or reconsidering any
+work. Observation does not imply mutation.
+
+The supervisor applies an effect only when the human clearly requests an
+execution change or when fulfilling the requested outcome actually requires
+durable work. If the available evidence cannot distinguish materially different
+actions, it states what is known and asks one focused question before changing
+state. Words such as "review" do not select a workflow; the meaning of the
+human's request does.
 
 The supervisor speaks in plain language. It explains:
 

@@ -1296,7 +1296,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerTool({
     name: "supervisor_reconsider",
     label: "Reconsider supervised goals",
-    description: "Schedule one focused event review for each affected existing goal. Use when new evidence materially changes a wait or the human asks the supervisor to recheck current execution. The LLM selects the exact affected workers; code only queues their normal reviews. During another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
+    description: "Schedule one focused event review for each affected existing goal. Use when new transient execution evidence materially affects current execution, a wait resolves, or the human explicitly asks the supervisor to recheck current execution. Do not use it merely to answer a question, explain or review a goal, provide a suggestion, or inspect stored status. The LLM selects the exact affected workers; code only queues their normal reviews. During another worker's focused review, retain these reviews for afterward and still finish the current review with one decision. This does not rewrite a durable goal or prompt a worker directly.",
     parameters: Type.Object({
       pane_ids: Type.Array(Pane, { minItems: 1, maxItems: 10 }),
       reason: Type.String({ minLength: 1, maxLength: 2000, description: "The concrete new fact or request each focused review must evaluate." }),
