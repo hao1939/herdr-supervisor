@@ -355,12 +355,14 @@ test("checkpoint saturation reports deferred discoveries without dropping pendin
   await watcher.runOnce();
   observations = [{ subject: "two", goalId: "g_two", revision: "one", payload: {} }];
   await watcher.runOnce();
+  observations = [];
+  await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.at(-1), {
+  assert.deepEqual(diagnostics.filter((item) => item.kind === "capacity"), [{
     kind: "capacity",
     source: "source",
     message: "source discovery deferred a new resource because all 1 checkpoint entries have pending deliveries",
-  });
+  }]);
   const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
   assert.equal(resources.length, 1);
   assert.ok(resources[0].pending);

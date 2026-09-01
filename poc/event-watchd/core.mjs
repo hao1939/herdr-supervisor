@@ -330,7 +330,7 @@ export class DiscoveredEventWatcher {
           source,
           message: `${source} discovery deferred a new resource because all ${this.maxResources} checkpoint entries have pending deliveries`,
         });
-      } else {
+      } else if (Object.keys(next.resources).length < this.maxResources || removableResourceKeys(next).length) {
         this.reported.delete(`capacity:${source}`);
       }
     }
