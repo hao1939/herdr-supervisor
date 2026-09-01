@@ -181,9 +181,36 @@ test("a legacy provider change survives until the worker is steered to reread it
   await recordDecision(pending, "steer", {
     progress: "The worker was asked to reread current provider authority.",
     action: "Reread the exact legacy provider resource and continue.",
+    resolvedLegacyExternalChange: true,
   }, directory);
 
   assert.equal((await loadGoalState(binding.goalId, directory)).externalChange, undefined);
+});
+
+test("administrative stop remains authoritative with a legacy provider change", async () => {
+  const directory = await root();
+  const binding = await registerSupervisedGoal(worker, {
+    objective: "Stop this upgraded goal when the human asks.",
+  }, directory, { goalId: "g_legacy_stop" });
+  await updateGoalState(binding.goalId, (state) => {
+    state.externalChange = {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    };
+    return state;
+  }, directory);
+
+  await recordDecision(binding, "stop", {
+    progress: "The human stopped supervision.",
+    action: "Stop supervision without changing the worker.",
+    terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
+  }, directory);
+
+  const state = await loadGoalState(binding.goalId, directory);
+  assert.equal(state.terminal.state, "stopped");
+  assert.equal(state.externalChange.revision, "legacy-revision");
 });
 
 test("refining a goal resolves its previous human question", async () => {

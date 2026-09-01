@@ -220,10 +220,10 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
-    if (current.externalChange && decision !== "steer") {
+    if (current.externalChange && ["leave", "ask_human", "accept"].includes(decision)) {
       throw new Error(`the legacy ${current.externalChange.source} ${current.externalChange.subject} change must be reread by the worker before this decision`);
     }
-    if (decision === "steer") delete current.externalChange;
+    if (current.externalChange && input.resolvedLegacyExternalChange) delete current.externalChange;
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

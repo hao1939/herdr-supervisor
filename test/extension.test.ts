@@ -7,7 +7,7 @@ import test from "node:test";
 import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
-import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
+import { goalPaths, loadGoalContract, readAudit, updateGoalState } from "../src/goal-store.ts";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
@@ -2969,6 +2969,15 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
 
 test("an uncertain steer delivery fails closed until fresh evidence", async (t) => {
   const root = await fixture();
+  await updateGoalState("g_test", (state) => {
+    state.externalChange = {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    };
+    return state;
+  }, root);
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
   t.after(() => {
@@ -3000,13 +3009,59 @@ test("an uncertain steer delivery fails closed until fresh evidence", async (t) 
   assert.match(result.content[0].text, /Do not send it again/);
   const [stored] = (await loadSupervisorGoals(root)).active;
   assert.equal(stored.lastDecision.decision, "steer");
-  assert.equal(stored.lastDecision.action, "Run the focused proof.");
+  assert.match(stored.lastDecision.action, /First reread current provider authority for ado-build org\/project\/101/);
+  assert.equal(stored.legacyExternalChange?.revision, "legacy-revision");
   const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
     message: "Run the focused proof.",
   });
   assert.equal(prompts, 1);
   assert.match(repeated.content[0].text, /already applied/);
+  pi.events.get("session_shutdown")();
+});
+
+test("confirmed legacy reread delivery clears the migration marker", async (t) => {
+  const root = await fixture();
+  await updateGoalState("g_test", (state) => {
+    state.externalChange = {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    };
+    return state;
+  }, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The old build state still needs a current reread.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
+    prompts.push(message);
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the focused proof after the reread.",
+  });
+
+  assert.equal(result.isError, false);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /First reread current provider authority for ado-build org\/project\/101/);
+  assert.match(prompts[0], /Continue the focused proof after the reread/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].legacyExternalChange, undefined);
   pi.events.get("session_shutdown")();
 });
 

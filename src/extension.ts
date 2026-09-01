@@ -284,6 +284,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     progress,
     evidence,
     reviewAt,
+    resolvedLegacyExternalChange = false,
   ) {
     const result = await recordDecision(binding, "steer", {
       progress,
@@ -291,6 +292,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
+      resolvedLegacyExternalChange,
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
@@ -1614,7 +1616,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         }
         let continuedBinding = binding;
         let resumed = false;
-        const instruction = params.message.trim();
+        const legacyChange = binding.legacyExternalChange;
+        const instruction = legacyChange
+          ? [
+              `First reread current provider authority for ${legacyChange.source} ${legacyChange.subject}; it changed before the metadata watcher upgrade.`,
+              params.message.trim(),
+            ].join("\n\n")
+          : params.message.trim();
         if (canResumeNow) {
           const request = recoveryRequest(binding, liveSnapshot);
           if (relocated) request.name = workerNameForGoal(binding.goalId);
@@ -1704,6 +1712,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             `The worker was steered to continue: ${params.message.trim()}`,
             params.evidence || continuedBinding.evidence,
             reviewAt,
+            Boolean(continuedBinding.legacyExternalChange),
           );
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed

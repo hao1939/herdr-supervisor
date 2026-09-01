@@ -262,9 +262,11 @@ decision.
 
 The v1 reader also accepts the retired `externalChange` field. The next
 focused review exposes it as one legacy reread obligation. Only steering the
-worker to reread that authority removes it; leaving, asking, or accepting cannot
-silently discard it. New code never writes it, and external revision state then
-belongs only to the shared watcher checkpoint.
+worker with the code-injected reread instruction and confirming its delivery
+removes it; unrelated or uncertain steering preserves it. Leaving, asking, or
+accepting cannot silently discard it, while an explicit administrative stop
+remains authoritative. New code never writes it, and external revision state
+then belongs only to the shared watcher checkpoint.
 
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
