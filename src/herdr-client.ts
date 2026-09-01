@@ -127,7 +127,18 @@ export class HerdrClient {
 
   async startAndWaitAgent(request, timeoutMs = 31_000, onStarted = () => {}) {
     const deadline = Date.now() + timeoutMs;
-    await this.startAgent(request, timeoutMs);
+    for (;;) {
+      try {
+        await this.startAgent(request, Math.max(1, deadline - Date.now()));
+        break;
+      } catch (error) {
+        // On WSL, a newly created pane's shell may not be ready yet.
+        // Retry until the deadline rather than failing immediately.
+        if (!/not an available shell/i.test(error?.message)) throw error;
+        if (Date.now() >= deadline) throw error;
+        await wait(Math.min(200, Math.max(1, deadline - Date.now())));
+      }
+    }
     onStarted();
     for (;;) {
       const remaining = deadline - Date.now();
