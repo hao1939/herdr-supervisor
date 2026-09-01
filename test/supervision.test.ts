@@ -133,6 +133,24 @@ test("working is quiet while settled and blocked states wake review", () => {
   assert.equal(shouldWake(current, agent({ agent_status: "blocked", state_change_seq: 12 }), pane).wake, false);
 });
 
+test("an unresolved legacy provider change wakes one ordinary focused review", () => {
+  const current = binding({
+    legacyExternalChange: {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    },
+  });
+  const pane = findPane(snapshot(), "w1:p2");
+
+  const result = shouldWake(current, agent(), pane);
+
+  assert.equal(result.wake, true);
+  assert.match(result.reason, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
+  assert.match(result.key, /legacy-external:ado-build:org\/project\/101:legacy-revision/);
+});
+
 test("a restored idle worker with no transition sequence is reviewed once", () => {
   const current = binding({ lastReviewStateChangeSeq: 0 });
   const currentPane = findPane(snapshot(), "w1:p2");

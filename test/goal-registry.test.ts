@@ -155,7 +155,7 @@ test("refining a goal replaces its contract without replacing its worker", async
   assert.equal(audit.at(-1).summary, "Added exact-commit ADO and collaboration requirements.");
 });
 
-test("an ordinary decision removes retired in-process watcher state", async () => {
+test("a legacy provider change survives until the worker is steered to reread it", async () => {
   const directory = await root();
   const binding = await registerSupervisedGoal(worker, {
     objective: "Continue a goal created before metadata discovery.",
@@ -170,9 +170,17 @@ test("an ordinary decision removes retired in-process watcher state", async () =
     return state;
   }, directory);
 
-  await recordDecision(binding, "leave", {
+  const [pending] = (await loadSupervisorGoals(directory)).active;
+  assert.equal(pending.legacyExternalChange?.revision, "legacy-revision");
+  await assert.rejects(recordDecision(pending, "leave", {
     progress: "The worker is continuing under the replacement watcher.",
     action: "Keep the healthy worker running.",
+  }, directory), /must be reread by the worker/);
+  assert.equal((await loadGoalState(binding.goalId, directory)).externalChange.revision, "legacy-revision");
+
+  await recordDecision(pending, "steer", {
+    progress: "The worker was asked to reread current provider authority.",
+    action: "Reread the exact legacy provider resource and continue.",
   }, directory);
 
   assert.equal((await loadGoalState(binding.goalId, directory)).externalChange, undefined);

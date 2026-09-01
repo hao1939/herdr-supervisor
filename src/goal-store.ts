@@ -33,7 +33,8 @@ const decisionFields = new Set(["decision", "at", "action"]);
 const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 // Read-only compatibility for checkpoints written by the retired in-process
-// watcher. New decisions remove this field; the shared watcher owns revisions.
+// watcher. One legacy focused reread removes it; the shared watcher owns all
+// new revisions.
 const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "workerSequence"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);

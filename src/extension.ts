@@ -261,6 +261,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       lastDecision: state.lastDecision,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
+      legacyExternalChange: state.externalChange
+        ? structuredClone(state.externalChange)
+        : undefined,
     });
   }
 

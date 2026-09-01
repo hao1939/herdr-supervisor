@@ -45,6 +45,9 @@ export function bindingFromRecord(record): GoalBinding {
     lastDecision: record.state.lastDecision,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
+    legacyExternalChange: record.state.externalChange
+      ? structuredClone(record.state.externalChange)
+      : undefined,
     updatedAt: record.state.updatedAt,
   };
 }
@@ -217,10 +220,10 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
-    // Retired v1 in-process watches stored this field. The metadata watcher now
-    // wakes workers directly, so the next ordinary decision removes legacy
-    // state without giving it another lifecycle.
-    delete current.externalChange;
+    if (current.externalChange && decision !== "steer") {
+      throw new Error(`the legacy ${current.externalChange.source} ${current.externalChange.subject} change must be reread by the worker before this decision`);
+    }
+    if (decision === "steer") delete current.externalChange;
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

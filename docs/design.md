@@ -261,7 +261,9 @@ checkpoint. New reviews never produce it; recovery is now transport inside
 decision.
 
 The v1 reader also accepts the retired `externalChange` field. The next
-ordinary decision removes it. New code never writes it; external revision state
+focused review exposes it as one legacy reread obligation. Only steering the
+worker to reread that authority removes it; leaving, asking, or accepting cannot
+silently discard it. New code never writes it, and external revision state then
 belongs only to the shared watcher checkpoint.
 
 `journal.jsonl` is append-only audit history. It is useful for inspection but
