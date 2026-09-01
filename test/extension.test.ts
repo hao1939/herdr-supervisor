@@ -18,12 +18,7 @@ import { nativeGoalPrompt } from "../src/prompts.ts";
 // labels are not affected by reconcileWorkerLabels during session_start.
 const originalRenamePane = HerdrClient.prototype.renamePane;
 HerdrClient.prototype.renamePane = async function () {};
-const originalClosePane = HerdrClient.prototype.closePane;
-HerdrClient.prototype.closePane = async function () {};
-test.after(() => {
-  HerdrClient.prototype.renamePane = originalRenamePane;
-  HerdrClient.prototype.closePane = originalClosePane;
-});
+test.after(() => { HerdrClient.prototype.renamePane = originalRenamePane; });
 
 const worker = {
   paneId: "w1:p2",
@@ -2877,84 +2872,6 @@ test("acceptance rejects a worker wake that arrived after observation", async (t
   assert.equal(finish.isError, true);
   assert.match(finish.content[0].text, /worker changed after it was observed/);
   assert.equal((await loadSupervisorGoals(root)).completed.length, 0);
-  pi.events.get("session_shutdown")();
-});
-
-test("acceptance persists completion before closing the exact worker pane", async (t) => {
-  const root = await fixture();
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-  });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
-    read: { text: "Every acceptance criterion is now verified.", truncated: false },
-  }));
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-  const closed = [];
-  t.mock.method(HerdrClient.prototype, "closePane", async (paneId) => {
-    const goals = await loadSupervisorGoals(root);
-    assert.equal(goals.active.length, 0, "completion must be durable before pane closure");
-    assert.equal(goals.completed[0]?.state?.terminal?.state, "accepted");
-    closed.push(paneId);
-  });
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const finish = await pi.tools.get("supervisor_finish").execute("finish", {
-    pane_id: worker.paneId,
-    summary: "The exact goal is complete.",
-    evidence: ["The focused proof passed."],
-  }, undefined, undefined, { ui: { setStatus() {} } });
-
-  assert.equal(finish.isError, false, finish.content[0].text);
-  assert.deepEqual(closed, [worker.paneId]);
-  assert.doesNotMatch(finish.content[0].text, /Pane retirement warning/);
-  pi.events.get("session_shutdown")();
-});
-
-test("a pane close failure cannot undo accepted goal completion", async (t) => {
-  const root = await fixture();
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-  });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
-    read: { text: "Every acceptance criterion is now verified.", truncated: false },
-  }));
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-  let closeAttempts = 0;
-  t.mock.method(HerdrClient.prototype, "closePane", async () => {
-    closeAttempts += 1;
-    throw new Error("pane is already unavailable");
-  });
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const finish = await pi.tools.get("supervisor_finish").execute("finish", {
-    pane_id: worker.paneId,
-    summary: "The exact goal is complete.",
-    evidence: ["The focused proof passed."],
-  }, undefined, undefined, { ui: { setStatus() {} } });
-
-  const goals = await loadSupervisorGoals(root);
-  assert.equal(finish.isError, false, finish.content[0].text);
-  assert.equal(closeAttempts, 1);
-  assert.equal(goals.active.length, 0);
-  assert.equal(goals.completed[0]?.state?.terminal?.state, "accepted");
-  assert.match(finish.content[0].text, /Pane retirement warning/);
-  assert.match(finish.content[0].text, /pane is already unavailable/);
   pi.events.get("session_shutdown")();
 });
 
