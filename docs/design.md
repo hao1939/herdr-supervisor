@@ -4,15 +4,31 @@
 
 ## Purpose
 
-Herdr Supervisor lets one human-facing agent watch several Herdr workers and
-help each one finish an explicit goal. It stays lightweight by using Herdr as
-the runtime and Codex's native Goal as the worker's continuation loop. It does
-not build another task system.
+Herdr Supervisor helps one person keep several goal-owning workers moving. It
+stays lightweight: the supervisor judges progress, workers do the work, and an
+optional external watcher wakes workers when a pull request or build changes.
+It does not build another task system.
+
+Herdr hosts the processes and events, and Codex supplies each worker's native
+Goal loop. Those are implementation choices, not extra product roles.
 
 The core rule is:
 
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
+
+The whole model is:
+
+1. The human defines or refines a goal.
+2. One worker owns that goal and keeps pursuing it.
+3. The supervisor watches evidence and helps the same worker move forward.
+4. An optional external watcher notifies the worker when a linked resource
+   changes.
+5. A failure enters the same observation and decision loop with diagnostic
+   facts and operating guidance.
+
+There are no hidden tasks, per-resource watch objects, diagnostic workflows, or
+parallel sources of goal truth.
 
 ## Scope discipline
 
@@ -66,13 +82,15 @@ cannot handle the problem cleanly.
 
 ## Mental model
 
-There are three roles:
+There are four plain roles:
 
 - The human states and refines outcomes and makes decisions that require human
   authority.
 - A worker pursues one durable goal in one exact native agent session.
 - The supervisor observes evidence, judges progress, and helps the same worker
   continue.
+- An optional external watcher detects relevant provider changes and wakes the
+  affected worker. It does not judge the change.
 
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal
@@ -97,41 +115,34 @@ Three diagrams, each answering one question.
 
 ```mermaid
 flowchart LR
-    U[Human] <--> S[Pi supervisor]
-    S <-->|socket| H[Herdr]
-    H --> W[Codex workers]
+    U[Human] <--> S[Supervisor]
+    S -->|goal and guidance| W[Workers]
+    W -->|progress and evidence| S
+    E[External watcher] -->|change notice| W
     S -->|write| F[(Goal files)]
-    F -.->|read goal contract| W
-
-    style U fill:#e8f0fe
-    style S fill:#fff4e5
-    style H fill:#e6f4ea
-    style W fill:#e6f4ea
-    style F fill:#fce8e6
+    F -.->|read contract| W
 ```
 
-Herdr owns panes, processes, and native sessions. The supervisor owns goal
-contracts, concise checkpoints, and judgment. Workers own implementation and
-detailed evidence. Each goal keeps three files:
+The runtime owns processes, native sessions, and event delivery. The supervisor
+owns goal contracts, concise checkpoints, and judgment. Workers own
+implementation and detailed evidence. Each goal keeps three files:
 `goal.json` (the outcome), `current.json` (where execution stands), and
 `journal.jsonl` (audit only).
 
-### What wakes the supervisor
+### What wakes work
 
 ```mermaid
 flowchart LR
-    A[Worker state changed] --> Q[Review signal]
-    B[Review deadline] --> Q
-    C[Selected peer goal changed] --> Q
+    A[Worker state changed] --> Q[Focused review]
+    B[Bounded recheck] --> Q
+    C[Related goal changed] --> Q
     D[Provider metadata changed] --> W[Current worker wakes and rereads]
     W --> A
-    Q --> R[Focused review]
-    E[Bounded global check] --> G[Compact global review]
-    G -. selected goals .-> Q
+    E[System health check] -. affected goals .-> Q
 ```
 
-The supervisor sleeps otherwise. It never polls a worker or provider. One
-shared metadata watcher performs bounded provider reads without model turns.
+The supervisor sleeps otherwise. It does not poll workers or providers. The
+optional shared watcher performs bounded provider reads without model turns.
 
 ### One review, one decision
 
@@ -243,7 +254,8 @@ goals/g_<id>/
 - acceptance criteria;
 - lasting constraints.
 
-Copying `goal.json` is enough to start fresh on another instance. It contains
+`goal.json` is the only goal data needed to start fresh on another instance.
+Place it in a valid goal directory there before starting a worker. It contains
 no pane, session, progress, wait, cursor, or history.
 
 Within one instance, an unstarted saved contract is resumed by passing its exact
@@ -376,28 +388,17 @@ unrelated useful work can continue.
 
 ### External updates
 
-One shared daemon replaces per-goal watch registration. Its design has six
-small contracts:
+One shared watcher replaces per-goal registration. Its public contract is only:
 
-1. **Scope:** the deployment lists the trusted GitHub repositories and ADO
-   pipeline definitions it wants observed.
-2. **Metadata:** a created PR or build carries only `herdr-goal=<goal-id>` (the
-   GitHub supervision block expresses the same value). There is no register,
-   renew, or unregister operation.
-3. **Adapter:** each provider adapter returns one normalized resource identity,
-   current revision, goal ID, and bounded payload.
-4. **Checkpoint:** the watcher atomically remembers only the latest revision
-   and optional undelivered revision for each bounded resource.
-5. **Delivery:** the goal ID is resolved through current canonical goal and
-   Herdr state. The current exact worker receives a short wake hint and rereads
-   provider authority; a saved pane is never a routing authority.
-6. **Terminal boundary:** one short per-goal execution lock serializes delivery
-   with accept and stop. If delivery wins, the terminal decision sees the new
-   worker sequence; if the terminal decision wins, delivery sees the completed
-   goal and sends nothing. The lock carries no workflow state.
-7. **Failure:** observation or delivery failures produce one bounded supervisor
-   diagnostic. The ordinary bounded goal review remains the safety net for a
-   missed or unsupported provider signal.
+1. **Link:** trusted metadata links a provider resource to one goal.
+2. **Observe:** a provider adapter reports a bounded current revision.
+3. **Notify:** a changed revision wakes that goal's exact current worker.
+
+There is no register, renew, unregister, predicate, or provider workflow in a
+goal. The watcher keeps a bounded revision checkpoint so unchanged reads stay
+quiet. A short per-goal action boundary prevents a notification from crossing
+goal acceptance or an explicit stop. These are safety details, not additional
+product concepts.
 
 The watcher detects change; it does not interpret it. It computes a compact
 revision from authoritative provider fields. An unchanged revision costs no
@@ -416,6 +417,38 @@ pipeline definitions. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
 the runtime environment. Without usable credentials, discovery fails with a
 clear error and the watcher never guesses.
+
+## Diagnostics and knowledge
+
+A failure is another observation, not a new task or a second recovery system:
+
+```text
+failure fact -> relevant goal and current evidence -> model decision -> existing action
+```
+
+The component that sees a failure reports bounded facts: what operation failed,
+where it failed, which goals may be affected, the observed error, and what
+automatic retry remains. Stable operating guidance explains the available
+capabilities and authority boundaries. The model decides what those facts mean.
+
+Knowledge has two simple homes. Goal-specific facts belong in the portable goal
+context. Stable operating rules belong in the supervisor or worker guidance.
+A diagnostic contributes only current failure facts and retry behavior; it is
+not a knowledge database or an error-history workflow.
+
+The model then uses the same paths it already has:
+
+- leave healthy work alone while built-in retry continues;
+- reconsider or steer the fitting existing goal;
+- ask the human for genuinely missing authority, configuration, or information;
+  or
+- define durable repair work only when repair itself is a real new outcome.
+
+Diagnostics never create a goal automatically. Code does not choose a recovery
+by matching error words. The supervisor must not claim that it inspected or
+repaired a service when its tools supplied no such evidence. If a case can be
+handled with existing actions, a reliable wake, and enough facts and guidance,
+the remedy belongs in knowledge rather than another mechanism.
 
 ## Concurrency
 
@@ -442,23 +475,21 @@ decision at a time.
   pending or while its turn owns Pi, so no automatic review begins only to lose
   its fence to that turn. It adds no durable message queue; after a process
   failure the human may simply resend the request.
-- A low-frequency compact global review sees every unfinished goal, including
+- A low-frequency system health check sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
-  work and may schedule ordinary focused reviews only for goals that have a
-  worker; it never acts on workers itself.
-- Its small local checkpoint supplies the last bounded active finding to the
-  next review. The model returns the complete set still supported by current
-  evidence; code suppresses an identical set and clears resolved findings so a
-  later recurrence is visible again.
+  problems and may wake ordinary focused reviews; it never acts on workers.
+- A small local checkpoint suppresses repeated identical health findings. The
+  check is another observation source feeding the same goal loop, not a second
+  kind of supervision.
 
 This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.
 
 ## Failure behavior
 
-Every failure resolves to one of three outcomes: retry safely, fail closed, or
-surface to the human. Nothing is silently dropped, and no failure path creates
-duplicate work.
+Every handled failure aims for one of three outcomes: retry safely, fail closed,
+or surface the evidence to the supervisor or human. No failure path creates
+duplicate goal work.
 
 ```mermaid
 flowchart TD
@@ -482,7 +513,7 @@ flowchart TD
 - An interrupted supervisor reloads every unfinished goal from its contract and
   checkpoint and compares it with fresh Herdr state.
 - A saved contract with no checkpoint remains visible as unstarted work in the
-  global safety review. It cannot be silently treated as healthy or routed to a
+  system health check. It cannot be silently treated as healthy or routed to a
   worker review that does not exist.
 - A stopped supported Codex process can resume only its exact native session.
 - A changed or missing identity fails closed and receives no prompt.

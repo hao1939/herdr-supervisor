@@ -193,7 +193,7 @@ test("the local checkpoint retains one unresolved external change", async () => 
   await updateGoalState("g_test", (current) => {
     current.externalChange = {
       source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
+      subject: "owner/repository#16",
       revision: "revision-2",
       observedAt: "2026-08-30T10:05:00.000Z",
     };
@@ -202,7 +202,7 @@ test("the local checkpoint retains one unresolved external change", async () => 
 
   assert.deepEqual((await loadGoalState("g_test", root)).externalChange, {
     source: "github-pr",
-    subject: "hao1939/herdr-supervisor#16",
+    subject: "owner/repository#16",
     revision: "revision-2",
     observedAt: "2026-08-30T10:05:00.000Z",
   });

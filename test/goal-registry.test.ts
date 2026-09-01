@@ -163,7 +163,7 @@ test("a legacy provider change survives until the worker is steered to reread it
   await updateGoalState(binding.goalId, (state) => {
     state.externalChange = {
       source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
+      subject: "owner/repository#16",
       revision: "legacy-revision",
       observedAt: "2026-08-30T05:01:00.000Z",
     };

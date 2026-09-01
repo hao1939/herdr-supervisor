@@ -219,11 +219,12 @@ const supervisorPolicy = [
   ],
   [
     "Diagnostics and new behavior",
-    "Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature.",
+    "Treat any supervisor or external-watcher diagnostic as current system evidence, not automatically as a new goal or feature.",
     "First ask whether an agent can handle it with existing tools, whether an existing event or bounded review will trigger that agent, and whether the agent has enough current context and durable knowledge.",
     "When all three are true, use or reconsider the fitting existing goal and improve its knowledge when needed; do not add another mechanism.",
     "Propose a new code primitive only for a proven missing capability or trigger, or when repeated failures, material unreliability, cost, or another general benefit justify it.",
     "Continue an existing matching goal instead of creating a duplicate, and ask the human only for missing authority, information, or a material decision.",
+    "Do not claim to inspect or repair a service unless the supplied evidence and available tools prove that action.",
   ],
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 
