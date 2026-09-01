@@ -105,6 +105,15 @@ export function shouldWake(binding, agent, pane) {
   const mismatch = identityMismatch(binding, agent, pane);
   if (mismatch) return { wake: true, reason: mismatch, sequence: undefined, key: `identity:${mismatch}` };
   const sequence = Number(agent.state_change_seq || 0);
+  if (binding.legacyExternalChange) {
+    const change = binding.legacyExternalChange;
+    return {
+      wake: true,
+      reason: `${change.source} ${change.subject} changed before the metadata watcher upgrade; have this worker reread current provider authority`,
+      sequence,
+      key: `legacy-external:${change.source}:${change.subject}:${change.revision}:${sequence}`,
+    };
+  }
   if (sequence > 0 && sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {
     return { wake: false, reason: "transition already reviewed", sequence, key: `state:${sequence}` };
   }
@@ -151,14 +160,10 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   const workerUnavailable = !agent && Boolean(mismatch);
   const routingRecoverable = !agent && sessionRecoverable;
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
-  const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
-  const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
   const goalState = workerUnavailable && awaitingHuman
     ? "waiting for you"
     : mismatch
     ? "needs attention"
-    : binding.externalChange
-      ? (externalRereadWorking ? "working" : "needs review")
     : awaitingHuman
       ? "waiting for you"
       : binding.wait
@@ -202,15 +207,6 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
     if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
   }
-  else if (binding.externalChange) {
-    if (!externalRereadInFlight) {
-      lines.push(`  Next: worker must reread ${binding.externalChange.source} ${binding.externalChange.subject}`);
-    } else if (agent.agent_status === "working") {
-      lines.push(`  Next: worker is rereading ${binding.externalChange.source} ${binding.externalChange.subject}`);
-    } else {
-      lines.push("  Next: supervisor should review the worker's reread result");
-    }
-  }
   else if (agent.agent_status === "working") {
     lines.push("  Next: review when the worker settles or blocks");
     if (binding.reviewAt) lines.push(`  Supervisor rechecks at: ${binding.reviewAt}`);
@@ -218,9 +214,6 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   else if (binding.wait) {
     const condition = detailed ? binding.wait.condition : compact(binding.wait.condition, 360);
     lines.push(`  Next: wait for ${condition}`);
-    if (binding.externalWatch) {
-      lines.push(`  Watching: ${binding.externalWatch.source} ${binding.externalWatch.subject}`);
-    }
     lines.push(`  Review at: ${binding.wait.reviewAt}`);
   }
   else lines.push(`  Next: supervisor should review current evidence`);

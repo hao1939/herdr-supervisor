@@ -45,16 +45,11 @@ export function bindingFromRecord(record): GoalBinding {
     lastDecision: record.state.lastDecision,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
-    externalChange: record.state.externalChange ? structuredClone(record.state.externalChange) : undefined,
+    legacyExternalChange: record.state.externalChange
+      ? structuredClone(record.state.externalChange)
+      : undefined,
     updatedAt: record.state.updatedAt,
   };
-}
-
-export async function recordExternalChange(binding, change, root?, now?) {
-  return updateGoalState(binding.goalId, (current) => {
-    current.externalChange = structuredClone(change);
-    return current;
-  }, root, now);
 }
 
 export async function loadSupervisorGoals(root?) {
@@ -225,30 +220,10 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
-    const resolvedRevision = input.resolvedExternalChangeRevision;
-    if (resolvedRevision && current.externalChange?.revision !== resolvedRevision) {
-      throw new Error("the watched external resource changed again before its reread was accepted");
+    if (current.externalChange && ["leave", "ask_human", "accept"].includes(decision)) {
+      throw new Error(`the legacy ${current.externalChange.source} ${current.externalChange.subject} change must be reread by the worker before this decision`);
     }
-    const resolvesExternalChange = Boolean(current.externalChange && resolvedRevision);
-    if (["leave", "ask_human"].includes(decision) && current.externalChange && !resolvesExternalChange) {
-      throw new Error("the watched external resource changed before the decision was recorded");
-    }
-    if (decision === "accept" && current.externalChange && !resolvesExternalChange) {
-      throw new Error("the watched external resource changed before acceptance");
-    }
-    if (
-      decision === "steer"
-      && current.externalChange?.revision !== input.externalChangeRevision
-    ) {
-      throw new Error("a steer must acknowledge the current external change revision before it can be recorded");
-    }
-    if (decision === "steer" && current.externalChange && !resolvesExternalChange) {
-      if (!Number.isInteger(input.workerSequence) || input.workerSequence < 0) {
-        throw new Error("external-change steering requires the observed worker sequence");
-      }
-      current.externalChange.workerSequence = input.workerSequence;
-    }
-    if (resolvesExternalChange) delete current.externalChange;
+    if (current.externalChange && input.resolvedLegacyExternalChange) delete current.externalChange;
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

@@ -1,5 +1,3 @@
-import type { ExternalWatch } from "./external-watch.ts";
-
 export type AgentSession = {
   source: string;
   agent: string;
@@ -53,12 +51,11 @@ export type ObservationCursor = {
   [field: string]: unknown;
 };
 
-export type PendingExternalChange = {
+export type LegacyExternalChange = {
   source: string;
   subject: string;
   revision: string;
   observedAt: string;
-  workerSequence?: number;
 };
 
 /** Durable goal data loaded from goal.json and current.json. */
@@ -74,7 +71,7 @@ export type GoalBinding = WorkerIdentity & {
   lastDecision?: LastDecision;
   wait?: GoalWait;
   observationCursor?: ObservationCursor;
-  externalChange?: PendingExternalChange;
+  legacyExternalChange?: LegacyExternalChange;
   updatedAt: string;
 };
 
@@ -87,8 +84,6 @@ export type GoalRuntime = {
   missingDecisionRetries: number;
   pendingCursor?: ObservationCursor;
   pendingObservationHasMessages?: boolean;
-  externalRereadCandidateRevision?: string;
-  externalWatch?: ExternalWatch;
 };
 
 export type ActiveGoal = GoalBinding & GoalRuntime;
