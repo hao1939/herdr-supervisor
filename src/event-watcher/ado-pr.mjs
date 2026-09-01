@@ -151,7 +151,7 @@ export function adoPullRequestDiscovery({
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
       const pullsBySubject = new Map();
-      const fullPullSubjects = new Set();
+      const listedSubjects = new Set();
       const absent = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
@@ -166,7 +166,11 @@ export function adoPullRequestDiscovery({
         if (pulls.length >= MAX_ACTIVE_PULLS) {
           throw new Error(`ADO pull request discovery reached its ${MAX_ACTIVE_PULLS}-pull limit; narrow the configured repository scope`);
         }
-        for (const pull of pulls) pullsBySubject.set(subjectFor(scope, pull.pullRequestId), pull);
+        for (const pull of pulls) {
+          const subject = subjectFor(scope, pull.pullRequestId);
+          pullsBySubject.set(subject, pull);
+          listedSubjects.add(subject);
+        }
       }
       for (const resource of remembered) {
         if (pullsBySubject.has(resource.subject)) continue;
@@ -183,14 +187,12 @@ export function adoPullRequestDiscovery({
             "ADO pull request",
           );
           pullsBySubject.set(resource.subject, pull);
-          fullPullSubjects.add(resource.subject);
         } catch (error) {
           if (error?.status === 404) absent.push(resource.subject);
           else throw error;
         }
       }
-      for (const [subject] of pullsBySubject) {
-        if (fullPullSubjects.has(subject)) continue;
+      for (const subject of listedSubjects) {
         const scope = parseSubject(subject);
         if (!scope) throw new Error("ADO pull request discovery returned an invalid pull request subject");
         const pull = await json(
