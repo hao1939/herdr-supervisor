@@ -3,6 +3,25 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.3.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.2...herdr-supervisor-v0.3.0) (2026-09-01)
+
+
+### Features
+
+* run workers with native Codex goals ([6fae060](https://github.com/hao1939/herdr-supervisor/commit/6fae060fe7b5ff6b76caa506c3d66ebb92a6afd9))
+
+
+### Bug Fixes
+
+* apply exact worker trust at launch ([1acd639](https://github.com/hao1939/herdr-supervisor/commit/1acd639b47bf7b9bca9ef132a3bafcc4a9d93e3d))
+* harden Herdr agent startup boundary ([#25](https://github.com/hao1939/herdr-supervisor/issues/25)) ([2b335e1](https://github.com/hao1939/herdr-supervisor/commit/2b335e14c728747cd80d44149c3c889eb81a8163))
+* honor exact worker review deadlines ([733e7b3](https://github.com/hao1939/herdr-supervisor/commit/733e7b3ab6daa8819423117db01ccf84b76ecc13))
+* initialize Codex session at launch ([81823ce](https://github.com/hao1939/herdr-supervisor/commit/81823cef3bac170f49ace7456f92011f40d64baa))
+* refresh cached review age ([aa436d6](https://github.com/hao1939/herdr-supervisor/commit/aa436d6c21ede8bb2ce2eb3c1ab65317f8ae67ef))
+* resume native goals without interaction ([ab02dfb](https://github.com/hao1939/herdr-supervisor/commit/ab02dfb625fc00b06c36e788e38ea92f575ef806))
+* retry agent start when pane shell is not yet ready ([#45](https://github.com/hao1939/herdr-supervisor/issues/45)) ([947170a](https://github.com/hao1939/herdr-supervisor/commit/947170a2b9749fe25c03a0f7fb1b1035d9ab5bbd))
+* trust unattended worker directory ([97c285d](https://github.com/hao1939/herdr-supervisor/commit/97c285dac325d0f2ae374f1af0f2418d3a08273e))
+
 ## [0.2.2](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.1...herdr-supervisor-v0.2.2) (2026-08-29)
 
 
