@@ -1405,7 +1405,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /whole objective and every acceptance criterion at their declared horizon/);
   assert.match(result.systemPrompt, /Distinguish a finite deliverable from a standing improvement outcome by meaning and conversation context, never keyword matching/);
   assert.match(result.systemPrompt, /only explicit human instruction may stop or replace it/);
-  assert.match(result.systemPrompt, /Treat a herdr-supervisor-error as current system evidence, not automatically as a new goal or feature/);
+  assert.match(result.systemPrompt, /Treat any supervisor or external-watcher diagnostic as current system evidence, not automatically as a new goal or feature/);
+  assert.match(result.systemPrompt, /Do not claim to inspect or repair a service unless the supplied evidence and available tools prove that action/);
   assert.match(result.systemPrompt, /whether an agent can handle it with existing tools/);
   assert.match(result.systemPrompt, /whether an existing event or bounded review will trigger that agent/);
   assert.match(result.systemPrompt, /whether the agent has enough current context and durable knowledge/);
@@ -3024,8 +3025,8 @@ test("restart restores a settled wait without a no-change review before its dead
   }, root, { goalId: "g_wait_restart" });
   const reviewAt = new Date(Date.now() + 1200).toISOString();
   await recordDecision(binding, "leave", {
-    progress: "The service asked us to wait.\nExternal watch target: github-pr hao1939/herdr-supervisor#16",
-    action: "Wait for the service retry boundary; observe github-pr hao1939/herdr-supervisor#16 when supervision resumes.",
+    progress: "The service asked us to wait.\nExternal watch target: github-pr owner/repository#16",
+    action: "Wait for the service retry boundary; observe github-pr owner/repository#16 when supervision resumes.",
     wait: { condition: "the service retry boundary", reviewAt },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
     evidence: ["The server returned a retry deadline."],
@@ -3059,7 +3060,7 @@ test("restart restores a settled wait without a no-change review before its dead
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /review deadline elapsed/);
-  assert.match(pi.messages[0].content, /External watch target: github-pr hao1939\/herdr-supervisor#16/);
+  assert.match(pi.messages[0].content, /External watch target: github-pr owner\/repository#16/);
   assert.doesNotMatch(pi.messages[0].content, /Watching:/);
   const observation = await pi.tools.get("supervisor_observe").execute("observe-due", {
     pane_id: worker.paneId,

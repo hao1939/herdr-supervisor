@@ -429,11 +429,16 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   await watcher.runOnce();
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery"]);
+  assert.deepEqual(diagnostics[0].affectedGoalIds, []);
+  assert.match(diagnostics[0].retry, /next bounded scan/);
+  assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_owner"]);
+  assert.match(diagnostics[1].retry, /remains pending/);
   deliveryFails = false;
   await watcher.runOnce();
   sourceFails = true;
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery", "source"]);
+  assert.deepEqual(diagnostics[2].affectedGoalIds, ["g_owner"]);
 });
 
 test("a pending delivery stays coalesced while its resource rotates out of a scan", async (t) => {
@@ -570,6 +575,8 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
 
   assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
   assert.match(diagnostics[1].message, /source new/);
+  assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_same"]);
+  assert.match(diagnostics[1].retry, /capacity becomes available/);
 });
 
 test("capacity turnover allows a later distinct deferral diagnostic", async (t) => {
@@ -1143,12 +1150,22 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
     },
   });
 
-  await diagnose({ message: "ADO discovery failed" });
+  await diagnose({
+    kind: "source",
+    source: "ado-build",
+    affectedGoalIds: ["g_release"],
+    message: "ADO discovery failed",
+    retry: "The watcher will retry this provider scope on its next bounded scan.",
+  });
 
   const prompt = calls.find(([method]) => method === "agent.prompt")[1];
   assert.equal(prompt.target, "w1:p2");
   assert.match(prompt.text, /ADO discovery failed/);
+  assert.match(prompt.text, /Known affected goals: g_release/);
+  assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
+  assert.match(prompt.text, /Do not claim to inspect or repair a service/);
   assert.match(prompt.text, /not a new goal/);
+  assert.doesNotMatch(prompt.text, /Inspect current service and provider evidence/);
 });
 
 test("watcher diagnostics fail closed when the supervisor is ambiguous", async () => {

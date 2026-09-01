@@ -181,10 +181,10 @@ export class MetadataEventWatcher {
     const found = [];
     const absent = [];
     for (const [source, adapter] of Object.entries(this.sources)) {
+      const known = Object.values(this.state.resources)
+        .filter((resource) => resource.source === source)
+        .map((resource) => ({ subject: resource.subject, goalId: resource.goalId }));
       try {
-        const known = Object.values(this.state.resources)
-          .filter((resource) => resource.source === source)
-          .map((resource) => ({ subject: resource.subject, goalId: resource.goalId }));
         const result = await adapter.scan(known);
         if (!result || typeof result !== "object" || Array.isArray(result)
           || !Array.isArray(result.observations) || !Array.isArray(result.absent)) {
@@ -225,6 +225,8 @@ export class MetadataEventWatcher {
         await this.report(`source:${source}`, {
           kind: "source",
           source,
+          affectedGoalIds: [...new Set(known.map((resource) => resource.goalId))].slice(0, 20),
+          retry: "The watcher will retry this provider scope on its next bounded scan.",
           message: `${source} discovery failed: ${error instanceof Error ? error.message : error}`,
         });
       }
@@ -266,6 +268,8 @@ export class MetadataEventWatcher {
         await this.report(`delivery:${goalId}`, {
           kind: "delivery",
           goalId,
+          affectedGoalIds: [goalId],
+          retry: "The latest observed revision remains pending and will be retried after a successful current provider read.",
           message: `could not wake ${goalId} for ${subjects}: ${error instanceof Error ? error.message : error}`,
         });
       }
@@ -300,6 +304,8 @@ export class MetadataEventWatcher {
     } catch (error) {
       await this.report("goals", {
         kind: "goals",
+        affectedGoalIds: goalIds.slice(0, 20),
+        retry: "The watcher will resolve canonical active goals again on its next bounded scan.",
         message: `could not resolve active goal ownership: ${error instanceof Error ? error.message : error}`,
       });
       return;
@@ -357,6 +363,8 @@ export class MetadataEventWatcher {
       .join(", ");
     await this.report("capacity", {
       kind: "capacity",
+      affectedGoalIds: [...new Set(deferred.map((item) => item.goalId))].slice(0, 20),
+      retry: "Existing resources remain monitored; deferred resources are reconsidered when bounded capacity becomes available.",
       message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a goal completes, a remembered resource is authoritatively absent, or its provider scope is removed: ${examples}`,
     });
   }

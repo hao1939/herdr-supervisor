@@ -1,16 +1,17 @@
 # Herdr Supervisor
 
-One Pi agent that supervises existing Herdr workers against explicit goals,
-without replacing Herdr or introducing another task system.
+One supervisor helps several workers finish explicit goals without introducing
+another task system.
 
-1. You describe an outcome to the supervisor.
-2. The supervisor forms the goal and acceptance criteria, starts one Codex worker
-   with a native `/goal` for it, and sleeps.
-3. A meaningful Herdr event wakes the supervisor.
-4. The supervisor reads current evidence and either leaves the worker alone,
-   continues it, asks you, or accepts the result.
+1. You define or refine an outcome.
+2. One worker owns that goal and keeps pursuing it.
+3. The supervisor watches progress and helps the same worker when needed.
+4. An optional external watcher wakes the worker when a pull request or build
+   changes.
 
-Herdr owns runtime truth. The supervisor owns judgment.
+The model decides what current evidence means. Small deterministic code records
+goals, observes events, validates identity, and applies the chosen action.
+Herdr hosts the sessions and events; it is runtime plumbing for this model.
 
 ## Quick start (container)
 
@@ -165,14 +166,21 @@ goal review remains the safety net after a missed signal or provider failure.
 One short per-goal execution lock prevents a notification from crossing an
 accept or stop decision; it contains no workflow state.
 
+Failures follow the same path. The component that sees a failure reports the
+operation, affected goals, observed error, and remaining automatic retry. The
+supervisor uses the existing goal actions and stable operating guidance to
+decide what to do. A diagnostic never creates a goal or recovery workflow by
+itself.
+
 The container starts the watcher automatically when either provider-scope
 variable is set. For local use, export the same variables and run
 `npm run watch` beside Herdr. Configure only scopes where the supervision
 metadata is written by trusted workers or maintainers.
 
 Each goal gets one directory: `goal.json` (portable contract), `current.json`
-(execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is
-enough to start that goal with a new worker elsewhere.
+(execution checkpoint), and `journal.jsonl` (audit). The contract file is the
+only goal data another instance needs; place it in a valid goal directory there
+before starting a new worker.
 
 The human may refine an active goal in conversation. The supervisor updates the
 durable contract and informs the same worker — no sibling goals or temporary
@@ -190,10 +198,11 @@ change; the metadata only makes the originating supervised work easy to trace.
 
 ### Current limitations
 
-- **Codex only.** Worker startup, message-level observation, and exact-session
-  recovery are Codex-specific. Other Herdr CLIs fall back to terminal scraping.
-- **One agent per goal.** Multi-agent execution (relay, reviewer pair) is
-  designed but not implemented. See `docs/multi-agent-design.md`.
+- **Full automation is Codex-specific.** Other Herdr agents can be attached and
+  observed through terminal output, but native Goal delivery and exact-session
+  recovery require Codex.
+- **One worker per goal.** A worker may use several repositories and worktrees,
+  but the supervisor does not coordinate several agents inside one goal.
 - **No automatic pane retirement or parking.** Safe closure needs an atomic
   Herdr identity precondition; safe parking also needs atomic exact-session
   resume and prompt. Until then, idle is execution state rather than proof that
@@ -211,16 +220,14 @@ npm test         # node:test suite
 
 - [Changelog](CHANGELOG.md)
 - [Current design](docs/design.md)
+- [Shared external watcher contract](docs/proposals/shared-event-watcher.md)
 - [Research landscape](docs/research.md)
-- [Deferred multi-worker exploration](docs/multi-agent-design.md)
-- [Proof-of-concept validation record](docs/poc-design.md)
-- [Code review, 2026-08-29](docs/review-2026-08-29.md) — historical snapshot
 
 ## Design rule
 
-Herdr owns runtime truth. The supervisor owns judgment about whether a
-registered worker is still moving toward its stated goal. It must not copy
-Herdr's lifecycle into a parallel queue, task graph, or status database.
+The runtime owns process and session truth. The supervisor owns judgment about
+whether a worker is still moving toward its stated goal. It must not copy the
+runtime lifecycle into a parallel queue, task graph, or status database.
 
 Implement only the small deterministic foundation shared by most goals. Keep
 uncommon recovery and workflow choices in model guidance until repeated live

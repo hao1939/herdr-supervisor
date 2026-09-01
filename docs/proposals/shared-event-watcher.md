@@ -36,7 +36,7 @@ configured provider adapter scans resources
                   v
             wake the worker
 
-observation or delivery failure -> supervisor diagnostic
+failure + known affected goals + retry fact -> supervisor diagnostic
 ```
 
 This replaces the former in-process, model-registered watcher. It does not
@@ -108,7 +108,7 @@ Each provider stores it in the simplest durable metadata it already supports:
 - GitHub pull requests use the existing secondary `## Supervision` description
   block. The adapter reads only its `Goal ID` value for routing.
 - Azure DevOps builds use a build tag such as
-  `herdr-goal=g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde`. Azure DevOps
+  `herdr-goal=g_example`. Azure DevOps
   rejects a colon in the build-tag API path, so the portable spelling uses an
   equals sign.
 
@@ -180,7 +180,7 @@ observations and exact remembered subjects that are now absent:
 {
   "source": "ado-build",
   "subject": "organization/project/178997557",
-  "goalId": "g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde",
+  "goalId": "g_example",
   "revision": "provider-derived-hash",
   "payload": {}
 }
@@ -241,7 +241,10 @@ If the goal is already complete when delivery begins, the change is safely
 ignored. If the goal is missing, ambiguous, unreadable, or temporarily has no
 valid worker, delivery fails closed. The daemon does not guess another worker
 or create a goal. It records one bounded diagnostic for the supervisor, which
-uses ordinary goal reasoning and tools to repair the situation.
+uses current facts and ordinary goal actions to keep affected work moving or
+ask for the missing human input. The watcher retains and retries its own
+pending delivery; the supervisor does not pretend to inspect or repair a
+service without evidence and an available action.
 
 The daemon resolves the environment's one Pi supervisor from fresh Herdr state
 and sends it a bounded diagnostic. It persists no supervisor destination. If
@@ -336,38 +339,17 @@ The provisioner has only two integration duties:
 
 ## Live evidence
 
-The MLVM experiment now proves the metadata path end to end for goal
-`g_63bfbf0e-66c1-4d47-89c8-b49ed0087bde` and its exact current worker in pane
-`w1:p11`:
+A containerized Azure DevOps experiment proved the metadata path end to end:
 
-- Builds `178997557`, `179017733`, and `179018392` carry the durable goal tag;
-  the worker registered no watch.
-- First discovery woke the exact worker. The worker reread ADO authority and
-  reconciled the resources instead of treating the hint as completion proof.
-- Canceling duplicate build `179018392` produced later revisions and another
-  wake without renewal. Its final state is completed/canceled.
-- Repeated unchanged scans of build `179017733` produced no new wake. After the
-  daemon restarted with its existing checkpoint, the build changed from
-  `notStarted` to `inProgress` at `2026-08-31T19:31:37Z`; the watcher recorded
-  the new revision at `19:31:43Z` and woke the same Codex session
-  `01a04ca8-8771-7473-8e20-cebef028f430`.
-- That worker reread the exact build and SHA, recorded its own durable
-  checkpoint, and continued independent goal work while leaving terminal ADO
-  proof event-driven.
-- The shared daemon remained healthy and retained all three latest revisions in
-  its bounded checkpoint.
-- The current watcher runtime was then deployed over the same checkpoint. A direct
-  container start initially lacked the user-local Azure CLI on `PATH`; the
-  existing `AZURE_CLI` environment setting fixed that deployment boundary
-  without adding credentials or watcher state. The resulting provider failure
-  reached the Pi supervisor, whose existing goal checkpoint records the
-  diagnostic and its decision to steer the same worker.
-- On the recovered daemon, build `179017733` exposed another real revision. The
-  checkpoint advanced, the pending wake cleared, and exact Codex session
-  `01a04ca8-8771-7473-8e20-cebef028f430` in pane `w1:p11` returned to
-  `working`. The worker reconciled the changed build, finished a useful PR
-  readiness checkpoint, and moved to another independent route instead of
-  polling. Later unchanged scans left the checkpoint timestamp unchanged.
+- tagged builds required no watch registration;
+- first discovery and later revisions woke the same exact worker;
+- unchanged scans produced no wake;
+- restart retained the latest revision and later change detection;
+- the worker reread current provider state instead of treating a hint as proof;
+- a missing Azure CLI path produced a supervisor diagnostic, while restoring
+  the configured path recovered the same pending observation; and
+- the worker continued independent useful work while terminal provider proof
+  remained event-driven.
 
 The metadata lifecycle and live ADO path are proven. The old per-goal watcher
 has been removed; this is now the only early external-update path.
