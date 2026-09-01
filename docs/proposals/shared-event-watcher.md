@@ -215,8 +215,10 @@ produce.
 The Azure DevOps PR adapter derives its revision from the pull request head,
 status, draft and merge state, reviewer votes, discussion thread revisions, and
 policy evaluations. It reads only PRs carrying the existing supervision block
-inside configured repositories. Its payload is bounded while its revision
-covers the complete provider collections.
+inside configured repositories. Because ADO truncates descriptions in its list
+response, the adapter rotates through bounded exact PR reads before parsing the
+block. Its payload is bounded while its revision covers the complete provider
+collections.
 
 On first discovery, the daemon records the revision and emits one wake. This
 may produce a harmless extra review when a resource was just created, but it

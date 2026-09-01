@@ -151,10 +151,11 @@ export function adoPullRequestDiscovery({
     async scan(known = []) {
       const auth = authorization || await getAuthorization();
       const pullsBySubject = new Map();
-      const listedPulls = new Map();
+      const active = [];
       const absent = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
+      const knownSubjects = new Set(known.map((resource) => resource.subject));
       for (const scope of scopes) {
         const result = await json(
           fetchImpl,
@@ -166,19 +167,11 @@ export function adoPullRequestDiscovery({
         if (pulls.length >= MAX_ACTIVE_PULLS) {
           throw new Error(`ADO pull request discovery reached its ${MAX_ACTIVE_PULLS}-pull limit; narrow the configured repository scope`);
         }
-        for (const pull of pulls) {
-          const subject = subjectFor(scope, pull.pullRequestId);
-          pullsBySubject.set(subject, pull);
-          listedPulls.set(subject, { scope, pullRequestId: pull.pullRequestId });
-        }
+        for (const pull of pulls) active.push({
+          subject: subjectFor(scope, pull.pullRequestId),
+        });
       }
-      for (const resource of remembered) {
-        if (pullsBySubject.has(resource.subject)) continue;
-        const scope = parseSubject(resource.subject);
-        if (!scope || !allowedRepositories.has(`${scope.organization}/${scope.project}/${scope.repository}`)) {
-          absent.push(resource.subject);
-          continue;
-        }
+      const exact = async (subject, scope, knownResource) => {
         try {
           const pull = await json(
             fetchImpl,
@@ -186,21 +179,23 @@ export function adoPullRequestDiscovery({
             auth,
             "ADO pull request",
           );
-          pullsBySubject.set(resource.subject, pull);
+          pullsBySubject.set(subject, pull);
         } catch (error) {
-          if (error?.status === 404) absent.push(resource.subject);
-          else throw error;
+          if (error?.status === 404 && knownResource) absent.push(subject);
+          else if (error?.status !== 404) throw error;
         }
+      };
+      for (const resource of remembered) {
+        const scope = parseSubject(resource.subject);
+        if (!scope || !allowedRepositories.has(`${scope.organization}/${scope.project}/${scope.repository}`)) {
+          absent.push(resource.subject);
+          continue;
+        }
+        await exact(resource.subject, scope, true);
       }
-      const fullPulls = await Promise.all([...listedPulls].map(async ([subject, { scope, pullRequestId }]) => {
-        return [subject, await json(
-          fetchImpl,
-          `${pullUrl(scope, `/${pullRequestId}`)}?api-version=7.1`,
-          auth,
-          "ADO pull request",
-        )];
-      }));
-      for (const [subject, pull] of fullPulls) pullsBySubject.set(subject, pull);
+      for (const candidate of recentWindow(active.filter((item) => !knownSubjects.has(item.subject)))) {
+        await exact(candidate.subject, parseSubject(candidate.subject), false);
+      }
       for (const resource of known) {
         const pull = pullsBySubject.get(resource.subject);
         if (pull && !supervisionGoal(pull.description)) absent.push(resource.subject);
@@ -209,7 +204,7 @@ export function adoPullRequestDiscovery({
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.description) }))
         .filter((item) => item.goalId);
       const retained = annotated.filter((item) => rememberedSubjects.has(item.subject));
-      const recent = recentWindow(annotated.filter((item) => !rememberedSubjects.has(item.subject)));
+      const recent = annotated.filter((item) => !rememberedSubjects.has(item.subject));
       const observations = [];
       for (const { subject, pull, goalId } of [...retained, ...recent]) {
         const scope = parseSubject(subject);

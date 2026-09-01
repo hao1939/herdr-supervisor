@@ -914,7 +914,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
       }] });
       if (text.includes("/pullRequests/42?")) return response({
         pullRequestId: 42,
-        description: "## Supervision\n- Goal ID: g_pr",
+        description: `${"Meaningful explanation. ".repeat(30)}\n\n## Supervision\n- Goal ID: g_pr`,
         lastMergeSourceCommit: { commitId: "abc" },
         status: "active",
         isDraft: false,
