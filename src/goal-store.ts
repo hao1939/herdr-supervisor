@@ -6,6 +6,56 @@ import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
 export const STATE_VERSION = 1;
+export const GOAL_STORE_GUIDE = `# Herdr Supervisor goal store
+
+This directory contains durable goal contracts and local supervision state. It
+is data, not a worktree or a second task system.
+
+## Layout
+
+\`\`\`text
+goals/
+├── README.md
+├── g_<id>/
+│   ├── goal.json
+│   ├── current.json
+│   └── journal.jsonl
+└── .supervisor/
+\`\`\`
+
+Within a \`g_<id>/\` directory, files other than \`goal.json\` appear only when
+that state exists.
+
+- \`goal.json\` is the portable authority: objective, stable context,
+  acceptance criteria, and lasting constraints.
+- \`current.json\` is the latest local checkpoint: worker identity, progress,
+  evidence, waits, and terminal result. It is not live runtime truth.
+- \`journal.jsonl\` is optional append-only audit history. Nothing replays it
+  to rebuild a goal.
+- \`.supervisor/\` contains local supervisor checkpoints, not goal contracts.
+
+Herdr owns live panes, processes, and native sessions. Read fresh supervisor or
+Herdr status before judging whether a worker is currently active.
+
+## Lifecycle
+
+- \`goal.json\` only: saved goal, not started on this instance.
+- Non-terminal \`current.json\`: active goal.
+- Terminal \`current.json\`: completed or explicitly stopped goal.
+
+To understand the store, list \`g_*\` directories, read each \`goal.json\`, then
+read \`current.json\` only for local progress. Consult \`journal.jsonl\` only
+when an audit trail matters. Compare goals by their meaning, not similar words
+or timestamps.
+
+Read these files freely, but do not edit them manually. Use supervisor actions
+for mutations so validation, identity checks, and atomic writes remain intact.
+Do not put credentials or transient provider state in a goal contract.
+
+To move a goal, copy its \`goal.json\` into a valid \`g_<id>/\` directory on the
+other instance and start it there. \`current.json\`, \`journal.jsonl\`, and
+\`.supervisor/\` are not required.
+`;
 const AUDIT_VERSION = 1;
 const MAX_CONTRACT_BYTES = 128 * 1024;
 const MAX_STATE_BYTES = 256 * 1024;
@@ -32,6 +82,9 @@ const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
 const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
+// Read-only compatibility for checkpoints written by the retired in-process
+// watcher. One legacy focused reread removes it; the shared watcher owns all
+// new revisions.
 const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "workerSequence"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
@@ -74,6 +127,10 @@ export function goalPaths(goalId, root = defaultGoalsRoot()) {
     current: join(directory, "current.json"),
     journal: join(directory, "journal.jsonl"),
   };
+}
+
+export function goalStoreGuidePath(root = defaultGoalsRoot()) {
+  return join(root, "README.md");
 }
 
 function requiredString(value, label) {
@@ -268,6 +325,20 @@ async function atomicWrite(path, value) {
   }
 }
 
+export async function initializeGoalStore(root = defaultGoalsRoot()) {
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  let file;
+  try {
+    file = await open(goalStoreGuidePath(root), "wx", 0o600);
+    await file.writeFile(GOAL_STORE_GUIDE);
+    await file.sync();
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  } finally {
+    await file?.close();
+  }
+}
+
 async function missing(path) {
   try {
     await readFile(path, "utf8");
@@ -282,6 +353,7 @@ export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
   validateGoalContract(contract);
   const paths = goalPaths(goalId, root);
   if (!(await missing(paths.contract))) throw new Error(`goal ${goalId} is already installed`);
+  await initializeGoalStore(root);
   await mkdir(paths.directory, { recursive: true, mode: 0o700 });
   await atomicWrite(paths.contract, jsonContent(contract, MAX_CONTRACT_BYTES, "goal contract"));
   return contract;
@@ -305,6 +377,7 @@ export async function updateGoalContract(goalId, change, root = defaultGoalsRoot
 
 export async function startGoal(goalId, worker, root = defaultGoalsRoot(), options: any = {}) {
   await loadGoalContract(goalId, root);
+  await initializeGoalStore(root);
   const paths = goalPaths(goalId, root);
   if (!(await missing(paths.current))) throw new Error(`goal ${goalId} already has local execution state`);
   const state = createGoalState({

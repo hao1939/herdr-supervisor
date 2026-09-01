@@ -1,16 +1,17 @@
 # Herdr Supervisor
 
-One Pi agent that supervises existing Herdr workers against explicit goals,
-without replacing Herdr or introducing another task system.
+One supervisor helps several workers finish explicit goals without introducing
+another task system.
 
-1. You describe an outcome to the supervisor.
-2. The supervisor forms the goal and acceptance criteria, starts one Codex worker
-   with a native `/goal` for it, and sleeps.
-3. A meaningful Herdr event wakes the supervisor.
-4. The supervisor reads current evidence and either leaves the worker alone,
-   continues it, asks you, or accepts the result.
+1. You define or refine an outcome.
+2. One worker owns that goal and keeps pursuing it.
+3. The supervisor watches progress and helps the same worker when needed.
+4. An optional external watcher wakes the worker when a pull request or build
+   changes.
 
-Herdr owns runtime truth. The supervisor owns judgment.
+The model decides what current evidence means. Small deterministic code records
+goals, observes events, validates identity, and applies the chosen action.
+Herdr hosts the sessions and events; it is runtime plumbing for this model.
 
 ## Quick start (container)
 
@@ -59,11 +60,15 @@ state at any time.
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
 | `ANTHROPIC_API_KEY` | — | Required for Pi |
 | `OPENAI_API_KEY` | — | Required for Codex workers |
-| `GITHUB_TOKEN` | — | Required for private GitHub PR watches; optional for public PRs to avoid the 60/hour unauthenticated limit. `GH_TOKEN` also works |
-| `AZURE_DEVOPS_EXT_PAT` | — | Required for Azure DevOps build watch (the `az` CLI is not in the image) |
+| `GITHUB_TOKEN` | — | GitHub API token for configured metadata discovery. `GH_TOKEN` also works |
+| `AZURE_DEVOPS_EXT_PAT` | — | Azure DevOps token for configured build discovery (the `az` CLI is not in the image) |
+| `AZURE_CLI` | `az` | Optional Azure CLI executable used when no ADO token is configured |
 | `HERDR_SUPERVISOR_REVIEW_MS` | `3600000` | Time without a review before a stale-progress check |
 | `HERDR_SUPERVISOR_GLOBAL_REVIEW_MS` | `3600000` | Interval for the compact review across all goals |
-| `HERDR_SUPERVISOR_EXTERNAL_WATCH_MS` | `300000` | Interval for PR and build observations |
+| `HERDR_WATCH_GITHUB_REPOSITORIES` | — | Up to ten comma-separated trusted `owner/repository` scopes; requires a GitHub token and enables the shared watcher |
+| `HERDR_WATCH_ADO_DEFINITIONS` | — | Up to ten comma-separated `organization/project/definition-id` scopes; enables the shared watcher |
+| `HERDR_WATCH_INTERVAL_MS` | `60000` | Interval between bounded provider scans |
+| `HERDR_WATCH_STATE_HOME` | user state directory | Directory for the bounded revision checkpoint |
 
 Codex runs sandboxed with its normal approval prompts by default. Set
 `HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1` to pass `--dangerously-bypass-approvals-and-sandbox`
@@ -129,7 +134,8 @@ the supervisor cannot become a second worker.
 
 The supervisor creates goals conversationally. It forms explicit completion
 criteria, places a Codex worker in a new or related tab, records the binding,
-and projects the canonical contract into that worker's native Codex Goal.
+gives its pane a short goal-based label, and projects the canonical contract
+into that worker's native Codex Goal.
 Codex owns the ordinary work-check-continue loop. The supervisor sleeps until a
 Herdr event or review deadline wakes it, then observes the worker once and makes
 exactly one decision:
@@ -146,19 +152,38 @@ is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction. If
 its pane disappeared and the recorded session supports exact resume, the
 executor may create a new routing pane, but only for that saved session.
+Herdr preserves a native Codex session when a human closes its settled pane.
+The supervisor does not automatically close panes because Herdr's current close
+operation cannot atomically require the expected terminal and native session.
 
-For a settled goal waiting on one exact GitHub pull request or Azure DevOps
-build, the supervisor can observe that resource between model turns. Unchanged
-reads stay quiet. A changed revision wakes the ordinary focused review, and the
-worker rereads the provider before the supervisor decides what the change
-means. When that condition is the worker's only blocker, it reports the wait
-once and yields instead of sleeping or polling. This uses the existing timer
-and review path; it is not another daemon or task system. The normal bounded
-review remains the fallback after restart or a provider failure.
+For GitHub and Azure DevOps, one shared metadata watcher observes configured
+provider scopes without model turns. Workers attach their durable goal ID when
+they create a PR or build; they never register or renew a watch. A changed
+revision resolves that goal's current exact worker and sends a short wake hint.
+The worker rereads provider authority, continues useful work, and its normal
+Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
+goal review remains the safety net after a missed signal or provider failure.
+One short per-goal execution lock prevents a notification from crossing an
+accept or stop decision; it contains no workflow state.
 
-Each goal gets one directory: `goal.json` (portable contract), `current.json`
-(execution checkpoint), and `journal.jsonl` (audit). Copying `goal.json` is
-enough to start that goal with a new worker elsewhere.
+Failures follow the same path. The component that sees a failure reports the
+operation, affected goals, observed error, and remaining automatic retry. The
+supervisor uses the existing goal actions and stable operating guidance to
+decide what to do. A diagnostic never creates a goal or recovery workflow by
+itself.
+
+The container starts the watcher automatically when either provider-scope
+variable is set. For local use, export the same variables and run
+`npm run watch` beside Herdr. Configure only scopes where the supervision
+metadata is written by trusted workers or maintainers.
+
+The goal-store root includes a concise `README.md` explaining its layout,
+authority, lifecycle, safe inspection, and portability. Each goal directory has
+`goal.json` (portable contract) and, when relevant, `current.json` (local
+execution checkpoint) and `journal.jsonl` (audit). The contract file is the
+only goal data another instance needs; place it in a valid goal directory there
+before starting a new worker. Store reads never generate files, and
+initialization never overwrites an existing root guide.
 
 The human may refine an active goal in conversation. The supervisor updates the
 durable contract and informs the same worker — no sibling goals or temporary
@@ -176,10 +201,15 @@ change; the metadata only makes the originating supervised work easy to trace.
 
 ### Current limitations
 
-- **Codex only.** Worker startup, message-level observation, and exact-session
-  recovery are Codex-specific. Other Herdr CLIs fall back to terminal scraping.
-- **One agent per goal.** Multi-agent execution (relay, reviewer pair) is
-  designed but not implemented. See `docs/multi-agent-design.md`.
+- **Full automation is Codex-specific.** Other Herdr agents can be attached and
+  observed through terminal output, but native Goal delivery and exact-session
+  recovery require Codex.
+- **One worker per goal.** A worker may use several repositories and worktrees,
+  but the supervisor does not coordinate several agents inside one goal.
+- **No automatic pane retirement or parking.** Safe closure needs an atomic
+  Herdr identity precondition; safe parking also needs atomic exact-session
+  resume and prompt. Until then, idle is execution state rather than proof that
+  a pane is disposable.
 
 ## Development
 
@@ -193,16 +223,14 @@ npm test         # node:test suite
 
 - [Changelog](CHANGELOG.md)
 - [Current design](docs/design.md)
+- [Shared external watcher contract](docs/proposals/shared-event-watcher.md)
 - [Research landscape](docs/research.md)
-- [Deferred multi-worker exploration](docs/multi-agent-design.md)
-- [Proof-of-concept validation record](docs/poc-design.md)
-- [Code review, 2026-08-29](docs/review-2026-08-29.md) — historical snapshot
 
 ## Design rule
 
-Herdr owns runtime truth. The supervisor owns judgment about whether a
-registered worker is still moving toward its stated goal. It must not copy
-Herdr's lifecycle into a parallel queue, task graph, or status database.
+The runtime owns process and session truth. The supervisor owns judgment about
+whether a worker is still moving toward its stated goal. It must not copy the
+runtime lifecycle into a parallel queue, task graph, or status database.
 
 Implement only the small deterministic foundation shared by most goals. Keep
 uncommon recovery and workflow choices in model guidance until repeated live

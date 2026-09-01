@@ -7,7 +7,9 @@ import {
   dependentBindings,
   dueBindings,
   findPane,
+  formatStoredGoal,
   formatWorker,
+  goalPaneLabel,
   identityMismatch,
   liveWorker,
   nextReviewDelay,
@@ -79,6 +81,11 @@ test("worker identity captures the exact native session", () => {
   });
 });
 
+test("worker display labels are bounded without changing goal meaning", () => {
+  assert.equal(goalPaneLabel("  Validate   Kubernetes versions  "), "Validate Kubernetes versions");
+  assert.equal(goalPaneLabel("A".repeat(80), 12), `${"A".repeat(11)}…`);
+});
+
 test("native session equality has one exact identity contract", () => {
   const session = agent().agent_session;
   assert.equal(sameAgentSession(session, { ...session }), true);
@@ -133,6 +140,26 @@ test("working is quiet while settled and blocked states wake review", () => {
   assert.equal(shouldWake(current, agent({ agent_status: "blocked", state_change_seq: 12 }), pane).wake, false);
 });
 
+test("an unresolved legacy provider change wakes one ordinary focused review", () => {
+  const current = binding({
+    legacyExternalChange: {
+      source: "ado-build",
+      subject: "org/project/101",
+      revision: "legacy-revision",
+      observedAt: "2026-08-30T05:01:00.000Z",
+    },
+  });
+  const pane = findPane(snapshot(), "w1:p2");
+
+  const result = shouldWake(current, agent(), pane);
+
+  assert.equal(result.wake, true);
+  assert.match(result.reason, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
+  assert.match(result.key, /legacy-external:ado-build:org\/project\/101:legacy-revision:10/);
+  const changed = shouldWake(current, agent({ state_change_seq: 11 }), pane);
+  assert.notEqual(changed.key, result.key);
+});
+
 test("a restored idle worker with no transition sequence is reviewed once", () => {
   const current = binding({ lastReviewStateChangeSeq: 0 });
   const currentPane = findPane(snapshot(), "w1:p2");
@@ -179,13 +206,6 @@ test("stopped process is shown as recoverable supervision work, not changed iden
     goalId: undefined,
     goal: "finish the goal",
     progress: undefined,
-    externalChange: {
-      source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
-      revision: "revision-2",
-      observedAt: "2026-08-30T05:01:00.000Z",
-      workerSequence: 7,
-    },
   });
   assert.equal(
     formatWorker(liveWorker(current, snapshot(null))),
@@ -322,7 +342,9 @@ test("a human question does not promise recovery for an unsupported missing sess
 test("the all-worker view stays bounded while one-worker detail stays complete", () => {
   const current = binding({
     goal: `Review the system ${"goal detail ".repeat(80)}`,
+    context: ["The complete stable context remains available in detail."],
     acceptance: ["The complete acceptance evidence remains available in detail."],
+    constraints: ["The complete lasting constraint remains available in detail."],
     progress: `Current finding ${"progress detail ".repeat(80)}`,
   });
   const live = liveWorker(current, snapshot());
@@ -332,9 +354,30 @@ test("the all-worker view stays bounded while one-worker detail stays complete",
   assert.ok(summary.length < 1000);
   assert.match(summary, /Review the system goal detail/);
   assert.doesNotMatch(summary, /Accept when:/);
+  assert.doesNotMatch(summary, /Context:/);
+  assert.doesNotMatch(summary, /Constraints:/);
   assert.match(summary, /…/);
+  assert.match(detail, /Context: The complete stable context remains available in detail/);
   assert.match(detail, /Accept when: The complete acceptance evidence remains available in detail/);
+  assert.match(detail, /Constraints: The complete lasting constraint remains available in detail/);
   assert.ok(detail.length > summary.length);
+});
+
+test("stored goal facts remain readable without live worker state", () => {
+  const current = binding({
+    context: ["The durable context remains available."],
+    acceptance: ["Fresh runtime state is observed."],
+    constraints: ["Do not guess worker state."],
+    progress: "The last stored review found useful work in progress.",
+  });
+  const output = formatStoredGoal(current);
+
+  assert.match(output, /^Goal g_test · active · live state unavailable$/m);
+  assert.match(output, /Context: The durable context remains available/);
+  assert.match(output, /Accept when: Fresh runtime state is observed/);
+  assert.match(output, /Constraints: Do not guess worker state/);
+  assert.match(output, /Progress: The last stored review found useful work in progress/);
+  assert.match(output, /Next: read fresh Herdr state before acting/);
 });
 
 test("a settled future wait shows its condition and review time", () => {
@@ -344,73 +387,11 @@ test("a settled future wait shows its condition and review time", () => {
       condition: "the capacity owner to release the shared pipeline slot",
       reviewAt: "2026-08-29T09:53:30.000Z",
     },
-    externalWatch: {
-      source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
-      nextPollAt: Date.parse("2026-08-29T09:50:00.000Z"),
-    },
   });
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
   assert.match(output, /Next: wait for the capacity owner to release the shared pipeline slot/);
-  assert.match(output, /Watching: github-pr hao1939\/herdr-supervisor#16/);
   assert.match(output, /Review at: 2026-08-29T09:53:30.000Z/);
   assert.doesNotMatch(output, /review current evidence/);
-});
-
-test("an unresolved external change is the visible next action", () => {
-  const current = binding({
-    progress: "The old PR snapshot was reviewed.",
-    wait: {
-      condition: "the old PR checks to finish",
-      reviewAt: "2026-08-30T06:01:00.000Z",
-    },
-    externalChange: {
-      source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
-      revision: "revision-2",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    },
-  });
-  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
-  assert.match(output, /Goal g_test · needs review/);
-  assert.match(output, /Next: worker must reread github-pr hao1939\/herdr-supervisor#16/);
-  assert.doesNotMatch(output, /Goal g_test · waiting/);
-  assert.doesNotMatch(output, /review current evidence/);
-});
-
-test("an external reread in progress is shown as working", () => {
-  const current = binding({
-    externalChange: {
-      source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
-      revision: "revision-2",
-      observedAt: "2026-08-30T05:01:00.000Z",
-      workerSequence: 7,
-    },
-  });
-  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "working" }))));
-  assert.match(output, /Goal g_test · working/);
-  assert.match(output, /Next: worker is rereading github-pr hao1939\/herdr-supervisor#16/);
-});
-
-test("a settled reread with a stale wait is shown as needs review, not waiting", () => {
-  const current = binding({
-    wait: {
-      condition: "the old PR checks to finish",
-      reviewAt: "2026-08-30T06:01:00.000Z",
-    },
-    externalChange: {
-      source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
-      revision: "revision-2",
-      observedAt: "2026-08-30T05:01:00.000Z",
-      workerSequence: 7,
-    },
-  });
-  const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
-  assert.match(output, /Goal g_test · needs review/);
-  assert.doesNotMatch(output, /Goal g_test · waiting/);
-  assert.match(output, /Next: supervisor should review the worker's reread result/);
 });
 
 test("a working goal shows its exact promised review time", () => {
@@ -513,6 +494,26 @@ test("a human correction updates durable authority before execution", () => {
   assert.match(prompt, /cannot override a contradictory goal\.json/);
   assert.match(prompt, /answers an earlier question with execution evidence that does not change the durable contract/);
   assert.match(prompt, /If the answer changes the contract, apply the durable-update rule instead/);
+  assert.match(prompt, /Use a fresh-start test for human refinements/);
+  assert.match(prompt, /losing conversation history and the current checkpoint would change what future cycles must do/);
+  assert.match(prompt, /persist the complete refinement in goal\.json with supervisor_update_goal/);
+  assert.match(prompt, /reconsideration or steering checkpoint is not durable authority/);
+});
+
+test("a direct human question can be answered without changing goal execution", () => {
+  const prompt = supervisorSystemPrompt("Base prompt.");
+  assert.match(prompt, /ordinary conversation, not automatically a goal-lifecycle event/);
+  assert.match(prompt, /When a direct human request requires durable work/);
+  assert.doesNotMatch(prompt, /For a direct human request, understand the durable outcome/);
+  assert.match(prompt, /observations may support an answer without requiring any state-changing tool/);
+  assert.match(prompt, /request for explanation, design review, status review, or suggestion is not by itself a request/);
+  assert.match(prompt, /answer directly/);
+  assert.match(prompt, /Do not use reconsideration merely to answer or discuss the goal/);
+  assert.match(prompt, /transient execution evidence that materially affects current execution/);
+  assert.match(prompt, /only when the human wants a new durable outcome/);
+  assert.match(prompt, /This is distinct from a direct question the human asks the supervisor/);
+  assert.doesNotMatch(prompt, /A human question also receives bounded reconsideration/);
+  assert.doesNotMatch(prompt, /Otherwise call supervisor_start_goal/);
 });
 
 test("each shared-session review request re-establishes one worker context", () => {

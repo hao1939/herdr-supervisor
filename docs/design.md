@@ -4,15 +4,31 @@
 
 ## Purpose
 
-Herdr Supervisor lets one human-facing agent watch several Herdr workers and
-help each one finish an explicit goal. It stays lightweight by using Herdr as
-the runtime and Codex's native Goal as the worker's continuation loop. It does
-not build another task system.
+Herdr Supervisor helps one person keep several goal-owning workers moving. It
+stays lightweight: the supervisor judges progress, workers do the work, and an
+optional external watcher wakes workers when a pull request or build changes.
+It does not build another task system.
+
+Herdr hosts the processes and events, and Codex supplies each worker's native
+Goal loop. Those are implementation choices, not extra product roles.
 
 The core rule is:
 
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
+
+The whole model is:
+
+1. The human defines or refines a goal.
+2. One worker owns that goal and keeps pursuing it.
+3. The supervisor watches evidence and helps the same worker move forward.
+4. An optional external watcher notifies the worker when a linked resource
+   changes.
+5. A failure enters the same observation and decision loop with diagnostic
+   facts and operating guidance.
+
+There are no hidden tasks, per-resource watch objects, diagnostic workflows, or
+parallel sources of goal truth.
 
 ## Scope discipline
 
@@ -66,19 +82,26 @@ cannot handle the problem cleanly.
 
 ## Mental model
 
-There are three roles:
+There are four plain roles:
 
 - The human states and refines outcomes and makes decisions that require human
   authority.
 - A worker pursues one durable goal in one exact native agent session.
 - The supervisor observes evidence, judges progress, and helps the same worker
   continue.
+- An optional external watcher detects relevant provider changes and wakes the
+  affected worker. It does not judge the change.
 
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal
 contract, its latest review checkpoint, and the judgment about what to do next.
 One native agent session can belong to only one unfinished goal, regardless of
 which pane currently routes to it.
+
+The supervisor derives each worker's short display label from its goal and asks
+Herdr to display it. The opaque goal ID, terminal ID, and native session ID
+remain authoritative. A label helps a human navigate; it is not stored state,
+never selects a worker, and never proves identity.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -92,39 +115,34 @@ Three diagrams, each answering one question.
 
 ```mermaid
 flowchart LR
-    U[Human] <--> S[Pi supervisor]
-    S <-->|socket| H[Herdr]
-    H --> W[Codex workers]
+    U[Human] <--> S[Supervisor]
+    S -->|goal and guidance| W[Workers]
+    W -->|progress and evidence| S
+    E[External watcher] -->|change notice| W
     S -->|write| F[(Goal files)]
-    F -.->|read goal contract| W
-
-    style U fill:#e8f0fe
-    style S fill:#fff4e5
-    style H fill:#e6f4ea
-    style W fill:#e6f4ea
-    style F fill:#fce8e6
+    F -.->|read contract| W
 ```
 
-Herdr owns panes, processes, and native sessions. The supervisor owns goal
-contracts, concise checkpoints, and judgment. Workers own implementation and
-detailed evidence. Each goal keeps three files:
+The runtime owns processes, native sessions, and event delivery. The supervisor
+owns goal contracts, concise checkpoints, and judgment. Workers own
+implementation and detailed evidence. Each goal keeps three files:
 `goal.json` (the outcome), `current.json` (where execution stands), and
 `journal.jsonl` (audit only).
 
-### What wakes the supervisor
+### What wakes work
 
 ```mermaid
 flowchart LR
-    A[Worker state changed] --> Q[Review signal]
-    B[Review deadline] --> Q
-    C[Selected peer goal changed] --> Q
-    D[Watched PR or build revision changed] --> Q
-    Q --> R[Focused review]
-    E[Bounded global check] --> G[Compact global review]
-    G -. selected goals .-> Q
+    A[Worker state changed] --> Q[Focused review]
+    B[Bounded recheck] --> Q
+    C[Related goal changed] --> Q
+    D[Provider metadata changed] --> W[Current worker wakes and rereads]
+    W --> A
+    E[System health check] -. affected goals .-> Q
 ```
 
-The supervisor sleeps otherwise. It never polls a worker.
+The supervisor sleeps otherwise. It does not poll workers or providers. The
+optional shared watcher performs bounded provider reads without model turns.
 
 ### One review, one decision
 
@@ -169,8 +187,9 @@ In plain language:
 2. The model compares it with active goals.
 3. The model updates a fitting goal or defines one new goal with objective,
    stable context, acceptance criteria, and constraints.
-4. Code validates that contract, creates or selects one worker space, starts
-   Codex, records its exact native session, and gives it the native `/goal`.
+4. Code validates that contract, creates or selects one meaningfully labelled
+   worker space, starts Codex, records its exact native session, and gives it
+   the native `/goal`.
 5. The worker keeps working without supervisor model turns.
 6. A Herdr event or bounded deadline asks the supervisor to review that goal.
 7. Code supplies the goal, fresh Herdr state, and bounded new worker evidence.
@@ -219,14 +238,24 @@ set of workflow-specific branches.
 
 ## Goal data
 
-Each goal keeps three files in one stable directory:
+The goal-store root explains itself, and each goal keeps up to three files in
+one stable directory:
 
 ```text
-goals/g_<id>/
-├── goal.json
-├── current.json
-└── journal.jsonl
+goals/
+├── README.md
+├── g_<id>/
+│   ├── goal.json
+│   ├── current.json
+│   └── journal.jsonl
+└── .supervisor/
 ```
+
+The supervisor places the concise root guide when it first writes to a goal
+store; reads never create or change files. The guide documents file authority,
+lifecycle, safe inspection, and portability for any agent or human with direct
+filesystem access. It is one shared explanation, not repeated metadata or a
+skill inside every goal. Existing root files are never overwritten.
 
 `goal.json` is the portable contract. It contains only:
 
@@ -235,7 +264,14 @@ goals/g_<id>/
 - acceptance criteria;
 - lasting constraints.
 
-Copying `goal.json` is enough to start fresh on another instance. It contains
+A human refinement belongs in this contract when it must still govern a fresh
+worker that has no conversation history or local checkpoint. This fresh-start
+test separates lasting outcome scope, recurring behavior, proof, and boundaries
+from transient execution evidence. Reconsidering or steering the current worker
+cannot substitute for updating durable authority.
+
+`goal.json` is the only goal data needed to start fresh on another instance.
+Place it in a valid goal directory there before starting a worker. It contains
 no pane, session, progress, wait, cursor, or history.
 
 Within one instance, an unstarted saved contract is resumed by passing its exact
@@ -243,46 +279,45 @@ goal ID to the same start operation used for a new goal. Code loads that contrac
 and creates its worker; the model does not restate the contract or create a
 sibling merely because the goal has no worker yet.
 
-`current.json` is the latest local checkpoint. It contains the exact worker
-binding, concise progress, retained evidence, observation cursor, last
-decision, optional wait, optional unresolved external change, and optional
-terminal result. It does not copy live worker status; that always comes from
-Herdr.
+The supervisor's ordinary status view lists the exact IDs and objectives of
+active and unstarted goals. Reading one exact goal returns its complete contract
+and, when it is terminal, its stored result and evidence. This is supervised
+goal data the model already owns, not general filesystem access. The summary
+stays compact while the exact read gives the model enough information to compare,
+resume, or discuss goals without asking the human to paste them again. If Herdr
+is temporarily unavailable, exact goal reads still return stored saved, active,
+or completed state while clearly marking unavailable live worker state. An
+exact pane query still requires Herdr because it is a runtime observation.
 
-Polling schedules remain disposable memory. If a watched PR or build changes,
-only that unresolved fact is saved in `current.json`. It survives restart and
-cannot be cleared by merely sending a prompt or receiving a worker reply. After
-the reread delivery attempt, the supervisor saves the current transcript cursor
-or terminal fingerprint. A later native final response, or a later settled
-Herdr transition with a changed fixed terminal fingerprint, establishes only a
-fresh result candidate. The model decides whether that result actually proves
-the authoritative reread and acknowledges the exact pending revision in its
-ordinary `leave`, `steer`, `ask_human`, or `accept` decision. Code then clears
-the matching revision atomically with that decision. This keeps semantic
-judgment in the model while code rejects stale revisions and old output. If the
-post-delivery observation itself fails, the supervisor saves a fail-closed
-boundary that cannot produce a candidate; a later bounded review may steer the
-same worker again and replace it with a real boundary.
+`current.json` is the latest local checkpoint. It contains the exact worker
+binding and its optional display label, concise progress, retained evidence, observation cursor, last
+decision, optional wait, and optional terminal result. It does not copy live
+worker or provider status; those facts stay with Herdr and the provider.
 
 Tool arguments keep the same boundary explicit. An optional value that does not
 apply is `null`; the model never invents a placeholder identity, revision,
 watch, wait, or deadline merely to fill a field. Code validates real values and
 executes the decision, while `null` carries no semantic claim.
 
-A decision that can change a watch briefly holds its exact external subject:
-it drains any in-flight read and prevents another one from starting until the
-state change commits. An unrelated slow provider does not delay it. The final
-state write also compares the exact external revision, so polling cannot race
-with steering, clearing, or acceptance and lose a newer change.
-
 The v1 reader still accepts the retired `recover` decision in an existing
 checkpoint. New reviews never produce it; recovery is now transport inside
 `steer`. This keeps restart compatibility without restoring a fifth model
 decision.
 
+The v1 reader also accepts the retired `externalChange` field. The next
+focused review exposes it as one legacy reread obligation. Only steering the
+worker with the code-injected reread instruction and confirming its delivery
+removes it; unrelated or uncertain steering preserves it. Leaving, asking, or
+accepting cannot silently discard it, while an explicit administrative stop
+remains authoritative. New code never writes it, and external revision state
+then belongs only to the shared watcher checkpoint.
+
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
 recovery; an invalid goal or checkpoint fails closed.
+
+`.supervisor/` holds local supervisor checkpoints. It is neither portable goal
+authority nor live runtime truth.
 
 In-memory runtime data holds only disposable scheduling details such as the
 next review time, coalesced signal, and one-turn observation fence. Durable
@@ -305,22 +340,21 @@ state, and bounded new evidence are sufficient after restart.
 
 Only the focused worker's evidence can prove its goal complete. Peer status can
 help coordination but cannot satisfy another worker's acceptance criteria.
+Immediately before acceptance, code rechecks the exact worker and rejects the
+decision if its status or Herdr change sequence moved after observation. This
+keeps any concurrent provider wake or ordinary worker activity in the normal
+review loop instead of accepting stale evidence.
 
 Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; an external watch may wake the supervisor when a PR or build changes.
-The supervisor then judges the refreshed evidence through its normal focused
-review. There is no second review lifecycle, reviewer state machine, attempt
-budget, or goal schema. A separate review goal exists only when review itself
-is the human's distinct durable outcome, such as an ongoing project-wide review
-program—not merely because one implementation reached a review step.
-
-The lightweight GitHub watch notices head, state, mergeability, checks, and
-commit-status changes. A review comment or approval by itself may therefore wait
-for the ordinary bounded review, where the worker rereads the current PR. That
-fallback preserves correctness without making the watcher another review system.
+findings; the metadata watcher may wake the current worker when a PR or build
+changes. The worker rereads provider authority, and its ordinary Herdr event
+wakes the supervisor. There is no second review lifecycle, reviewer state
+machine, attempt budget, or goal schema. A separate review goal exists only when
+review itself is the human's distinct durable outcome—not merely because one
+implementation reached a review step.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -345,6 +379,14 @@ The worker never sleeps or polls for an external condition. When it has
 genuinely exhausted the safe work it can do now, it reports the exact remaining
 condition once and yields. An idle worker costs nothing.
 
+Idle is not the same as inactive. An unfinished goal keeps its pane because it
+may still own a wait, review, or immediate next action. Herdr preserves native
+Codex sessions when a human closes a settled pane, but the supervisor does not
+close panes automatically: the current `pane.close` operation cannot require
+the expected terminal and native session, so a client-side identity check could
+race pane reuse. Automatic retirement should wait for that small atomic Herdr
+primitive rather than add a second parked lifecycle or risk closing live work.
+
 When the pull request or build later changes, the watch or the bounded review
 wakes that exact session. The worker rereads the current provider state,
 handles what changed — review comments, a failed check, a merge conflict — and
@@ -361,46 +403,83 @@ promise to reconsider, not permission to forget the goal:
   when a peer review proves that condition materially changed, the model
   selects the exact affected waits for early review, and a terminal peer wakes
   all remaining dependents after either worker is relocated;
-- a wait on one exact GitHub PR or ADO build may register a disposable external
-  watch chosen by the model;
+- a wait on a supported GitHub PR or ADO build relies on its durable goal
+  metadata for an early wake;
 - every wait has a bounded recheck;
 - the model chooses an evidence-appropriate safety time; a selected peer effect
-  or external watch still wakes the goal earlier, avoiding repeated short
+  or external update still wakes the goal earlier, avoiding repeated short
   reviews of unchanged state;
 - when a wait expires, current evidence must confirm it before waiting again.
 
-A human question follows the same rule. It is concrete, asks for the minimum
-input that changes the work, and receives a bounded reconsideration so
-unrelated useful work can continue.
+A question the supervisor asks the human because execution needs input follows
+the same rule. It is concrete, asks for the minimum input that changes the
+work, and receives a bounded reconsideration so unrelated useful work can
+continue. This does not apply to a direct question the human asks the
+supervisor; ordinary conversation does not imply an execution effect.
 
-### External watches
+### External updates
 
-External watches run as small deterministic reads inside the existing Pi
-extension process. They share the nearest-deadline timer and the per-goal
-review signal map.
+One shared watcher replaces per-goal registration. Its public contract is only:
 
-The watch detects change; it does not interpret it. It computes one compact
-revision identity from provider metadata: GitHub PR head, state, draft and
-mergeability state, checks, and commit statuses; or Azure DevOps build status,
-ID, result, source version, and finish time. An unchanged identity schedules
-another read without a model turn. A changed identity queues the ordinary
-focused review, where the model asks the same worker to reread provider
-authority and judge it.
+1. **Link:** trusted metadata links a provider resource to one goal.
+2. **Observe:** a provider adapter reports a bounded current revision.
+3. **Notify:** a changed revision wakes that goal's exact current worker.
+
+There is no register, renew, unregister, predicate, or provider workflow in a
+goal. The watcher keeps a bounded revision checkpoint so unchanged reads stay
+quiet. A short per-goal action boundary prevents a notification from crossing
+goal acceptance or an explicit stop. These are safety details, not additional
+product concepts.
+
+The watcher detects change; it does not interpret it. It computes a compact
+revision from authoritative provider fields. An unchanged revision costs no
+model turn. A changed revision wakes the worker directly, and its normal Herdr
+state change enters the existing supervisor review loop.
 
 Deciding what a review comment, failed check, or merged branch means for the
-goal belongs to the worker, not the supervisor and not the watch.
-
-Watch registration is process-local in the first version: after restart, the
-ordinary bounded goal review can register it again. This keeps provider polling
-an optimization rather than another durable task or event system.
+goal belongs to the worker, not the supervisor or watcher. See
+`docs/proposals/shared-event-watcher.md` for the exact provider contract and
+live evidence.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
-accepts `GITHUB_TOKEN` or `GH_TOKEN`. Azure DevOps accepts
+requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
+configured repositories. One watcher also accepts at most ten Azure DevOps
+pipeline definitions. Azure DevOps accepts
 `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
-the runtime environment. Without usable credentials, a watch degrades to
-unauthenticated limits for a public GitHub PR. A private GitHub PR or Azure
-DevOps build instead fails with a clear credential error; the watch never
-guesses.
+the runtime environment. Without usable credentials, discovery fails with a
+clear error and the watcher never guesses.
+
+## Diagnostics and knowledge
+
+A failure is another observation, not a new task or a second recovery system:
+
+```text
+failure fact -> relevant goal and current evidence -> model decision -> existing action
+```
+
+The component that sees a failure reports bounded facts: what operation failed,
+where it failed, which goals may be affected, the observed error, and what
+automatic retry remains. Stable operating guidance explains the available
+capabilities and authority boundaries. The model decides what those facts mean.
+
+Knowledge has two simple homes. Goal-specific facts belong in the portable goal
+context. Stable operating rules belong in the supervisor or worker guidance.
+A diagnostic contributes only current failure facts and retry behavior; it is
+not a knowledge database or an error-history workflow.
+
+The model then uses the same paths it already has:
+
+- leave healthy work alone while built-in retry continues;
+- reconsider or steer the fitting existing goal;
+- ask the human for genuinely missing authority, configuration, or information;
+  or
+- define durable repair work only when repair itself is a real new outcome.
+
+Diagnostics never create a goal automatically. Code does not choose a recovery
+by matching error words. The supervisor must not claim that it inspected or
+repaired a service when its tools supplied no such evidence. If a case can be
+handled with existing actions, a reliable wake, and enough facts and guidance,
+the remedy belongs in knowledge rather than another mechanism.
 
 ## Concurrency
 
@@ -427,23 +506,21 @@ decision at a time.
   pending or while its turn owns Pi, so no automatic review begins only to lose
   its fence to that turn. It adds no durable message queue; after a process
   failure the human may simply resend the request.
-- A low-frequency compact global review sees every unfinished goal, including
+- A low-frequency system health check sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
-  work and may schedule ordinary focused reviews only for goals that have a
-  worker; it never acts on workers itself.
-- Its small local checkpoint supplies the last bounded active finding to the
-  next review. The model returns the complete set still supported by current
-  evidence; code suppresses an identical set and clears resolved findings so a
-  later recurrence is visible again.
+  problems and may wake ordinary focused reviews; it never acts on workers.
+- A small local checkpoint suppresses repeated identical health findings. The
+  check is another observation source feeding the same goal loop, not a second
+  kind of supervision.
 
 This is event-loop coordination, not a durable queue, workflow engine, or task
 graph.
 
 ## Failure behavior
 
-Every failure resolves to one of three outcomes: retry safely, fail closed, or
-surface to the human. Nothing is silently dropped, and no failure path creates
-duplicate work.
+Every handled failure aims for one of three outcomes: retry safely, fail closed,
+or surface the evidence to the supervisor or human. No failure path creates
+duplicate goal work.
 
 ```mermaid
 flowchart TD
@@ -467,7 +544,7 @@ flowchart TD
 - An interrupted supervisor reloads every unfinished goal from its contract and
   checkpoint and compares it with fresh Herdr state.
 - A saved contract with no checkpoint remains visible as unstarted work in the
-  global safety review. It cannot be silently treated as healthy or routed to a
+  system health check. It cannot be silently treated as healthy or routed to a
   worker review that does not exist.
 - A stopped supported Codex process can resume only its exact native session.
 - A changed or missing identity fails closed and receives no prompt.
@@ -482,6 +559,18 @@ perfect reconstruction. Simplicity and robust eventual progress come first.
 
 ## Human experience
 
+Human conversation is not a goal-lifecycle event by default. The supervisor may
+read the goal state and answer a question, explain the design, review what is
+known, or offer a suggestion without starting, updating, or reconsidering any
+work. Observation does not imply mutation.
+
+The supervisor applies an effect only when the human clearly requests an
+execution change or when fulfilling the requested outcome actually requires
+durable work. If the available evidence cannot distinguish materially different
+actions, it states what is known and asks one focused question before changing
+state. Words such as "review" do not select a workflow; the meaning of the
+human's request does.
+
 The supervisor speaks in plain language. It explains:
 
 - what is true now;
@@ -495,6 +584,8 @@ events and internal metadata do not compete with the useful outcome.
 ## Implementation boundary
 
 - `extension.ts` wires Pi tools, Herdr events, timers, and validated effects.
+- `event-watcher/` owns metadata discovery, bounded revision state, provider
+  adapters, and goal-addressed wake delivery outside the Pi process.
 - `prompts.ts` contains readable model and worker policy.
 - `types.ts` distinguishes durable goal bindings from transient runtime state.
 - `identity.ts` owns exact native-session equality shared across boundaries.

@@ -6,7 +6,10 @@ import test from "node:test";
 import {
   appendAudit,
   createGoalContract,
+  GOAL_STORE_GUIDE,
   goalPaths,
+  goalStoreGuidePath,
+  initializeGoalStore,
   installGoal,
   listGoalRecords,
   loadGoal,
@@ -70,6 +73,44 @@ test("the portable contract rejects runtime and audit fields", () => {
   assert.throws(() => validateGoalContract({ ...contract(), journal: [] }), /unsupported field journal/);
 });
 
+test("the first installed goal makes the store self-explaining", async () => {
+  const root = await goalsRoot();
+  await installGoal("g_test", contract(), root);
+
+  assert.equal(await readFile(goalStoreGuidePath(root), "utf8"), GOAL_STORE_GUIDE);
+  assert.deepEqual(await loadGoalContract("g_test", root), contract());
+  assert.match(GOAL_STORE_GUIDE, /goal\.json.*portable authority/s);
+  assert.match(GOAL_STORE_GUIDE, /current\.json.*not live runtime truth/s);
+  assert.match(GOAL_STORE_GUIDE, /journal\.jsonl.*audit history/s);
+  assert.match(GOAL_STORE_GUIDE, /do not edit them manually/i);
+});
+
+test("goal-store reads create nothing", async () => {
+  const root = await goalsRoot();
+
+  assert.deepEqual(await listGoalRecords(root), []);
+  await assert.rejects(readFile(goalStoreGuidePath(root), "utf8"), { code: "ENOENT" });
+});
+
+test("explicit initialization creates only the shared guide", async () => {
+  const root = await goalsRoot();
+
+  await initializeGoalStore(root);
+
+  assert.equal(await readFile(goalStoreGuidePath(root), "utf8"), GOAL_STORE_GUIDE);
+  assert.deepEqual(await listGoalRecords(root), []);
+});
+
+test("installing a goal preserves an existing root guide", async () => {
+  const root = await goalsRoot();
+  await writeFile(goalStoreGuidePath(root), "Local operator notes.\n");
+
+  await installGoal("g_test", contract(), root);
+
+  assert.equal(await readFile(goalStoreGuidePath(root), "utf8"), "Local operator notes.\n");
+  assert.deepEqual(await loadGoalContract("g_test", root), contract());
+});
+
 test("the local checkpoint rejects contract and unknown fields", async () => {
   const root = await goalsRoot();
   await runningGoal(root);
@@ -110,6 +151,7 @@ test("copying goal.json is sufficient to start fresh in another instance", async
   await copyFile(goalPaths("g_source", source).contract, targetPaths.contract);
 
   const copied = await loadGoalContract("g_target", target);
+  await assert.rejects(readFile(goalStoreGuidePath(target), "utf8"), { code: "ENOENT" });
   assert.deepEqual(copied, contract());
   assert.equal("goalId" in copied, false);
   assert.equal("worker" in copied, false);
@@ -122,6 +164,7 @@ test("copying goal.json is sufficient to start fresh in another instance", async
     agentSession: { ...worker.agentSession, value: "session_target" },
   };
   await startGoal("g_target", targetWorker, target, { at: "2026-08-29T10:00:00.000Z" });
+  assert.equal(await readFile(goalStoreGuidePath(target), "utf8"), GOAL_STORE_GUIDE);
   assert.equal((await loadGoalState("g_target", target)).worker.agentSession.value, "session_target");
   assert.deepEqual(await readAudit("g_target", target), []);
 });
@@ -193,7 +236,7 @@ test("the local checkpoint retains one unresolved external change", async () => 
   await updateGoalState("g_test", (current) => {
     current.externalChange = {
       source: "github-pr",
-      subject: "hao1939/herdr-supervisor#16",
+      subject: "owner/repository#16",
       revision: "revision-2",
       observedAt: "2026-08-30T10:05:00.000Z",
     };
@@ -202,7 +245,7 @@ test("the local checkpoint retains one unresolved external change", async () => 
 
   assert.deepEqual((await loadGoalState("g_test", root)).externalChange, {
     source: "github-pr",
-    subject: "hao1939/herdr-supervisor#16",
+    subject: "owner/repository#16",
     revision: "revision-2",
     observedAt: "2026-08-30T10:05:00.000Z",
   });

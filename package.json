@@ -22,6 +22,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test 'test/**/*.test.ts'",
+    "watch": "node src/event-watcher/daemon.mjs",
     "check": "tsc --noEmit && sh -n container/container-entrypoint.sh && sh -n container/bin/codex && sh -n container/bin/pi"
   },
   "engines": {

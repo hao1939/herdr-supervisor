@@ -51,6 +51,12 @@ export function captureIdentity(agent) {
   };
 }
 
+export function goalPaneLabel(objective, limit = 60) {
+  const label = objective.replace(/\s+/g, " ").trim();
+  if (!label) throw new Error("worker display label requires a goal objective");
+  return label.length > limit ? `${label.slice(0, limit - 1)}…` : label;
+}
+
 export function identityMismatch(binding, agent, pane?) {
   if (!agent && !pane) return "worker pane is no longer present";
   if (!agent && pane.terminal_id !== binding.terminalId) return "pane now refers to a different terminal";
@@ -105,6 +111,15 @@ export function shouldWake(binding, agent, pane) {
   const mismatch = identityMismatch(binding, agent, pane);
   if (mismatch) return { wake: true, reason: mismatch, sequence: undefined, key: `identity:${mismatch}` };
   const sequence = Number(agent.state_change_seq || 0);
+  if (binding.legacyExternalChange) {
+    const change = binding.legacyExternalChange;
+    return {
+      wake: true,
+      reason: `${change.source} ${change.subject} changed before the metadata watcher upgrade; have this worker reread current provider authority`,
+      sequence,
+      key: `legacy-external:${change.source}:${change.subject}:${change.revision}:${sequence}`,
+    };
+  }
   if (sequence > 0 && sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {
     return { wake: false, reason: "transition already reviewed", sequence, key: `state:${sequence}` };
   }
@@ -143,6 +158,59 @@ function compact(value, limit) {
   return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
 }
 
+function contractLines({ context = [], acceptance = [], constraints = [] }) {
+  const lines = [];
+  if (context.length) lines.push(`  Context: ${context.join("; ")}`);
+  if (acceptance.length) lines.push(`  Accept when: ${acceptance.join("; ")}`);
+  if (constraints.length) lines.push(`  Constraints: ${constraints.join("; ")}`);
+  return lines;
+}
+
+export function formatUnstartedGoal({ goalId, contract }, { detailed = true } = {}) {
+  const objective = detailed ? contract.objective : compact(contract.objective, 240);
+  const lines = [
+    `Goal ${goalId} · unstarted`,
+    `  Objective: ${objective}`,
+  ];
+  if (detailed) lines.push(...contractLines(contract));
+  lines.push("  Worker: not started");
+  return lines.join("\n");
+}
+
+export function formatStoredGoal(binding, { detailed = true } = {}) {
+  const objective = detailed ? binding.goal : compact(binding.goal, 240);
+  const lines = [
+    `Goal ${binding.goalId} · active · live state unavailable`,
+    `  Objective: ${objective}`,
+    `  Worker: ${binding.agentSession.agent} ${binding.paneId} · state unavailable`,
+  ];
+  if (detailed) lines.push(...contractLines(binding));
+  if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
+  lines.push("  Next: read fresh Herdr state before acting on this worker");
+  return lines.join("\n");
+}
+
+export function formatCompletedGoal({ goalId, contract, state }) {
+  const terminal = state.terminal;
+  const lines = [
+    `Goal ${goalId} · ${terminal.state}`,
+    `  Objective: ${contract.objective}`,
+    ...contractLines(contract),
+    `  Result: ${terminal.summary}`,
+  ];
+  if (state.progress && state.progress !== terminal.summary) {
+    lines.push(`  Progress: ${state.progress}`);
+  }
+  if (state.evidence.length) {
+    lines.push("  Evidence:", ...state.evidence.map((item) => `  - ${item}`));
+  }
+  lines.push(
+    `  Worker: ${state.worker.agentSession.agent} ${state.worker.paneId}`,
+    `  Finished: ${terminal.at}`,
+  );
+  return lines.join("\n");
+}
+
 export function formatWorker({ binding, agent, mismatch }, { detailed = true } = {}) {
   const processStopped = mismatch === "worker agent process is no longer detected";
   const paneMissing = mismatch === "worker pane is no longer present";
@@ -151,14 +219,10 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   const workerUnavailable = !agent && Boolean(mismatch);
   const routingRecoverable = !agent && sessionRecoverable;
   const awaitingHuman = binding.lastDecision?.decision === "ask_human";
-  const externalRereadInFlight = Number.isInteger(binding.externalChange?.workerSequence);
-  const externalRereadWorking = externalRereadInFlight && agent?.agent_status === "working";
   const goalState = workerUnavailable && awaitingHuman
     ? "waiting for you"
     : mismatch
     ? "needs attention"
-    : binding.externalChange
-      ? (externalRereadWorking ? "working" : "needs review")
     : awaitingHuman
       ? "waiting for you"
       : binding.wait
@@ -185,7 +249,7 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
     `  Objective: ${goal}`,
     `  Worker: ${worker} · ${workerState}`,
   ];
-  if (detailed && binding.acceptance.length) lines.push(`  Accept when: ${binding.acceptance.join("; ")}`);
+  if (detailed) lines.push(...contractLines(binding));
   if (binding.progress) lines.push(`  Progress: ${detailed ? binding.progress : compact(binding.progress, 600)}`);
   if (workerUnavailable && awaitingHuman) {
     lines.push(sessionRecoverable
@@ -202,15 +266,6 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
     const reviewAt = binding.wait?.reviewAt || binding.nextReviewAt;
     if (reviewAt) lines.push(`  Supervisor rechecks at: ${reviewAt}`);
   }
-  else if (binding.externalChange) {
-    if (!externalRereadInFlight) {
-      lines.push(`  Next: worker must reread ${binding.externalChange.source} ${binding.externalChange.subject}`);
-    } else if (agent.agent_status === "working") {
-      lines.push(`  Next: worker is rereading ${binding.externalChange.source} ${binding.externalChange.subject}`);
-    } else {
-      lines.push("  Next: supervisor should review the worker's reread result");
-    }
-  }
   else if (agent.agent_status === "working") {
     lines.push("  Next: review when the worker settles or blocks");
     if (binding.reviewAt) lines.push(`  Supervisor rechecks at: ${binding.reviewAt}`);
@@ -218,9 +273,6 @@ export function formatWorker({ binding, agent, mismatch }, { detailed = true } =
   else if (binding.wait) {
     const condition = detailed ? binding.wait.condition : compact(binding.wait.condition, 360);
     lines.push(`  Next: wait for ${condition}`);
-    if (binding.externalWatch) {
-      lines.push(`  Watching: ${binding.externalWatch.source} ${binding.externalWatch.subject}`);
-    }
     lines.push(`  Review at: ${binding.wait.reviewAt}`);
   }
   else lines.push(`  Next: supervisor should review current evidence`);
