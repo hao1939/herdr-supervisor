@@ -29,6 +29,8 @@ test("provider metadata names one durable goal without a watch registration", ()
     "- Pane: \"w1:p7\"",
   ].join("\n")), "g_exact-1");
   assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\n- Goal ID: g_two"), undefined);
+  assert.equal(supervisionGoal("## Supervision\n- Goal ID: \"g_one"), undefined);
+  assert.equal(supervisionGoal("## Supervision\n- Goal ID: g_one\""), undefined);
   assert.equal(supervisionGoal("No metadata"), undefined);
   assert.equal(supervisionGoal([
     "## Supervision",

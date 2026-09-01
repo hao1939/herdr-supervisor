@@ -400,8 +400,9 @@ decides what the change means for its goal.
 The metadata is attached once per created resource. Every later revision of
 that resource needs no renewal. A rerun with a new build ID receives the same
 goal metadata through its normal creation path. Goal completion needs no
-unregister operation; later delivery is ignored, and bounded checkpoint
-eviction is ordinary cache cleanup.
+unregister operation; later delivery is ignored. A live remembered resource is
+never evicted: only authoritative absence or configured-scope removal deletes
+its checkpoint entry.
 
 The current in-process explicit watcher remains a compatibility path until the
 shared metadata-discovery daemon passes its documented production gates. It is
