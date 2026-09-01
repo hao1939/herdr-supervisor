@@ -510,10 +510,36 @@ test("a direct human question can be answered without changing goal execution", 
   assert.match(prompt, /answer directly/);
   assert.match(prompt, /Do not use reconsideration merely to answer or discuss the goal/);
   assert.match(prompt, /transient execution evidence that materially affects current execution/);
-  assert.match(prompt, /only when the human wants a new durable outcome/);
+  assert.match(prompt, /when the human has authorized execution of a sufficiently clear, distinct durable outcome/);
   assert.match(prompt, /This is distinct from a direct question the human asks the supervisor/);
   assert.doesNotMatch(prompt, /A human question also receives bounded reconsideration/);
   assert.doesNotMatch(prompt, /Otherwise call supervisor_start_goal/);
+});
+
+test("goal formation precedes comparison with existing work", () => {
+  const prompt = supervisorSystemPrompt("Base prompt.");
+  assert.match(prompt, /first form a candidate goal from their intended outcome and the conversation/);
+  assert.match(prompt, /Lead with a concrete interpretation and sensible recommended defaults/);
+  assert.match(prompt, /Only after the candidate is coherent, use supervisor_status/);
+  assert.match(prompt, /objective, continuity horizon, expected artifacts, and acceptance evidence are substantially the same/);
+  assert.match(prompt, /shared subject, source, tool, or ability to absorb the work is not enough/);
+  assert.match(prompt, /constraints govern that goal only/);
+  assert.match(prompt, /never treat its local one-worker, one-topic, or scope rule as a global admission rule/);
+  assert.match(prompt, /Reuse the exact existing goal for an equivalent outcome/);
+  assert.match(prompt, /start a new goal for a distinct outcome/);
+  assert.match(prompt, /asks only for a proposal, discuss it without mutation/);
+  assert.match(prompt, /Show the useful candidate and your recommendation before asking/);
+  assert.match(prompt, /cannot silently add a materially different kind of work, deliverable, external effect, or authority/);
+  assert.match(prompt, /Research and synthesis, building and experimentation, and external operation are materially different work modes/);
+  assert.match(prompt, /keep the candidate within the stated mode, present the broader mode as your one question/);
+  assert.match(prompt, /do not authorize or start that broader work before the human answers/);
+  assert.match(prompt, /that authority survives any necessary clarification/);
+  assert.match(prompt, /act without asking for start permission again/);
+  assert.doesNotMatch(prompt, /no existing goal fits/);
+  assert.ok(
+    prompt.indexOf("first form a candidate goal") < prompt.indexOf("Only after the candidate is coherent"),
+    "candidate formation must be stated before existing-goal comparison",
+  );
 });
 
 test("each shared-session review request re-establishes one worker context", () => {
