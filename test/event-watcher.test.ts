@@ -974,6 +974,24 @@ test("ADO pull request discovery rereads remembered pulls and forgets removed me
   assert.ok(urls.some((url) => url.includes("/pullRequests/42?")));
 });
 
+test("ADO pull request discovery fails when reading a full listed pull request fails", async () => {
+  const source = adoPullRequestDiscovery({
+    repositories: ["org/project/repo"],
+    authorization: "******",
+    fetchImpl: async (url) => {
+      const text = String(url);
+      if (text.includes("/pullRequests?")) return response({ count: 1, value: [{
+        pullRequestId: 42,
+        description: "List descriptions are not authoritative.",
+      }] });
+      if (text.includes("/pullRequests/42?")) return response({}, false, 500);
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  await assert.rejects(source.scan(), /ADO pull request returned HTTP 500/);
+});
+
 test("ADO pull request discovery keeps repository scope bounded", () => {
   assert.throws(
     () => adoPullRequestDiscovery({
