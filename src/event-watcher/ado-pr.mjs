@@ -192,17 +192,17 @@ export function adoPullRequestDiscovery({
           else throw error;
         }
       }
-      for (const subject of listedSubjects) {
+      const fullPulls = await Promise.all([...listedSubjects].map(async (subject) => {
         const scope = parseSubject(subject);
         if (!scope) throw new Error("ADO pull request discovery returned an invalid pull request subject");
-        const pull = await json(
+        return [subject, await json(
           fetchImpl,
           `${pullUrl(scope, `/${scope.pullRequestId}`)}?api-version=7.1`,
           auth,
           "ADO pull request",
-        );
-        pullsBySubject.set(subject, pull);
-      }
+        )];
+      }));
+      for (const [subject, pull] of fullPulls) pullsBySubject.set(subject, pull);
       for (const resource of known) {
         const pull = pullsBySubject.get(resource.subject);
         if (pull && !supervisionGoal(pull.description)) absent.push(resource.subject);
