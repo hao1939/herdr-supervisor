@@ -4,6 +4,20 @@ import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
 
+const MAX_EVENT_FACT_BYTES = 8 * 1024;
+
+function observedEvent(event) {
+  const lines = [`- ${event.source} ${event.subject}`];
+  if (event.payload === undefined) return lines;
+  const facts = JSON.stringify(event.payload);
+  if (Buffer.byteLength(facts) <= MAX_EVENT_FACT_BYTES) {
+    lines.push(`  Observed facts: ${facts}`);
+  } else {
+    lines.push(`  Observed facts omitted because they exceed ${MAX_EVENT_FACT_BYTES} bytes; reread the provider.`);
+  }
+  return lines;
+}
+
 export function herdrRequest(method, params = {}, {
   socketPath,
   timeoutMs = 5_000,
@@ -59,9 +73,9 @@ export function herdrGoalDelivery({
       target: agent.pane_id,
       text: [
         `External resources changed for goal ${goalId}:`,
-        ...events.map((event) => `- ${event.source} ${event.subject}`),
+        ...events.flatMap(observedEvent),
         "Reread current provider authority, decide what the change means, and continue useful work toward the goal.",
-        "This is only a wake hint, not completion proof.",
+        "Observed facts are only a bounded wake hint, not provider authority or completion proof.",
       ].join("\n"),
     }, options);
     return { paneId: agent.pane_id };
