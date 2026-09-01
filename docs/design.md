@@ -90,7 +90,8 @@ There are four plain roles:
 - The supervisor observes evidence, judges progress, and helps the same worker
   continue.
 - An optional external watcher detects relevant provider changes and wakes the
-  affected worker. It does not judge the change.
+  affected worker with bounded observed facts. It does not judge the change,
+  and the worker rereads provider authority before acting.
 
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal

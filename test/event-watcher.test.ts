@@ -1178,14 +1178,60 @@ test("Herdr delivery resolves a goal to its current exact native session", async
     return {};
   };
   const deliver = herdrGoalDelivery({ goalsRoot: root, request });
-  await deliver("g_exact", [{ source: "github-pr", subject: "owner/repo#42" }]);
+  await deliver("g_exact", [{
+    source: "ado-pr",
+    subject: "org/project/repo/42",
+    payload: {
+      head: "abc123",
+      mergeStatus: "conflicts",
+      discussions: [{ id: 71, status: "active", commentCount: 1 }],
+      policies: [{ id: "policy-1", status: "rejected" }],
+    },
+  }]);
   const prompts = calls.filter(([method]) => method === "agent.prompt").map(([, params]) => params);
   assert.equal(prompts.length, 2);
   assert.equal(prompts[0].target, "w1:p9");
   assert.equal(prompts[0].text, "/goal resume");
   assert.equal(prompts[1].target, "w1:p9");
-  assert.match(prompts[1].text, /owner\/repo#42/);
-  assert.match(prompts[1].text, /wake hint, not completion proof/);
+  assert.match(prompts[1].text, /org\/project\/repo\/42/);
+  assert.match(prompts[1].text, /"mergeStatus":"conflicts"/);
+  assert.match(prompts[1].text, /"id":71,"status":"active","commentCount":1/);
+  assert.match(prompts[1].text, /"id":"policy-1","status":"rejected"/);
+  assert.match(prompts[1].text, /bounded wake hint, not provider authority or completion proof/);
+});
+
+test("Herdr delivery bounds oversized observed facts without hiding the resource", async (t) => {
+  const root = await temporary(t, "event-watch-bounded-facts-");
+  const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" };
+  await registerSupervisedGoal({ paneId: "w1:p1", terminalId: "terminal-1", agentSession: session }, {
+    objective: "Respond to bounded provider changes.",
+    acceptance: ["Provider changes reach the exact worker."],
+  }, root, { goalId: "g_bounded" });
+  const prompts = [];
+  const deliver = herdrGoalDelivery({
+    goalsRoot: root,
+    request: async (method, params) => {
+      if (method === "session.snapshot") return { snapshot: { agents: [{
+        pane_id: "w1:p1",
+        terminal_id: "terminal-1",
+        agent_session: session,
+        agent_status: "working",
+      }] } };
+      if (method === "agent.prompt") prompts.push(params);
+      return {};
+    },
+  });
+
+  await deliver("g_bounded", [{
+    source: "ado-pr",
+    subject: "org/project/repo/99",
+    payload: { evidence: "x".repeat(9 * 1024) },
+  }]);
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].text, /org\/project\/repo\/99/);
+  assert.match(prompts[0].text, /Observed facts omitted because they exceed 8192 bytes/);
+  assert.doesNotMatch(prompts[0].text, /x{100}/);
 });
 
 test("goal acceptance and external delivery share one atomic action boundary", async (t) => {
