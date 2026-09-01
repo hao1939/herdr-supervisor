@@ -236,6 +236,28 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery", "source"]);
 });
 
+test("a pending delivery stays coalesced while its resource rotates out of a scan", async (t) => {
+  const directory = await temporary(t, "event-watch-rotated-diagnostic-");
+  let present = true;
+  const diagnostics = [];
+  const watcher = new DiscoveredEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => discovery(present ? [{
+      subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
+    }] : []) } },
+    deliver: async () => { throw new Error("worker unavailable"); },
+    diagnose: (item) => diagnostics.push(item),
+  });
+
+  await watcher.runOnce();
+  present = false;
+  await watcher.runOnce();
+  present = true;
+  await watcher.runOnce();
+
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery"]);
+});
+
 test("a failed diagnostic delivery is retried without blocking observation", async (t) => {
   const directory = await temporary(t, "event-watch-diagnostic-retry-");
   let attempts = 0;

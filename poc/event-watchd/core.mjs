@@ -226,14 +226,17 @@ export class DiscoveredEventWatcher {
   async deliverPending(observed) {
     const delivered = [];
     const groups = new Map();
+    const pendingGoals = new Set();
     for (const [key, resource] of Object.entries(this.state.resources)) {
-      if (!resource.pending || !observed.has(key)) continue;
+      if (!resource.pending) continue;
+      pendingGoals.add(resource.pending.goalId);
+      if (!observed.has(key)) continue;
       const items = groups.get(resource.pending.goalId) || [];
       items.push({ key, resource, pending: structuredClone(resource.pending) });
       groups.set(resource.pending.goalId, items);
     }
     for (const key of this.reported) {
-      if (key.startsWith("delivery:") && !groups.has(key.slice("delivery:".length))) this.reported.delete(key);
+      if (key.startsWith("delivery:") && !pendingGoals.has(key.slice("delivery:".length))) this.reported.delete(key);
     }
     for (const [goalId, items] of groups) {
       const batch = items.slice(0, MAX_EVENTS_PER_DELIVERY);
