@@ -83,9 +83,7 @@ const stateFields = new Set([
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
-// paneId was written beside goalId by the previous v1 peer-wait format. Read
-// it once, then drop it so every subsequent write keeps only durable identity.
-const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
+const waitFields = new Set(["condition", "reviewAt", "goalId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
@@ -237,13 +235,6 @@ export function validateGoalState(state) {
     if (state.wait.goalId !== undefined && !goalIdPattern.test(state.wait.goalId)) {
       throw new Error("goal wait goalId must be a goal ID");
     }
-    if (state.wait.paneId !== undefined) {
-      requiredString(state.wait.paneId, "goal wait paneId");
-      if (state.wait.goalId === undefined) {
-        throw new Error("legacy goal wait paneId requires goalId");
-      }
-      delete state.wait.paneId;
-    }
     if (!Number.isFinite(Date.parse(state.wait.reviewAt))) {
       throw new Error("goal wait reviewAt must be an ISO timestamp");
     }
@@ -336,80 +327,6 @@ async function missing(path) {
   }
 }
 
-const discardClaimPattern = /^\.discarding-(g_[a-zA-Z0-9_-]+)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-async function pathMissing(path) {
-  try {
-    await readdir(path);
-    return false;
-  } catch (error) {
-    if (error?.code === "ENOENT") return true;
-    throw error;
-  }
-}
-
-async function finishDiscardClaim(directory, hasContract) {
-  if (hasContract) {
-    try {
-      await unlink(join(directory, "goal.json"));
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-  }
-  try {
-    await rmdir(directory);
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-}
-
-async function recoverInterruptedDiscards(root = defaultGoalsRoot()) {
-  let rootEntries;
-  try {
-    rootEntries = await readdir(root, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-  const claims = rootEntries
-    .filter((entry) => entry.isDirectory() && discardClaimPattern.test(entry.name))
-    .map((entry) => ({ name: entry.name, goalId: discardClaimPattern.exec(entry.name)![1] }))
-    .sort((left, right) => left.name.localeCompare(right.name));
-
-  for (const claim of claims) {
-    const claimedDirectory = join(root, claim.name);
-    let entries;
-    try {
-      entries = (await readdir(claimedDirectory)).sort();
-    } catch (error) {
-      if (error?.code === "ENOENT") continue;
-      throw error;
-    }
-    let validContract = false;
-    if (entries.length === 1 && entries[0] === "goal.json") {
-      try {
-        validateGoalContract(JSON.parse(await readFile(join(claimedDirectory, "goal.json"), "utf8")));
-        validContract = true;
-      } catch {
-        // A malformed contract was never safe to discard; restore it below so
-        // the ordinary goal loader exposes the error.
-      }
-    }
-    if (entries.length === 0 || validContract) {
-      await finishDiscardClaim(claimedDirectory, validContract);
-      continue;
-    }
-
-    const originalDirectory = goalPaths(claim.goalId, root).directory;
-    try {
-      await rename(claimedDirectory, originalDirectory);
-    } catch (error) {
-      if (error?.code === "ENOENT" && !(await pathMissing(originalDirectory))) continue;
-      throw new Error(`could not restore interrupted discard for ${claim.goalId}: ${error.message}`);
-    }
-  }
-}
-
 export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
   validateGoalContract(contract);
   const paths = goalPaths(goalId, root);
@@ -423,8 +340,8 @@ export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
 export async function discardUnstartedGoal(goalId, root = defaultGoalsRoot()) {
   const paths = goalPaths(goalId, root);
   const discardedDirectory = join(root, `.discarding-${goalId}-${randomUUID()}`);
-  let contract = await loadGoalContract(goalId, root);
   await rename(paths.directory, discardedDirectory);
+  let contract;
   try {
     const entries = (await readdir(discardedDirectory)).sort();
     if (entries.length !== 1 || entries[0] !== "goal.json") {
@@ -432,14 +349,6 @@ export async function discardUnstartedGoal(goalId, root = defaultGoalsRoot()) {
     }
     contract = validateGoalContract(JSON.parse(await readFile(join(discardedDirectory, "goal.json"), "utf8")));
   } catch (error) {
-    if (error?.code === "ENOENT") {
-      if (await pathMissing(paths.directory)) {
-        // A concurrent restart reconciliation finished the same authorized
-        // claim. The goal is gone, so report the committed outcome truthfully.
-        return { goalId, contract, cleanupError: undefined };
-      }
-      throw new Error(`goal ${goalId} changed while its discard claim was being checked`);
-    }
     try {
       await rename(discardedDirectory, paths.directory);
     } catch (restoreError) {
@@ -452,7 +361,8 @@ export async function discardUnstartedGoal(goalId, root = defaultGoalsRoot()) {
   }
   let cleanupError;
   try {
-    await finishDiscardClaim(discardedDirectory, true);
+    await unlink(join(discardedDirectory, "goal.json"));
+    await rmdir(discardedDirectory);
   } catch (error) {
     cleanupError = error;
   }
@@ -503,7 +413,6 @@ export async function loadGoal(goalId, root = defaultGoalsRoot()) {
 }
 
 export async function listGoalRecords(root = defaultGoalsRoot()) {
-  await recoverInterruptedDiscards(root);
   let entries;
   try {
     entries = await readdir(root, { withFileTypes: true });
