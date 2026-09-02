@@ -339,13 +339,26 @@ export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
 
 export async function discardUnstartedGoal(goalId, root = defaultGoalsRoot()) {
   const paths = goalPaths(goalId, root);
-  const contract = await loadGoalContract(goalId, root);
-  const entries = (await readdir(paths.directory)).sort();
-  if (entries.length !== 1 || entries[0] !== "goal.json") {
-    throw new Error(`goal ${goalId} is not an unstarted contract with no local state`);
-  }
   const discardedDirectory = join(root, `.discarding-${goalId}-${randomUUID()}`);
   await rename(paths.directory, discardedDirectory);
+  let contract;
+  try {
+    const entries = (await readdir(discardedDirectory)).sort();
+    if (entries.length !== 1 || entries[0] !== "goal.json") {
+      throw new Error(`goal ${goalId} is not an unstarted contract with no local state`);
+    }
+    contract = validateGoalContract(JSON.parse(await readFile(join(discardedDirectory, "goal.json"), "utf8")));
+  } catch (error) {
+    try {
+      await rename(discardedDirectory, paths.directory);
+    } catch (restoreError) {
+      throw new Error(
+        `could not validate discarded goal ${goalId} and could not restore its directory: ${restoreError.message}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   let cleanupError;
   try {
     await unlink(join(discardedDirectory, "goal.json"));
