@@ -1,9 +1,31 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, mkdir, readFile, readlink, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 
 const skillPath = new URL("../skills/herdr-goals/SKILL.md", import.meta.url);
 const skillMetadataPath = new URL("../skills/herdr-goals/agents/openai.yaml", import.meta.url);
+const entrypointPath = new URL("../container/container-entrypoint.sh", import.meta.url);
+const run = promisify(execFile);
+
+test("the container preserves an operator-owned goal skill symlink", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-skill-entrypoint-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const codexHome = join(root, "codex");
+  const piHome = join(root, "pi");
+  const target = join(codexHome, "skills", "herdr-goals");
+  await mkdir(join(codexHome, "skills"), { recursive: true });
+  await symlink("/operator/herdr-goals", target);
+
+  await run(entrypointPath.pathname, ["true"], {
+    env: { ...process.env, CODEX_HOME: codexHome, PI_CODING_AGENT_DIR: piHome },
+  });
+
+  assert.equal(await readlink(target), "/operator/herdr-goals");
+});
 
 test("the bundled goal-management skill keeps one validated action path", async () => {
   const skill = await readFile(skillPath, "utf8");

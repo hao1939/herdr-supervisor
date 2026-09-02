@@ -10,10 +10,10 @@ mkdir -p "$extension_dir"
 ln -sfn /opt/herdr-supervisor/container/pi-extension.ts "$extension_dir/herdr-supervisor.ts"
 
 # Make goal-management guidance available to ordinary Codex management panes
-# without modifying a mounted workspace. Respect an operator-provided real
-# directory; this image owns only its symlink.
+# without modifying a mounted workspace. Create only a missing entry so an
+# operator-provided directory or symlink remains authoritative.
 mkdir -p "$codex_skill_root"
-if [ ! -e "$goal_skill_target" ] || [ -L "$goal_skill_target" ]; then
+if [ ! -e "$goal_skill_target" ] && [ ! -L "$goal_skill_target" ]; then
   ln -sfn /opt/herdr-supervisor/skills/herdr-goals "$goal_skill_target"
 fi
 

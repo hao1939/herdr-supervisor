@@ -41,15 +41,16 @@ docker compose exec herdr herdr
 In the Herdr UI, open a pane and type `pi`. The extension loads automatically.
 Talk to the supervisor — describe what you want done and it handles the rest.
 
-Name that agent once so external diagnostics and optional management panes can
-address it without relying on a recyclable pane ID:
+After starting or restarting that agent, name it so external diagnostics and
+optional management panes can address it without relying on a recyclable pane
+ID. Herdr clears the name when the agent exits or is replaced:
 
 ```sh
 herdr agent rename <pi-pane-id> supervisor
 ```
 
 For a larger portfolio, you may open a separate Codex pane for longer goal
-discussion and name it `goal-manager`:
+discussion and name it `goal-manager` after each start or restart:
 
 ```sh
 herdr agent rename <codex-pane-id> goal-manager
