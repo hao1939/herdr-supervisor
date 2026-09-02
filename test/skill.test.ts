@@ -11,8 +11,18 @@ test("the bundled goal-management skill keeps one validated action path", async 
   assert.match(skill, /single live Herdr agent named/);
   assert.match(skill, /`supervisor`/);
   assert.match(skill, /Never edit goal-store files directly/);
+  assert.match(skill, /`\/unsupervise <pane-id>`/);
+  assert.match(skill, /ends\s+supervision without stopping the worker/);
   assert.match(skill, /Do not wake an/);
   assert.match(skill, /entire portfolio merely to refresh its display/);
+});
+
+test("the bundled goal-management skill verifies explicit stops as terminal state", async () => {
+  const skill = await readFile(skillPath, "utf8");
+
+  assert.match(skill, /canonical `current\.json` is/);
+  assert.match(skill, /terminal with state `stopped`/);
+  assert.match(skill, /worker was not stopped/);
 });
 
 test("the bundled goal-management skill gives portfolio reviews bounded context", async () => {

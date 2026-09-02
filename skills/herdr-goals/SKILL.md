@@ -75,7 +75,10 @@ proof instead of copying or replaying it without a concrete need.
 ## Apply through the validated path
 
 Never edit goal-store files directly. Use the available supervisor actions for
-start, complete-contract update, reconsideration, or explicit stop.
+start, complete-contract update, or reconsideration. For an explicit stop, use
+a validated stop action when one is available; otherwise submit
+`/unsupervise <pane-id>` to the uniquely named Pi `supervisor`. This ends
+supervision without stopping the worker.
 
 If this agent has no supervisor actions and the human authorized a mutation,
 find the single live Herdr agent named `supervisor`, relay the requested
@@ -88,13 +91,16 @@ entire portfolio merely to refresh its display.
 
 ## Verify the effect
 
-After a mutation, re-read the canonical `goal.json`, identify the exact goal and
-worker, and confirm initial worker activity in fresh Herdr state. Report:
+After a start, update, or reconsideration, re-read the canonical `goal.json`,
+identify the exact goal and worker, and confirm initial worker activity in
+fresh Herdr state. After a stop, verify that canonical `current.json` is
+terminal with state `stopped` and that the worker was not stopped. Report:
 
 - what was created, reused, updated, reconsidered, or stopped;
 - the exact goal and worker identities;
 - any material difference between the authorized contract and stored result;
-- whether the worker actually started or resumed; and
+- whether the worker actually started or resumed when expected, or supervision
+  reached the terminal `stopped` state; and
 - any terminal or stopped pane that is now a manual cleanup candidate.
 
 Do not claim success from a supervisor acknowledgement alone. Do not close a
