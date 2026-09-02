@@ -41,6 +41,26 @@ docker compose exec herdr herdr
 In the Herdr UI, open a pane and type `pi`. The extension loads automatically.
 Talk to the supervisor — describe what you want done and it handles the rest.
 
+Name that agent once so external diagnostics and optional management panes can
+address it without relying on a recyclable pane ID:
+
+```sh
+herdr agent rename <pi-pane-id> supervisor
+```
+
+For a larger portfolio, you may open a separate Codex pane for longer goal
+discussion and name it `goal-manager`:
+
+```sh
+herdr agent rename <codex-pane-id> goal-manager
+```
+
+The image supplies the `herdr-goals` Codex skill. The management pane is only an
+interactive client: it reads goal and runtime state, discusses or refines
+outcomes, and relays authorized complete actions to the named Pi supervisor. It
+owns no goal state and can be closed without affecting workers. You can still
+talk directly to the Pi supervisor for simpler use.
+
 **Working on host files:** mount your project directory into the container:
 
 ```sh
@@ -192,6 +212,12 @@ execution checkpoint) and `journal.jsonl` (audit). The contract file is the
 only goal data another instance needs; place it in a valid goal directory there
 before starting a new worker. Store reads never generate files, and
 initialization never overwrites an existing root guide.
+
+An optional Codex management pane uses that same self-explaining store for
+portfolio discussion. It summarizes active outcomes, material progress,
+blockers, next actions, and the latest advisory global-review finding without
+creating another registry or action path. The uniquely named Pi `supervisor`
+still performs every validated goal mutation.
 
 The human may refine an active goal in conversation. The supervisor updates the
 durable contract and informs the same worker — no sibling goals or temporary

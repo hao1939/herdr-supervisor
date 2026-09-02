@@ -28,6 +28,7 @@ RUN mkdir -p /app /opt/herdr-supervisor \
 
 COPY --chown=node:node package.json /opt/herdr-supervisor/
 COPY --chown=node:node container /opt/herdr-supervisor/container
+COPY --chown=node:node skills /opt/herdr-supervisor/skills
 COPY --chown=node:node src /opt/herdr-supervisor/src
 RUN chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
     && mv /usr/local/bin/codex /usr/local/bin/codex-agent \

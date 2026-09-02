@@ -3,9 +3,19 @@ set -eu
 
 pi_agent_dir="${PI_CODING_AGENT_DIR:-/home/node/.pi/agent}"
 extension_dir="${pi_agent_dir}/extensions"
+codex_skill_root="${CODEX_HOME:-/home/node/.codex}/skills"
+goal_skill_target="${codex_skill_root}/herdr-goals"
 
 mkdir -p "$extension_dir"
 ln -sfn /opt/herdr-supervisor/container/pi-extension.ts "$extension_dir/herdr-supervisor.ts"
+
+# Make goal-management guidance available to ordinary Codex management panes
+# without modifying a mounted workspace. Respect an operator-provided real
+# directory; this image owns only its symlink.
+mkdir -p "$codex_skill_root"
+if [ ! -e "$goal_skill_target" ] || [ -L "$goal_skill_target" ]; then
+  ln -sfn /opt/herdr-supervisor/skills/herdr-goals "$goal_skill_target"
+fi
 
 watcher_pid=""
 if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}${HERDR_WATCH_ADO_REPOSITORIES:-}" ]; then
