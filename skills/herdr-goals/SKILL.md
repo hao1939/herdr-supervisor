@@ -94,16 +94,19 @@ entire portfolio merely to refresh its display.
 
 ## Verify the effect
 
-After a start, update, or reconsideration, re-read the canonical `goal.json`,
-identify the exact goal and worker, and confirm initial worker activity in
-fresh Herdr state. After a stop, verify that canonical `current.json` is
+After a start or update, re-read the canonical `goal.json`, identify the exact
+goal and worker, and confirm initial worker activity in fresh Herdr state. A
+reconsideration acknowledgement proves only that a focused review was
+scheduled; report it as scheduled until the resulting review or fresh
+checkpoint is observed. After a stop, verify that canonical `current.json` is
 terminal with state `stopped` and that the worker was not stopped. Report:
 
 - what was created, reused, updated, reconsidered, or stopped;
 - the exact goal and worker identities;
 - any material difference between the authorized contract and stored result;
-- whether the worker actually started or resumed when expected, or supervision
-  reached the terminal `stopped` state; and
+- whether the worker actually started or resumed when expected, reconsideration
+  is only scheduled or has produced a fresh review, or supervision reached the
+  terminal `stopped` state; and
 - any terminal or stopped pane that is now a manual cleanup candidate.
 
 Do not claim success from a supervisor acknowledgement alone. Do not close a

@@ -11,6 +11,21 @@ const skillMetadataPath = new URL("../skills/herdr-goals/agents/openai.yaml", im
 const entrypointPath = new URL("../container/container-entrypoint.sh", import.meta.url);
 const run = promisify(execFile);
 
+test("the container installs the bundled goal skill when no entry exists", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-skill-entrypoint-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const codexHome = join(root, "codex");
+
+  await run(entrypointPath.pathname, ["true"], {
+    env: { ...process.env, CODEX_HOME: codexHome, PI_CODING_AGENT_DIR: join(root, "pi") },
+  });
+
+  assert.equal(
+    await readlink(join(codexHome, "skills", "herdr-goals")),
+    "/opt/herdr-supervisor/skills/herdr-goals",
+  );
+});
+
 test("the container preserves an operator-owned goal skill symlink", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-skill-entrypoint-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -45,6 +60,13 @@ test("the bundled goal-management skill verifies explicit stops as terminal stat
   assert.match(skill, /canonical `current\.json` is/);
   assert.match(skill, /terminal with state `stopped`/);
   assert.match(skill, /worker was not stopped/);
+});
+
+test("the bundled goal-management skill distinguishes scheduled reconsideration", async () => {
+  const skill = await readFile(skillPath, "utf8");
+
+  assert.match(skill, /acknowledgement proves only that a focused review was\s+scheduled/);
+  assert.match(skill, /until the resulting review or fresh\s+checkpoint is observed/);
 });
 
 test("the bundled goal-management skill supplies local worker start inputs", async () => {
