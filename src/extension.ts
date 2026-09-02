@@ -1203,11 +1203,19 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       try {
         const result = await discardInstalledGoal(goalId);
         goalCache = undefined;
-        await refreshStatus(ctx);
-        const warning = result.cleanupError
+        let refreshError;
+        try {
+          await refreshStatus(ctx);
+        } catch (error) {
+          refreshError = error;
+        }
+        const cleanupWarning = result.cleanupError
           ? ` The goal is no longer installed, but its hidden temporary cleanup failed: ${result.cleanupError.message}.`
           : "";
-        return text(`Discarded unstarted goal ${goalId}: ${result.contract.objective}.${warning}`);
+        const refreshWarning = refreshError
+          ? ` The goal was discarded, but the supervisor status could not refresh: ${refreshError.message}.`
+          : "";
+        return text(`Discarded unstarted goal ${goalId}: ${result.contract.objective}.${cleanupWarning}${refreshWarning}`);
       } catch (error) {
         goalCache = undefined;
         return text(`Could not discard ${goalId}: ${error.message}`, true);
@@ -1556,7 +1564,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       }
       if (
         waitingFor
-        && !binding.wait?.goalId
+        && !waitingOnGoalId
         && latestAgent.agent_status !== "working"
         && Number.isFinite(previousReviewAt)
         && previousReviewAt <= Date.now()

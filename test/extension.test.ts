@@ -294,6 +294,34 @@ test("discard removes only the exact unstarted goal authorized by the human", as
   assert.deepEqual(goals.unstarted.map((goal) => goal.goalId), ["g_keep"]);
 });
 
+test("discard success remains truthful when status refresh fails", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-discard-refresh-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Discard despite a stale display.",
+    acceptance: ["The saved contract is gone."],
+  }, root, { goalId: "g_refresh" });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_discard_goal").execute(
+    "discard",
+    { goal_id: "g_refresh" },
+    undefined,
+    undefined,
+    { ui: { setStatus() { throw new Error("display unavailable"); } } },
+  );
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /goal was discarded, but the supervisor status could not refresh/);
+  assert.deepEqual((await loadSupervisorGoals(root)).unstarted, []);
+});
+
 test("pull request traceability never publishes a path-backed session locator", () => {
   const trace = pullRequestTraceability({
     goalId: "g_path",
@@ -2952,7 +2980,7 @@ test("a live checkpoint keeps later unchanged working checks quiet", async (t) =
   pi.events.get("session_shutdown")();
 });
 
-test("restart restores a settled wait without a no-change review before its deadline", async (t) => {
+test("restart preserves a peer wait and requires fresh evidence before replacing it with an external wait", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-wait-restart-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
   const sessionFile = join(sessions, "worker.jsonl");
@@ -2972,9 +3000,9 @@ test("restart restores a settled wait without a no-change review before its dead
   }, root, { goalId: "g_wait_restart" });
   const reviewAt = new Date(Date.now() + 1200).toISOString();
   await recordDecision(binding, "leave", {
-    progress: "The service asked us to wait.\nExternal watch target: github-pr owner/repository#16",
-    action: "Wait for the service retry boundary; observe github-pr owner/repository#16 when supervision resumes.",
-    wait: { condition: "the service retry boundary", reviewAt },
+    progress: "A peer owns the next attempt.\nExternal watch target: github-pr owner/repository#16",
+    action: "Wait for the peer to release capacity; observe github-pr owner/repository#16 when supervision resumes.",
+    wait: { condition: "the peer releases capacity", reviewAt, goalId: "g_previous_peer" },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
     evidence: ["The server returned a retry deadline."],
   }, root);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -140,6 +140,42 @@ test("discarding fails closed when a goal has local state or unknown files", asy
     /not an unstarted contract with no local state/,
   );
   assert.equal((await loadGoalContract("g_unknown", root)).objective, "Produce the verified result.");
+});
+
+test("restart reconciliation finishes or restores interrupted discard claims", async () => {
+  const root = await goalsRoot();
+  await installGoal("g_saved", contract(), root);
+  const savedClaim = join(root, ".discarding-g_saved-11111111-1111-4111-8111-111111111111");
+  await rename(goalPaths("g_saved", root).directory, savedClaim);
+
+  await runningGoal(root, "g_running");
+  const runningClaim = join(root, ".discarding-g_running-22222222-2222-4222-8222-222222222222");
+  await rename(goalPaths("g_running", root).directory, runningClaim);
+
+  const records = await listGoalRecords(root);
+
+  assert.deepEqual(records.map((record) => record.goalId), ["g_running"]);
+  assert.equal((await loadGoalState("g_running", root)).worker.agentSession.value, "session_test");
+  assert.deepEqual((await readdir(root)).filter((entry) => entry.startsWith(".discarding-")), []);
+});
+
+test("legacy peer-wait pane identity is accepted once and not retained", async () => {
+  const root = await goalsRoot();
+  await runningGoal(root);
+  const paths = goalPaths("g_test", root);
+  const state = JSON.parse(await readFile(paths.current, "utf8"));
+  state.wait = {
+    condition: "the exact peer finishes",
+    reviewAt: "2026-08-28T11:00:00.000Z",
+    goalId: "g_peer",
+    paneId: "w1:p9",
+  };
+  await writeFile(paths.current, `${JSON.stringify(state, null, 2)}\n`);
+
+  const loaded = await loadGoalState("g_test", root);
+
+  assert.equal(loaded.wait.goalId, "g_peer");
+  assert.equal("paneId" in loaded.wait, false);
 });
 
 test("the local checkpoint rejects contract and unknown fields", async () => {
