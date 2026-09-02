@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  discardInstalledGoal,
   loadSupervisorGoals,
   recordDecision,
   refineSupervisorGoal,
@@ -11,7 +12,7 @@ import {
   registerSupervisedGoal,
   startInstalledGoal,
 } from "../src/goal-registry.ts";
-import { createGoalContract, installGoal, loadGoalState, readAudit, updateGoalState } from "../src/goal-store.ts";
+import { createGoalContract, installGoal, readAudit } from "../src/goal-store.ts";
 import { shouldWake } from "../src/supervision.ts";
 
 const worker = {
@@ -44,6 +45,27 @@ test("one active goal binds one exact worker and uses explicit acceptance", asyn
   }, {
     objective: "Another goal with the same native session.",
   }, directory), /native agent session already pursues goal g_test/);
+});
+
+test("discarding an installed goal cannot race with starting it", async () => {
+  const directory = await root();
+  await installGoal("g_saved", createGoalContract({
+    objective: "Retain or start exactly once.",
+    acceptance: ["The outcome is verified."],
+  }), directory);
+
+  const results = await Promise.allSettled([
+    discardInstalledGoal("g_saved", directory),
+    startInstalledGoal("g_saved", worker, directory),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  const goals = await loadSupervisorGoals(directory);
+  assert.ok(
+    (goals.active.length === 1 && goals.unstarted.length === 0)
+      || (goals.active.length === 0 && goals.unstarted.length === 0),
+  );
 });
 
 test("concurrent registration cannot assign one native session twice", async () => {
@@ -153,64 +175,6 @@ test("refining a goal replaces its contract without replacing its worker", async
   const audit = await readAudit("g_test", directory);
   assert.equal(audit.at(-1).type, "goal_refined");
   assert.equal(audit.at(-1).summary, "Added exact-commit ADO and collaboration requirements.");
-});
-
-test("a legacy provider change survives until the worker is steered to reread it", async () => {
-  const directory = await root();
-  const binding = await registerSupervisedGoal(worker, {
-    objective: "Continue a goal created before metadata discovery.",
-  }, directory, { goalId: "g_legacy_watch" });
-  await updateGoalState(binding.goalId, (state) => {
-    state.externalChange = {
-      source: "github-pr",
-      subject: "owner/repository#16",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    };
-    return state;
-  }, directory);
-
-  const [pending] = (await loadSupervisorGoals(directory)).active;
-  assert.equal(pending.legacyExternalChange?.revision, "legacy-revision");
-  await assert.rejects(recordDecision(pending, "leave", {
-    progress: "The worker is continuing under the replacement watcher.",
-    action: "Keep the healthy worker running.",
-  }, directory), /must be reread by the worker/);
-  assert.equal((await loadGoalState(binding.goalId, directory)).externalChange.revision, "legacy-revision");
-
-  await recordDecision(pending, "steer", {
-    progress: "The worker was asked to reread current provider authority.",
-    action: "Reread the exact legacy provider resource and continue.",
-    resolvedLegacyExternalChange: true,
-  }, directory);
-
-  assert.equal((await loadGoalState(binding.goalId, directory)).externalChange, undefined);
-});
-
-test("administrative stop remains authoritative with a legacy provider change", async () => {
-  const directory = await root();
-  const binding = await registerSupervisedGoal(worker, {
-    objective: "Stop this upgraded goal when the human asks.",
-  }, directory, { goalId: "g_legacy_stop" });
-  await updateGoalState(binding.goalId, (state) => {
-    state.externalChange = {
-      source: "ado-build",
-      subject: "org/project/101",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    };
-    return state;
-  }, directory);
-
-  await recordDecision(binding, "stop", {
-    progress: "The human stopped supervision.",
-    action: "Stop supervision without changing the worker.",
-    terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
-  }, directory);
-
-  const state = await loadGoalState(binding.goalId, directory);
-  assert.equal(state.terminal.state, "stopped");
-  assert.equal(state.externalChange.revision, "legacy-revision");
 });
 
 test("refining a goal resolves its previous human question", async () => {
@@ -370,23 +334,6 @@ test("the same native session may refresh its transient routing location", async
   const binding = await registerSupervisedGoal(worker, {
     objective: "Keep working after restart.",
   }, directory, { goalId: "g_restart", at: "2026-08-28T10:00:00.000Z" });
-  const dependentWorker = {
-    paneId: "w1:p3",
-    terminalId: "term_dependent",
-    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_dependent" },
-  };
-  const dependent = await registerSupervisedGoal(dependentWorker, {
-    objective: "Continue when the peer changes.",
-  }, directory, { goalId: "g_dependent", at: "2026-08-28T10:00:10.000Z" });
-  await recordDecision(dependent, "leave", {
-    progress: "Waiting for the peer.",
-    action: "Wait for the peer.",
-    wait: {
-      condition: "the peer result",
-      paneId: worker.paneId,
-      reviewAt: "2026-08-28T11:00:00.000Z",
-    },
-  }, directory, () => "2026-08-28T10:00:20.000Z");
   const refreshed = await refreshWorkerLocation(binding, {
     ...worker,
     paneId: "w1:p9",
@@ -398,10 +345,7 @@ test("the same native session may refresh its transient routing location", async
   assert.equal(refreshed.updatedAt, "2026-08-28T10:01:00.000Z");
   const storedGoals = (await loadSupervisorGoals(directory)).active;
   const stored = storedGoals.find((goal) => goal.goalId === binding.goalId);
-  const storedDependent = storedGoals.find((goal) => goal.goalId === dependent.goalId);
   assert.equal(stored.paneId, "w1:p9");
   assert.equal(stored.terminalId, "term_after_restart");
   assert.equal(stored.agentSession.value, worker.agentSession.value);
-  assert.equal(storedDependent.wait.goalId, binding.goalId);
-  assert.equal(storedDependent.wait.paneId, worker.paneId);
 });

@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   appendAudit,
   createGoalContract,
+  discardUnstartedGoal,
   GOAL_STORE_GUIDE,
   goalPaths,
   goalStoreGuidePath,
@@ -111,6 +112,36 @@ test("installing a goal preserves an existing root guide", async () => {
   assert.deepEqual(await loadGoalContract("g_test", root), contract());
 });
 
+test("discarding removes only a contract that has never started", async () => {
+  const root = await goalsRoot();
+  await installGoal("g_saved", contract(), root);
+
+  const result = await discardUnstartedGoal("g_saved", root);
+
+  assert.equal(result.contract.objective, "Produce the verified result.");
+  assert.equal(result.cleanupError, undefined);
+  assert.deepEqual(await listGoalRecords(root), []);
+  assert.equal(await readFile(goalStoreGuidePath(root), "utf8"), GOAL_STORE_GUIDE);
+});
+
+test("discarding fails closed when a goal has local state or unknown files", async () => {
+  const root = await goalsRoot();
+  await runningGoal(root, "g_running");
+  await assert.rejects(
+    discardUnstartedGoal("g_running", root),
+    /not an unstarted contract with no local state/,
+  );
+  assert.equal((await loadGoalState("g_running", root)).worker.paneId, worker.paneId);
+
+  await installGoal("g_unknown", contract(), root);
+  await writeFile(join(goalPaths("g_unknown", root).directory, "operator-note.txt"), "keep\n");
+  await assert.rejects(
+    discardUnstartedGoal("g_unknown", root),
+    /not an unstarted contract with no local state/,
+  );
+  assert.equal((await loadGoalContract("g_unknown", root)).objective, "Produce the verified result.");
+});
+
 test("the local checkpoint rejects contract and unknown fields", async () => {
   const root = await goalsRoot();
   await runningGoal(root);
@@ -125,21 +156,6 @@ test("the local checkpoint rejects contract and unknown fields", async () => {
   const current = await loadGoalState("g_test", root);
   current.worker.agent_status = "working";
   assert.throws(() => validateGoalState(current), /goal worker contains unsupported field agent_status/);
-});
-
-test("v1 checkpoints retain read compatibility with the legacy recover decision", async () => {
-  const root = await goalsRoot();
-  await runningGoal(root);
-  await updateGoalState("g_test", (current) => {
-    current.lastDecision = {
-      decision: "recover",
-      at: "2026-08-28T10:05:00.000Z",
-      action: "Resumed the exact worker session.",
-    };
-    return current;
-  }, root, () => "2026-08-28T10:05:00.000Z");
-
-  assert.equal((await loadGoalState("g_test", root)).lastDecision.decision, "recover");
 });
 
 test("copying goal.json is sufficient to start fresh in another instance", async () => {
@@ -228,27 +244,6 @@ test("state updates atomically replace the current view and advance its revision
   assert.equal(updated.reviewAt, "2026-08-28T10:10:00.000Z");
   assert.equal((await loadGoalState("g_test", root)).progress, "The focused proof passes; live behavior remains.");
   assert.equal(JSON.parse(await readFile(goalPaths("g_test", root).current, "utf8")).revision, 2);
-});
-
-test("the local checkpoint retains one unresolved external change", async () => {
-  const root = await goalsRoot();
-  await runningGoal(root);
-  await updateGoalState("g_test", (current) => {
-    current.externalChange = {
-      source: "github-pr",
-      subject: "owner/repository#16",
-      revision: "revision-2",
-      observedAt: "2026-08-30T10:05:00.000Z",
-    };
-    return current;
-  }, root, () => "2026-08-30T10:05:00.000Z");
-
-  assert.deepEqual((await loadGoalState("g_test", root)).externalChange, {
-    source: "github-pr",
-    subject: "owner/repository#16",
-    revision: "revision-2",
-    observedAt: "2026-08-30T10:05:00.000Z",
-  });
 });
 
 test("the local checkpoint rejects a malformed exact review time", async () => {

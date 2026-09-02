@@ -179,6 +179,8 @@ executor may create a new routing pane, but only for that saved session.
 Herdr preserves a native Codex session when a human closes its settled pane.
 The supervisor does not automatically close panes because Herdr's current close
 operation cannot atomically require the expected terminal and native session.
+An explicitly selected saved goal that has never started can also be discarded;
+the action refuses any goal with execution state, history, or unknown files.
 
 For GitHub and Azure DevOps, one shared metadata watcher observes configured
 provider scopes without model turns. Workers attach their durable goal ID when
@@ -258,7 +260,6 @@ npm test         # node:test suite
 
 - [Changelog](CHANGELOG.md)
 - [Current design](docs/design.md)
-- [Shared external watcher contract](docs/proposals/shared-event-watcher.md)
 - [Research landscape](docs/research.md)
 
 ## Design rule

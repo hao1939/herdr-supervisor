@@ -62,6 +62,15 @@ test("the bundled goal-management skill verifies explicit stops as terminal stat
   assert.match(skill, /worker was not stopped/);
 });
 
+test("the bundled goal-management skill limits discard to explicit unstarted goals", async () => {
+  const skill = await readFile(skillPath, "utf8");
+
+  assert.match(skill, /human explicitly asks to discard an exact saved goal/);
+  assert.match(skill, /Never infer this\s+authority from age, duplication, a global-review finding, or an absent worker/);
+  assert.match(skill, /fail closed for active or completed goals/);
+  assert.match(skill, /exact\s+ID is no longer listed/);
+});
+
 test("the bundled goal-management skill distinguishes scheduled reconsideration", async () => {
   const skill = await readFile(skillPath, "utf8");
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   appendAudit,
   createGoalContract,
+  discardUnstartedGoal,
   installGoal,
   listGoalRecords,
   loadGoalContract,
@@ -45,9 +46,6 @@ export function bindingFromRecord(record): GoalBinding {
     lastDecision: record.state.lastDecision,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
-    legacyExternalChange: record.state.externalChange
-      ? structuredClone(record.state.externalChange)
-      : undefined,
     updatedAt: record.state.updatedAt,
   };
 }
@@ -106,6 +104,19 @@ export async function startInstalledGoal(goalId, worker, root?, options: any = {
     }
     const state = await startGoal(goalId, worker, root, { at: options.at });
     return bindingFromRecord({ goalId, contract: installed.contract, state });
+  });
+}
+
+export async function discardInstalledGoal(goalId, root?) {
+  return withGoalRootLock(root, async () => {
+    const goals = await loadSupervisorGoals(root);
+    if (goals.errors.length) {
+      throw new Error(`repair unreadable goals before discarding another: ${goals.errors.map((record) => record.goalId).join(", ")}`);
+    }
+    if (!goals.unstarted.some((record) => record.goalId === goalId)) {
+      throw new Error(`goal ${goalId} is not an unstarted saved contract`);
+    }
+    return discardUnstartedGoal(goalId, root);
   });
 }
 
@@ -181,24 +192,6 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
       throw new Error("the worker routing changed; reread Herdr before relocating it");
     }
     assertWorkerAvailable(goals.active, worker, current.goalId);
-    if (worker.paneId !== current.paneId) {
-      const legacyDependents = goals.active.filter((candidate) => (
-        candidate.goalId !== current.goalId
-        && !candidate.wait?.goalId
-        && candidate.wait?.paneId === current.paneId
-      ));
-      // Make the durable goal identity authoritative before changing its
-      // replaceable pane. If interrupted, the peer remains at the old pane and
-      // this idempotent upgrade is retried before relocation.
-      for (const dependent of legacyDependents) {
-        await updateGoalState(dependent.goalId, (goalState) => {
-          if (goalState.wait?.paneId === current.paneId && !goalState.wait.goalId) {
-            goalState.wait.goalId = current.goalId;
-          }
-          return goalState;
-        }, root, now);
-      }
-    }
     const state = await updateGoalState(current.goalId, (goalState) => {
       goalState.worker.paneId = worker.paneId;
       goalState.worker.terminalId = worker.terminalId;
@@ -220,10 +213,6 @@ export async function refreshWorkerLocation(binding, worker, root?, now?) {
 export async function recordDecision(binding, decision, input, root?, now = () => new Date().toISOString()) {
   const at = now();
   const state = await updateGoalState(binding.goalId, (current) => {
-    if (current.externalChange && ["leave", "ask_human", "accept"].includes(decision)) {
-      throw new Error(`the legacy ${current.externalChange.source} ${current.externalChange.subject} change must be reread by the worker before this decision`);
-    }
-    if (current.externalChange && input.resolvedLegacyExternalChange) delete current.externalChange;
     current.progress = input.progress;
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);

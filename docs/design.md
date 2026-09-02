@@ -322,6 +322,12 @@ goal ID to the same start operation used for a new goal. Code loads that contrac
 and creates its worker; the model does not restate the contract or create a
 sibling merely because the goal has no worker yet.
 
+If the human explicitly selects an exact saved goal that has never started, the
+supervisor may discard it. Code requires a directory containing only
+`goal.json`; active goals, completed goals, audit history, and unknown files
+fail closed. Age, apparent duplication, or a global-review finding never grants
+discard authority.
+
 The supervisor's ordinary status view lists the exact IDs and objectives of
 active and unstarted goals. Reading one exact goal returns its complete contract
 and, when it is terminal, its stored result and evidence. This is supervised
@@ -333,27 +339,14 @@ or completed state while clearly marking unavailable live worker state. An
 exact pane query still requires Herdr because it is a runtime observation.
 
 `current.json` is the latest local checkpoint. It contains the exact worker
-binding and its optional display label, concise progress, retained evidence, observation cursor, last
-decision, optional wait, and optional terminal result. It does not copy live
-worker or provider status; those facts stay with Herdr and the provider.
+binding, concise progress, retained evidence, observation cursor, last decision,
+optional wait, and optional terminal result. It does not copy live worker or
+provider status; those facts stay with Herdr and the provider.
 
 Tool arguments keep the same boundary explicit. An optional value that does not
 apply is `null`; the model never invents a placeholder identity, revision,
 watch, wait, or deadline merely to fill a field. Code validates real values and
 executes the decision, while `null` carries no semantic claim.
-
-The v1 reader still accepts the retired `recover` decision in an existing
-checkpoint. New reviews never produce it; recovery is now transport inside
-`steer`. This keeps restart compatibility without restoring a fifth model
-decision.
-
-The v1 reader also accepts the retired `externalChange` field. The next
-focused review exposes it as one legacy reread obligation. Only steering the
-worker with the code-injected reread instruction and confirming its delivery
-removes it; unrelated or uncertain steering preserves it. Leaving, asking, or
-accepting cannot silently discard it, while an explicit administrative stop
-remains authoritative. New code never writes it, and external revision state
-then belongs only to the shared watcher checkpoint.
 
 `journal.jsonl` is append-only audit history. It is useful for inspection but
 is never replayed to rebuild the current goal. A missing journal cannot stop
@@ -483,9 +476,7 @@ model turn. A changed revision wakes the worker directly, and its normal Herdr
 state change enters the existing supervisor review loop.
 
 Deciding what a review comment, failed check, or merged branch means for the
-goal belongs to the worker, not the supervisor or watcher. See
-`docs/proposals/shared-event-watcher.md` for the exact provider contract and
-live evidence.
+goal belongs to the worker, not the supervisor or watcher.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
