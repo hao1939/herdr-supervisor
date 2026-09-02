@@ -147,8 +147,13 @@ test("restart reconciliation finishes or restores interrupted discard claims", a
   await installGoal("g_saved", contract(), root);
   const savedClaim = join(root, ".discarding-g_saved-11111111-1111-4111-8111-111111111111");
   await rename(goalPaths("g_saved", root).directory, savedClaim);
+  assert.deepEqual(await listGoalRecords(root), []);
 
-  await runningGoal(root, "g_running");
+  await installGoal("g_running", contract(), root);
+  assert.equal((await listGoalRecords(root))[0].state, undefined);
+  // Model another process creating current.json after discard discovery but
+  // before the atomic directory claim. The claim must retain and restore it.
+  await startGoal("g_running", worker, root, { at: "2026-08-28T10:00:00.000Z" });
   const runningClaim = join(root, ".discarding-g_running-22222222-2222-4222-8222-222222222222");
   await rename(goalPaths("g_running", root).directory, runningClaim);
 
