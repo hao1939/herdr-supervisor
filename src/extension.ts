@@ -143,6 +143,18 @@ function workerNameForGoal(goalId: string) {
   return `goal-${suffix}`;
 }
 
+function unboundWorkersForGoal(snapshot, workspaceId, activeGoals, goalId) {
+  const workerName = workerNameForGoal(goalId);
+  return snapshot.agents?.filter((agent) => (
+    agent.name === workerName
+    && agent.workspace_id === workspaceId
+    && !activeGoals.some((binding) => (
+      binding.paneId === agent.pane_id
+      || sameAgentSession(binding.agentSession, agent.agent_session)
+    ))
+  )) || [];
+}
+
 function exactSessionAgent(snapshot, session) {
   const matches = snapshot.agents?.filter((agent) => (
     sameAgentSession(agent.agent_session, session)
@@ -1027,14 +1039,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const snapshot = await client.snapshot();
       const supervisor = findPane(snapshot, supervisorPane);
       if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
-      const pendingAgents = snapshot.agents?.filter((agent) => (
-        agent.name === workerName
-        && agent.workspace_id === supervisor.workspace_id
-        && !goals.active.some((binding) => (
-          binding.paneId === agent.pane_id
-          || sameAgentSession(binding.agentSession, agent.agent_session)
-        ))
-      )) || [];
+      const pendingAgents = unboundWorkersForGoal(snapshot, supervisor.workspace_id, goals.active, goalId);
       if (pendingAgents.length > 1) {
         throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
       }
@@ -1201,6 +1206,18 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         return text(`${mode()} mode: would discard unstarted goal ${goalId}, but no contract was removed.`);
       }
       try {
+        if (pendingStarts.has(goalId)) {
+          throw new Error(`goal ${goalId} already has a worker bootstrap in progress`);
+        }
+        const supervisorPaneId = process.env.HERDR_PANE_ID;
+        if (supervisorPaneId) {
+          const [snapshot, goals] = await Promise.all([client.snapshot(), activeBindings()]);
+          const supervisor = findPane(snapshot, supervisorPaneId);
+          if (!supervisor) throw new Error(`the supervisor pane ${supervisorPaneId} is not present in Herdr`);
+          if (unboundWorkersForGoal(snapshot, supervisor.workspace_id, goals.active, goalId).length) {
+            throw new Error(`goal ${goalId} already has an initialized worker; retry the same goal instead of discarding it`);
+          }
+        }
         const result = await discardInstalledGoal(goalId);
         goalCache = undefined;
         let refreshError;

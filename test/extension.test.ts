@@ -1741,8 +1741,18 @@ test("a missing native session cannot leave assigned work running unsupervised",
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /goal was not delivered or bound/);
   assert.equal(prompts.length, 0);
-  assert.equal((await loadSupervisorGoals(root)).active.length, 0);
-  assert.equal((await loadSupervisorGoals(root)).unstarted.length, 1);
+  const stored = await loadSupervisorGoals(root);
+  assert.equal(stored.active.length, 0);
+  assert.equal(stored.unstarted.length, 1);
+  const discard = await pi.tools.get("supervisor_discard_goal").execute(
+    "discard-pending",
+    { goal_id: stored.unstarted[0].goalId },
+    undefined,
+    undefined,
+    { ui: { setStatus() {} } },
+  );
+  assert.equal(discard.isError, true);
+  assert.match(discard.content[0].text, /worker bootstrap in progress/);
   pi.events.get("session_shutdown")();
 });
 
@@ -1813,13 +1823,23 @@ test("restart reuses a pending initialized pane instead of creating another work
   herdrSupervisor(firstPi);
   const first = await firstPi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
   firstPi.events.get("session_shutdown")();
+  const goalId = (await loadSupervisorGoals(root)).unstarted[0].goalId;
   sessionReady = true;
 
   const secondPi = fakePi();
   herdrSupervisor(secondPi);
+  const discard = await secondPi.tools.get("supervisor_discard_goal").execute(
+    "discard-restored",
+    { goal_id: goalId },
+    undefined,
+    undefined,
+    { ui: { setStatus() {} } },
+  );
   const second = await secondPi.tools.get("supervisor_start_goal").execute("second", request, undefined, undefined, { ui: { setStatus() {} } });
 
   assert.equal(first.isError, true);
+  assert.equal(discard.isError, true);
+  assert.match(discard.content[0].text, /already has an initialized worker/);
   assert.equal(second.isError, false);
   assert.equal(creates, 1);
   assert.equal(starts, 1);
