@@ -498,6 +498,10 @@ test("a human correction updates durable authority before execution", () => {
   assert.match(prompt, /losing conversation history and the current checkpoint would change what future cycles must do/);
   assert.match(prompt, /persist the complete refinement in goal\.json with supervisor_update_goal/);
   assert.match(prompt, /reconsideration or steering checkpoint is not durable authority/);
+  assert.match(prompt, /Write the smallest complete contract/);
+  assert.match(prompt, /put each fact in one place/);
+  assert.match(prompt, /one-time adoption, migration, backlog transfer, and evidence reconciliation as current execution/);
+  assert.match(prompt, /stable reference and integrity proof rather than replaying it/);
 });
 
 test("a direct human question can be answered without changing goal execution", () => {

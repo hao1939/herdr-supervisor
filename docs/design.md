@@ -82,7 +82,7 @@ cannot handle the problem cleanly.
 
 ## Mental model
 
-There are four plain roles:
+There are four core roles:
 
 - The human states and refines outcomes and makes decisions that require human
   authority.
@@ -92,6 +92,15 @@ There are four plain roles:
 - An optional external watcher detects relevant provider changes and wakes the
   affected worker with bounded observed facts. It does not judge the change,
   and the worker rereads provider authority before acting.
+
+For a busy portfolio, the human may also open an ordinary Codex **goal
+management pane**. It is an interactive client, not another service, task,
+supervisor, or source of truth. It helps the human explore outcomes, inspect the
+portfolio, and form goal changes. It reads the same goal store and Herdr state,
+then relays an authorized complete action to the uniquely named `supervisor`,
+which remains the single validated mutation path. The Pi supervisor can stay
+focused on background event reviews while the management pane handles longer
+human discussion.
 
 Herdr owns panes, processes, native sessions, status, and events. The worker
 owns implementation and detailed evidence. The supervisor owns the goal
@@ -117,6 +126,9 @@ Three diagrams, each answering one question.
 ```mermaid
 flowchart LR
     U[Human] <--> S[Supervisor]
+    U <--> M[Optional goal manager]
+    M -->|validated request| S
+    M -.->|read| F
     S -->|goal and guidance| W[Workers]
     W -->|progress and evidence| S
     E[External watcher] -->|change notice| W
@@ -173,7 +185,8 @@ confirmed, it fails closed and asks the human.
 
 In plain language:
 
-- You talk to one supervisor.
+- You may talk directly to the supervisor, or use one ordinary Codex management
+  pane for portfolio discussion while the supervisor handles background events.
 - It turns each durable outcome into a goal and starts one Codex worker for it.
   Multiple workers run in parallel.
 - Workers use their native Codex Goal loop and do not need constant prompting.
@@ -620,6 +633,34 @@ The supervisor speaks in plain language. It explains:
 
 It preserves exact IDs and evidence only where they help verification. Runtime
 events and internal metadata do not compete with the useful outcome.
+
+### Optional goal management pane
+
+The goal management pane is useful when the human wants to compare several
+goals, rethink portfolio boundaries, or discuss a candidate before changing
+execution. It has no durable lifecycle and owns no goals. Closing it loses no
+supervision state.
+
+The management agent reads the self-explaining goal store and fresh Herdr state.
+For a portfolio review it may also read the latest timestamped
+`.supervisor/global-review.json` finding, verify it against current facts, and
+present one compact view: outcome, state, latest material change, blocker, and
+next action. The finding is advisory and never becomes a second source of goal
+truth.
+
+Only the Pi agent named `supervisor` applies goal actions. The management agent
+relays a complete authorized contract or a precise reconsideration request to
+that name, never to a remembered pane ID, then verifies canonical storage and
+live worker activity. This keeps one action path while allowing a stronger
+interactive agent to help the human reason about the portfolio.
+
+Goal contracts stay concise. One-time migrations and predecessor handoffs are
+current execution unless they change what every fresh worker must pursue. Keep
+their detailed references in the checkpoint or steering instruction; when a
+portable fresh start needs the unfinished handoff, use one short context
+reference and remove it after the handoff is sealed. Historical evidence is
+normally preserved by reference and integrity proof rather than exhaustively
+replayed.
 
 ## Implementation boundary
 

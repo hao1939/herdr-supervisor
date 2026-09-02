@@ -1,0 +1,4 @@
+interface:
+  display_name: "Herdr Goals"
+  short_description: "Form, inspect, refine, and verify Herdr goals"
+  default_prompt: "Use $herdr-goals to inspect or operate my Herdr goals through their validated lifecycle."
