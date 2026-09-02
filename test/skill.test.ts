@@ -25,6 +25,14 @@ test("the bundled goal-management skill verifies explicit stops as terminal stat
   assert.match(skill, /worker was not stopped/);
 });
 
+test("the bundled goal-management skill supplies local worker start inputs", async () => {
+  const skill = await readFile(skillPath, "utf8");
+
+  assert.match(skill, /absolute worker\s+working directory/);
+  assert.match(skill, /either a new tab or the exact pane of a related\s+worker/);
+  assert.match(skill, /local execution inputs, not goal context/);
+});
+
 test("the bundled goal-management skill gives portfolio reviews bounded context", async () => {
   const skill = await readFile(skillPath, "utf8");
 

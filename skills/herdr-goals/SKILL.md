@@ -83,8 +83,11 @@ supervision without stopping the worker.
 If this agent has no supervisor actions and the human authorized a mutation,
 find the single live Herdr agent named `supervisor`, relay the requested
 operation and the complete contract to it, and ask it to apply the contract as
-written rather than redesign it. Do not relay a half-formed draft. If there is
-no unique supervisor, report that boundary instead of guessing a pane.
+written rather than redesign it. For a start, also include the absolute worker
+working directory and choose either a new tab or the exact pane of a related
+worker; these are local execution inputs, not goal context. Do not relay a
+half-formed draft. If there is no unique supervisor, report that boundary
+instead of guessing a pane.
 
 Reconsider only goals materially affected by the new fact. Do not wake an
 entire portfolio merely to refresh its display.
