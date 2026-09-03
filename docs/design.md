@@ -17,6 +17,16 @@ The core rule is:
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
 
+The extension rule is equally small:
+
+> **Events carry facts. Knowledge guides action.**
+
+An observation path says what changed and wakes one statically chosen
+responsible agent. Plain-language, version-controlled guidance tells that
+agent why the event matters, what evidence to inspect, which existing actions
+are available, and what useful result to produce. The agent still judges the
+current case. Neither the event nor the guidance is an executable workflow.
+
 The whole model is:
 
 1. The human defines or refines a goal.
@@ -44,6 +54,11 @@ The minimal core lets an agent:
 - **act** through small validated effects;
 - **remember** the portable goal and latest local checkpoint; and
 - **wake** on meaningful events or a bounded health check.
+
+New integrations extend facts with a deterministic observer, action with
+durable response knowledge, or both. Keep those surfaces separate: guidance
+can improve with experience without changing delivery or persistence. Do not
+translate it into code branches merely because it is explicit.
 
 For every new request or failure, ask in order:
 
@@ -88,10 +103,17 @@ There are four core roles:
   authority.
 - A worker pursues one durable goal in one exact native agent session.
 - The supervisor observes evidence, judges progress, and helps the same worker
-  continue.
+  continue. It also assembles and verifies any shared observation path needed
+  by the supervised portfolio.
 - An optional external watcher detects relevant provider changes and wakes the
   affected worker with bounded observed facts. It does not judge the change,
   and the worker rereads provider authority before acting.
+
+Every observation path has one fixed responsible role chosen when that path is
+wired. Current pull-request and build changes wake their linked worker. A
+future portfolio observation, if live evidence justifies it, may wake the
+supervisor's existing global review instead. Events do not contain a generic
+target, and the watcher does not choose a recipient at runtime.
 
 For a busy portfolio, the human may also open an ordinary Codex **goal
 management pane**. It is an interactive client, not another service, task,
@@ -136,6 +158,7 @@ flowchart LR
     M -->|validated request| S
     M -.->|read| F
     S -->|goal and guidance| W[Workers]
+    S -.->|configure and verify| E
     W -->|progress and evidence| S
     E[External watcher] -->|change notice| W
     S -->|write| F[(Goal files)]
@@ -157,11 +180,14 @@ flowchart LR
     C[Related goal changed] --> Q
     D[Provider metadata changed] --> W[Current worker wakes and rereads]
     W --> A
-    E[System health check] -. affected goals .-> Q
+    E[System or portfolio fact] --> G[Global review]
+    G -. affected goals .-> Q
 ```
 
 The supervisor sleeps otherwise. It does not poll workers or providers. The
 optional shared watcher performs bounded provider reads without model turns.
+The low-frequency global review remains a safety net for missed system-level
+events, not the primary way to discover facts that a cheap observer can report.
 
 ### One review, one decision
 
@@ -486,6 +512,41 @@ state change enters the existing supervisor review loop.
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor or watcher.
 
+### Event and knowledge extension contract
+
+The general extension seam is **event for fact, knowledge for action**:
+
+1. **Observe facts.** A small adapter reads one trusted source and emits a
+   bounded identity, revision, timestamp, and payload. It reports what the
+   source says, not what an agent should do.
+2. **Wake one owner.** Static composition selects one responsible agent for
+   that observation path. Goal-linked PR and build events resolve to the exact
+   worker. A system-level observation may instead request the supervisor's
+   existing global review. The event carries links such as a goal ID when they
+   are observed facts; it does not carry a generic routing target.
+3. **Supply response knowledge.** The triggered turn receives concise stable
+   guidance describing why the event matters, what authority to reread, useful
+   checks and existing actions, and the expected result. Goal-specific policy
+   remains in `goal.json`; shared operating knowledge remains in prompts or a
+   colocated plain-language guide.
+4. **Let the model decide.** The responsible agent combines current authority,
+   goal or portfolio context, event facts, and response knowledge. It uses
+   existing actions and reports what is true, why it matters, what it did, and
+   what condition should wake work again.
+
+Knowledge must be readable by the responsible agent or included in the bounded
+automatic-review context; it is not assumed to appear through model memory. A
+restricted review cannot depend on opening a document with unavailable tools.
+When incidents teach a reusable response, update the guide or prompt before
+adding watcher conditionals.
+
+For example, a future GitHub portfolio observer could report changed draft-PR
+facts to one global review. Its guidance could teach the supervisor to inspect
+readiness, overlap, CI, and blocked goals before reconsidering affected
+workers. The observer would not maintain a hold state or route workers, and the
+periodic review would remain only a missed-event safety net. This is an
+extension seam, not a feature until live evidence justifies it.
+
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable
 goal from trusted provider metadata and returns `{ subject, goalId, revision,
@@ -501,6 +562,13 @@ it, and extend its built-in adapters through a normal reviewed code change.
 Container auto-start is only a deployment convenience. The worker-notification
 contract remains intentionally narrow so goal workers need not know how the
 watcher is hosted or extended.
+
+The supervisor is responsible for bringing that infrastructure together for
+its portfolio: decide that the trigger is useful, configure its shared scope,
+make the response knowledge available, and verify delivery. Responsibility is
+not an exclusive capability. A management agent, worker, or human with the same
+authority may perform the concrete setup, but workers are never required to
+manage the watcher in order to pursue their goals.
 
 This is a small tool set—daemon, adapters, and a colocated operating contract—
 not a privileged management service. Role boundaries define responsibility and
@@ -524,23 +592,26 @@ repositories and ten pipeline definitions. Azure DevOps accepts
 the runtime environment. Without usable credentials, discovery fails with a
 clear error and the watcher never guesses.
 
-## Diagnostics and knowledge
+## Events, diagnostics, and knowledge
 
-A failure is another observation, not a new task or a second recovery system:
+An ordinary external change and a failure use the same separation:
 
 ```text
-failure fact -> relevant goal and current evidence -> model decision -> existing action
+event fact -> relevant context + response knowledge -> model decision -> existing action
 ```
 
-The component that sees a failure reports bounded facts: what operation failed,
-where it failed, which goals may be affected, the observed error, and what
-automatic retry remains. Stable operating guidance explains the available
-capabilities and authority boundaries. The model decides what those facts mean.
+For a failure, the component reports what operation failed, where it failed,
+which goals may be affected, the observed error, and what automatic retry
+remains. Stable operating guidance explains the available capabilities and
+authority boundaries. The model decides what those facts mean.
 
-Knowledge has two simple homes. Goal-specific facts belong in the portable goal
-context. Stable operating rules belong in the supervisor or worker guidance.
-A diagnostic contributes only current failure facts and retry behavior; it is
-not a knowledge database or an error-history workflow.
+Knowledge has two authorities. Goal-specific facts and policy belong in the
+portable goal context. Stable operating rules belong in version-controlled
+supervisor or worker guidance, either a compact prompt rule or a colocated
+guide that keeps operation and extension self-explaining. The triggered agent
+must actually receive or be able to read that guidance. An event or diagnostic
+contributes only current facts and retry behavior; it is not a knowledge
+database or an error-history workflow.
 
 The model then uses the same paths it already has:
 

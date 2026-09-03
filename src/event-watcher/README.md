@@ -5,6 +5,14 @@ supervised goals and notifies the exact current worker when their authoritative
 state changes. It removes provider waiting and polling from worker model turns.
 It is not a task system, event bus, workflow engine, or decision agent.
 
+Its extension rule is:
+
+> **Events carry facts. Knowledge guides action.**
+
+Adapters extend what can be observed. Plain-language response guidance extends
+what the responsible agent knows to do with those observations. The watcher
+never turns that guidance into provider-specific workflow code.
+
 ```text
 provider -> source adapter -> resource observation -> watcher core -> worker
                             failure ------------------------------> supervisor
@@ -15,12 +23,26 @@ a durable goal ID. The watcher validates, remembers, and delivers the changed
 observation. The worker rereads the provider and decides what the change means
 for its goal. Only watcher or delivery failures go to the supervisor.
 
+This implementation currently has one fixed notification rule: a linked
+provider resource wakes its exact goal worker. Do not add a generic `target`
+field or runtime router to support another case. If live evidence justifies a
+system-level observer later, wire that observer statically to the supervisor's
+existing global review and keep its facts and response knowledge separate.
+
 ## Using event-watchd
 
 `event-watchd` is an agent-operable external observation tool. There is no
 subscription UI or per-goal registration: start it for trusted provider scopes,
 then let workers identify the resources they create with the durable goal ID
 they already own.
+
+The supervisor is accountable for assembling this shared path for its
+portfolio: choose the trusted scope, ensure one daemon is running, ensure the
+fixed recipient has suitable response knowledge, and verify an end-to-end
+change. This is setup and health ownership, not participation in every event.
+It happens once per environment or integration change, not once per goal or
+resource. Any authorized agent may carry out the ordinary process or code
+operations on the supervisor's behalf.
 
 ### What an agent does
 
@@ -32,8 +54,10 @@ definitions. The agent should:
 2. inspect existing watcher processes and avoid starting a duplicate;
 3. start the watcher with the exact scope variables below;
 4. verify the process, provider access, metadata, and worker delivery;
-5. diagnose or stop it with ordinary process tools; and
-6. when needed, extend its source code through the documented adapter contract.
+5. confirm the receiving agent has the small response knowledge needed for the
+   event;
+6. diagnose or stop it with ordinary process tools; and
+7. when needed, extend its source code through the documented adapter contract.
 
 Workers remain unaware of this machinery. They only put their current goal ID
 on new PRs and builds, receive bounded notifications, and reread provider
@@ -167,6 +191,30 @@ avoids a fresh notification for every still-linked resource after restart.
 
 ## Boundaries
 
+### Two extension surfaces
+
+Before changing code, identify which surface is missing:
+
+- **Fact extension:** add or change an adapter because the agent cannot observe
+  a useful authoritative change or cannot be woken by it.
+- **Knowledge extension:** update the responsible agent's stable guidance
+  because it already receives sufficient facts and has sufficient actions, but
+  needs a clearer way to assess or handle the case.
+
+An event contains source identity, subject, revision, observed links, and
+bounded provider facts—never an invented action. Plain-language,
+version-controlled response knowledge names the responsible role, why the
+event matters, what authority to inspect, suitable existing actions, and the
+expected output or next condition. Put goal-specific policy in the goal,
+compact common rules in the recipient's prompt, and detailed operating help in
+a colocated guide. If an automatic review cannot read that guide, supply its
+small required rules in the turn context.
+
+This split lets incident experience improve agent behavior without changing
+watcher state or delivery. Add deterministic code only when the missing fact,
+wake, validation, or effect is genuinely reusable and cannot be handled
+reliably with existing primitives.
+
 ### Source adapter
 
 A source adapter owns one provider/resource shape. It:
@@ -248,7 +296,9 @@ Extending the watcher is an ordinary reviewed code change:
 3. Wire its bounded configuration and source name into `daemon.mjs`.
 4. Add focused tests for linking, revisions, absence, truncation, credentials,
    bounds, and remembered-resource refresh.
-5. Document agent operation in this guide and any optional deployment setup.
+5. Document the observed facts and the response knowledge needed by the fixed
+   recipient, including how that knowledge reaches an automatic turn.
+6. Document agent operation in this guide and any optional deployment setup.
 
 Keep one shared daemon unless a source has a proven separate security or
 lifecycle boundary. Do not add semantic routing, suggestions, per-resource

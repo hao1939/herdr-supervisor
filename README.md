@@ -13,6 +13,17 @@ The model decides what current evidence means. Small deterministic code records
 goals, observes events, validates identity, and applies the chosen action.
 Herdr hosts the sessions and events; it is runtime plumbing for this model.
 
+The extension contract is **event for fact, knowledge for action**. Adapters
+add bounded observations and reliable wakes. Plain-language, version-controlled
+guidance teaches the responsible agent how to assess those facts and what useful
+result to produce. Events never become instructions, and guidance never becomes
+an executable workflow.
+
+The supervisor brings those pieces together for its portfolio: it ensures the
+shared observer is configured, the fixed recipient has the needed guidance,
+and one end-to-end change is proven. It does not sit between the watcher and a
+worker afterward, and setup is shared rather than repeated for every goal.
+
 ## Quick start (container)
 
 The recommended way to run the supervisor. The container bundles Herdr, Pi, and
@@ -219,9 +230,10 @@ scopes where supervision metadata is written by trusted workers or maintainers.
 
 The [event-watchd guide](src/event-watcher/README.md) shows how an agent starts,
 inspects, verifies, changes, stops, and extends it. It also defines the small
-coding contract for adding another built-in provider or resource type. The
-agent uses its ordinary environment authority; no watcher-specific management
-tool or dynamic plugin loader is needed.
+coding contract for adding another built-in provider or resource type and the
+separate knowledge contract for teaching the receiving agent how to respond.
+The agent uses its ordinary environment authority; no watcher-specific
+management tool or dynamic plugin loader is needed.
 
 The goal-store root includes a concise `README.md` explaining its layout,
 authority, lifecycle, safe inspection, and portability. Each goal directory has
