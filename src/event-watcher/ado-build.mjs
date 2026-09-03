@@ -81,7 +81,7 @@ function currentBuild(build) {
   return { revision: hash(payload), payload };
 }
 
-export function adoBuildDiscovery({
+export function adoBuildSource({
   definitions,
   fetchImpl = fetch,
   authorization,

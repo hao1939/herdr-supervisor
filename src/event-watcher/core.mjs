@@ -141,7 +141,10 @@ function storeObservation(state, item, maxResources) {
   return { stored: true, changed: true };
 }
 
-export class MetadataEventWatcher {
+// Source adapters return goal-addressed resource observations only. This core
+// owns revision comparison and calls the injected delivery boundary; adapters
+// never resolve or contact workers.
+export class ExternalEventWatcher {
   constructor({
     statePath,
     sources,

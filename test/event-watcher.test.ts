@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
-import { adoPullRequestDiscovery } from "../src/event-watcher/ado-pr.mjs";
-import { MetadataEventWatcher as DiscoveredEventWatcher } from "../src/event-watcher/core.mjs";
-import { githubPullRequestDiscovery, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
+import { adoBuildSource, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
+import { adoPullRequestSource } from "../src/event-watcher/ado-pr.mjs";
+import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
+import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
 import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
@@ -140,7 +140,7 @@ test("first discovery and every later revision wake the goal without renewal", a
   const directory = await temporary(t, "event-watch-discovery-");
   let revision = "one";
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: { revision } }]) },
@@ -167,7 +167,7 @@ test("provider scans receive the remembered revision and delivery state", async 
   const directory = await temporary(t, "event-watch-provider-state-");
   const known = [];
   let deliveries = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: {
@@ -200,7 +200,7 @@ test("provider scans receive the remembered revision and delivery state", async 
 test("completed goal metadata does not consume watcher capacity", async (t) => {
   const directory = await temporary(t, "event-watch-completed-goal-");
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       provider: {
@@ -244,7 +244,7 @@ test("metadata moved to an inactive goal removes its former active-owner checkpo
       },
     },
   }, null, 2)}\n`);
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: {
       provider: { scan: async () => discovery([
@@ -278,7 +278,7 @@ test("goal ownership failure preserves the current watcher checkpoint", async (t
   };
   await writeFile(statePath, `${JSON.stringify(original, null, 2)}\n`);
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: {
       provider: { async scan() { return { observations: [], absent: [] }; } },
@@ -299,7 +299,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   const statePath = join(directory, "state.json");
   const diagnostics = [];
   const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }]) };
-  const failing = new DiscoveredEventWatcher({
+  const failing = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async () => { throw new Error("Herdr unavailable"); },
@@ -310,7 +310,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   assert.ok((Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any).pending);
 
   const delivered = [];
-  const recovered = new DiscoveredEventWatcher({
+  const recovered = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async (goalId, events) => delivered.push([goalId, events[0].revision]),
@@ -325,7 +325,7 @@ test("restart replaces a pending revision with current provider state before wak
   const statePath = join(directory, "state.json");
   let revision = "old";
   const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: {} }]) };
-  const first = new DiscoveredEventWatcher({
+  const first = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async () => { throw new Error("Herdr unavailable"); },
@@ -335,7 +335,7 @@ test("restart replaces a pending revision with current provider state before wak
 
   revision = "current";
   const delivered = [];
-  const recovered = new DiscoveredEventWatcher({
+  const recovered = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async (_goalId, events) => delivered.push(events[0].revision),
@@ -349,7 +349,7 @@ test("a pending wake waits for a current read of its exact resource", async (t) 
   const directory = await temporary(t, "event-watch-current-read-");
   let scan = 0;
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => {
       scan += 1;
@@ -381,7 +381,7 @@ test("authoritative absence forgets a resource without delivering its stale pend
   const statePath = join(directory, "state.json");
   let present = true;
   let deliveries = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => present
       ? discovery([{ subject: "resource-1", goalId: "g_owner", revision: "old", payload: {} }])
@@ -405,7 +405,7 @@ test("removing a configured provider forgets its checkpoint without stale delive
   const directory = await temporary(t, "event-watch-provider-removed-");
   const statePath = join(directory, "state.json");
   let deliveries = 0;
-  const initial = new DiscoveredEventWatcher({
+  const initial = new ExternalEventWatcher({
     statePath,
     sources: { removed: { scan: async () => discovery([{
       subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
@@ -418,7 +418,7 @@ test("removing a configured provider forgets its checkpoint without stale delive
   });
   await initial.runOnce();
 
-  const cleanup = new DiscoveredEventWatcher({
+  const cleanup = new ExternalEventWatcher({
     statePath,
     sources: {},
     deliver: async () => { deliveries += 1; },
@@ -433,7 +433,7 @@ test("array-shaped checkpoint resources fail instead of losing observations", as
   const directory = await temporary(t, "event-watch-invalid-state-");
   const statePath = join(directory, "state.json");
   await writeFile(statePath, '{"version":1,"resources":[]}\n');
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => discovery() } },
     deliver: async () => {},
@@ -446,7 +446,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   let sourceFails = true;
   let deliveryFails = true;
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: { scan: async () => {
@@ -482,7 +482,7 @@ test("a pending delivery stays coalesced while its resource rotates out of a sca
   const directory = await temporary(t, "event-watch-rotated-diagnostic-");
   let present = true;
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(present ? [{
       subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
@@ -503,7 +503,7 @@ test("a pending delivery stays coalesced while its resource rotates out of a sca
 test("a failed diagnostic delivery is retried without blocking observation", async (t) => {
   const directory = await temporary(t, "event-watch-diagnostic-retry-");
   let attempts = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => { throw new Error("provider unavailable"); } } },
     deliver: async () => {},
@@ -527,7 +527,7 @@ test("the checkpoint stays bounded without evicting remembered resources", async
     { subject: "old", goalId: "g_old", revision: "one", payload: {} },
     { subject: "pending", goalId: "g_pending", revision: "one", payload: {} },
   ];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async (goalId) => {
@@ -555,7 +555,7 @@ test("authoritative absence frees checkpoint capacity without losing pending del
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ];
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async (_goalId, events) => {
@@ -588,7 +588,7 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ];
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async () => { throw new Error("worker unavailable"); },
@@ -623,7 +623,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ]);
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => result } },
     deliver: async () => {},
@@ -656,7 +656,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
   const directory = await temporary(t, "event-watch-coalesce-");
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery([
       { subject: "one", goalId: "g_same", revision: "one", payload: {} },
@@ -680,7 +680,7 @@ test("the shared checkpoint accepts both built-in provider bounds together", asy
     revision: "one",
     payload: {},
   }));
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       "github-pr": { scan: async () => discovery(observations("pr", 20)) },
@@ -723,7 +723,7 @@ test("GitHub discovery reads only annotated pull requests", async () => {
     if (String(url).includes("/status?")) return response({ statuses: [] });
     throw new Error(`unexpected URL ${url}`);
   };
-  const source = githubPullRequestDiscovery({ repositories: ["owner/repo"], fetchImpl, token: "token" });
+  const source = githubPullRequestSource({ repositories: ["owner/repo"], fetchImpl, token: "token" });
   const { observations: found } = await source.scan();
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "owner/repo#42");
@@ -733,11 +733,11 @@ test("GitHub discovery reads only annotated pull requests", async () => {
 
 test("GitHub discovery requires credentials and a bounded repository scope", () => {
   assert.throws(
-    () => githubPullRequestDiscovery({ repositories: ["owner/repo"], token: "" }),
+    () => githubPullRequestSource({ repositories: ["owner/repo"], token: "" }),
     /requires GITHUB_TOKEN or GH_TOKEN/,
   );
   assert.throws(
-    () => githubPullRequestDiscovery({
+    () => githubPullRequestSource({
       repositories: Array.from({ length: 11 }, (_, index) => `owner/repo-${index}`),
       token: "token",
     }),
@@ -755,7 +755,7 @@ for (const truncated of ["checks", "statuses"]) {
       context: `status-${id}`,
       state: "success",
     }));
-    const source = githubPullRequestDiscovery({
+    const source = githubPullRequestSource({
       repositories: ["owner/repo"],
       token: "token",
       fetchImpl: async (url) => {
@@ -792,7 +792,7 @@ test("GitHub discovery refreshes a remembered pull request outside the recent wi
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -819,7 +819,7 @@ test("GitHub discovery retires a delivered closed revision outside the recent wi
     draft: false,
     updated_at: "2026-09-01T00:01:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -856,7 +856,7 @@ test("GitHub discovery retires a delivered closed revision outside the recent wi
 });
 
 test("GitHub discovery reports removed goal metadata as authoritative absence", async () => {
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -893,7 +893,7 @@ test("GitHub discovery does not crowd a remembered pull request out with recent 
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -920,7 +920,7 @@ test("GitHub discovery rotates through recent annotated pull requests", async ()
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   }));
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -943,7 +943,7 @@ test("GitHub discovery rotates through recent annotated pull requests", async ()
 
 test("ADO discovery uses the durable build tag and current build revision", async () => {
   let lastChangedDate = "2026-09-01T00:00:00Z";
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async () => response({ value: [
@@ -974,7 +974,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
   let threadStatus = "active";
   let commentUpdated = "2026-09-01T00:01:00Z";
   let policyStatus = "queued";
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1030,7 +1030,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
 
 test("ADO pull request discovery rereads remembered pulls and forgets removed metadata", async () => {
   const urls = [];
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1055,7 +1055,7 @@ test("ADO pull request discovery rereads remembered pulls and forgets removed me
 
 test("ADO pull request discovery retires a delivered terminal revision", async () => {
   let listedAsActive = true;
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1113,7 +1113,7 @@ test("ADO pull request discovery retires a delivered terminal revision", async (
 });
 
 test("ADO pull request discovery fails when reading a full listed pull request fails", async () => {
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "******",
     fetchImpl: async (url) => {
@@ -1132,7 +1132,7 @@ test("ADO pull request discovery fails when reading a full listed pull request f
 
 test("ADO pull request discovery keeps repository scope bounded", () => {
   assert.throws(
-    () => adoPullRequestDiscovery({
+    () => adoPullRequestSource({
       repositories: Array.from({ length: 11 }, (_, index) => `org/project/repo-${index}`),
       authorization: "Bearer token",
     }),
@@ -1141,7 +1141,7 @@ test("ADO pull request discovery keeps repository scope bounded", () => {
 });
 
 test("ADO pull request discovery refuses a partial policy revision", async () => {
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1174,7 +1174,7 @@ test("ADO pull request discovery refuses a partial policy revision", async () =>
 
 test("ADO discovery keeps configured pipeline scope bounded", () => {
   assert.throws(
-    () => adoBuildDiscovery({
+    () => adoBuildSource({
       definitions: Array.from({ length: 11 }, (_, index) => `org/project/${index + 1}`),
       authorization: "Bearer token",
     }),
@@ -1192,7 +1192,7 @@ test("ADO authorization preserves the configured CLI failure", async () => {
 
 test("ADO discovery refreshes a remembered build outside the recent definition window", async () => {
   const urls = [];
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1228,7 +1228,7 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
 });
 
 test("ADO discovery keeps an undelivered terminal build", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1260,7 +1260,7 @@ test("ADO discovery keeps an undelivered terminal build", async () => {
 });
 
 test("ADO discovery forgets a retained build without hiding valid recent observations", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1282,7 +1282,7 @@ test("ADO discovery forgets a retained build without hiding valid recent observa
 });
 
 test("ADO discovery forgets builds outside the configured definition scope", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1304,7 +1304,7 @@ test("ADO discovery forgets builds outside the configured definition scope", asy
 
 test("ADO discovery rotates across full definitions without dropping remembered builds", async () => {
   const definitions = Array.from({ length: 6 }, (_, index) => `org/project/${index + 1}`);
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions,
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1561,7 +1561,7 @@ test("GitHub discovery refreshes every remembered pull request within a few boun
     goalId: `g_remembered_${index + 1}`,
   }));
   const reads = [];
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -1600,7 +1600,7 @@ test("ADO discovery bounds remembered rereads per scan and still covers them all
     goalId: `g_remembered_${index + 1}`,
   }));
   const reads = [];
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "******",
     fetchImpl: async (url) => {

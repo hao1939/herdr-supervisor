@@ -47,7 +47,7 @@ function completeCollection(result, field, label) {
   return items;
 }
 
-export function githubPullRequestDiscovery({
+export function githubPullRequestSource({
   repositories,
   fetchImpl = fetch,
   token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN,

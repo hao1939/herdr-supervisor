@@ -3,6 +3,9 @@
 Read `docs/design.md` and `.github/copilot-instructions.md` before changing the
 supervisor. They define the current architecture and review rules.
 
+Before changing `src/event-watcher/`, also read its colocated `README.md`. It
+defines the one-way source-adapter and worker-notification boundary.
+
 Keep one core loop:
 
 `observe -> decide -> act -> remember -> wake`

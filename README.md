@@ -182,10 +182,11 @@ operation cannot atomically require the expected terminal and native session.
 An explicitly selected saved goal that has never started can also be discarded;
 the action refuses any goal with execution state, history, or unknown files.
 
-For GitHub and Azure DevOps, one shared metadata watcher observes configured
-provider scopes without model turns. Workers attach their durable goal ID when
-they create a PR or build; they never register or renew a watch. A changed
-revision resolves that goal's current exact worker and sends a short wake hint.
+For GitHub and Azure DevOps, one shared external event watcher (`event-watchd`)
+observes configured provider scopes without model turns. Workers attach their
+durable goal ID when they create a PR or build; they never register or renew a
+watch. A changed revision resolves that goal's current exact worker and sends a
+short wake hint.
 The worker rereads provider authority, continues useful work, and its normal
 Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
 goal review remains the safety net after a missed signal or provider failure.
@@ -207,6 +208,10 @@ The container starts the watcher automatically when either provider-scope
 variable is set. For local use, export the same variables and run
 `npm run watch` beside Herdr. Configure only scopes where the supervision
 metadata is written by trusted workers or maintainers.
+
+The [source adapter guide](src/event-watcher/README.md) defines the small coding
+contract for adding another built-in provider or resource type. There is no
+dynamic plugin loader.
 
 The goal-store root includes a concise `README.md` explaining its layout,
 authority, lifecycle, safe inspection, and portability. Each goal directory has

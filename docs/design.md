@@ -393,12 +393,12 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; the metadata watcher may wake the current worker when a PR or build
-changes. The worker rereads provider authority, and its ordinary Herdr event
-wakes the supervisor. There is no second review lifecycle, reviewer state
-machine, attempt budget, or goal schema. A separate review goal exists only when
-review itself is the human's distinct durable outcome—not merely because one
-implementation reached a review step.
+findings; the external event watcher may wake the current worker when a PR or
+build changes. The worker rereads provider authority, and its ordinary Herdr
+event wakes the supervisor. There is no second review lifecycle, reviewer state
+machine, attempt budget, or goal schema. A separate review goal exists only
+when review itself is the human's distinct durable outcome—not merely because
+one implementation reached a review step.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -485,6 +485,14 @@ state change enters the existing supervisor review loop.
 
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor or watcher.
+
+The watcher process is `event-watchd`. Its extension point is a statically
+wired source adapter, not a runtime plugin. An adapter identifies the durable
+goal from trusted provider metadata and returns `{ subject, goalId, revision,
+payload }`; it never resolves or contacts a worker. Shared delivery maps that
+goal ID through canonical state to the exact current native session. The
+colocated source adapter guide documents the coding convention for adding a
+built-in source.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten

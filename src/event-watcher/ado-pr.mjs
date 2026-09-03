@@ -128,7 +128,7 @@ function pullRevision(pull, threads, policies) {
   };
 }
 
-export function adoPullRequestDiscovery({
+export function adoPullRequestSource({
   repositories,
   fetchImpl = fetch,
   authorization,
