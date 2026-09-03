@@ -288,6 +288,17 @@ npm run check    # tsc --noEmit + shell syntax
 npm test         # node:test suite
 ```
 
+### Release pull requests
+
+This repository uses release-please and squash-merges pull requests. The pull
+request title becomes the squash commit title, so write it as the Conventional
+Commit that should choose the changelog section and version bump.
+
+Use a `plugin` scope for Herdr plugin-facing changes, for example
+`feat(plugin): add ...`, `fix(plugin): correct ...`, or
+`docs(plugin): explain ...`. Use `!` for breaking changes, such as
+`feat(plugin)!: change ...`.
+
 ## Documents
 
 - [Changelog](CHANGELOG.md)
