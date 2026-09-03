@@ -173,7 +173,7 @@ export class ExternalEventWatcher {
   async report(key, diagnostic) {
     if (this.reported.has(key)) return;
     try {
-      await this.diagnose(diagnostic);
+      await this.diagnose({ ...diagnostic, observedAt: this.now().toISOString() });
       this.reported.add(key);
     } catch (error) {
       console.error(`event watcher diagnostic delivery failed: ${error instanceof Error ? error.message : error}`);

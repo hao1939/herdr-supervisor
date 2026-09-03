@@ -238,6 +238,7 @@ test("supervisor diagnostic uses the same versioned fact-and-knowledge contract"
     kind: "source",
     source: "ado-build",
     affectedGoalIds: ["g_release"],
+    observedAt: "2026-09-03T00:00:00.000Z",
     message: "ADO discovery failed",
     retry: "Retry on the next bounded scan.",
   });
@@ -245,6 +246,7 @@ test("supervisor diagnostic uses the same versioned fact-and-knowledge contract"
   assert.match(message, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
   assert.match(message, /Event facts\n  Failure kind: source/);
   assert.match(message, /Affected Goal IDs: g_release/);
+  assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
   assert.match(message, /Agent response knowledge\n  # External watcher failure/);
   assert.match(message, /Inspect the current watcher, provider, and\s+affected existing/);
 });
@@ -646,6 +648,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
       if (deliveryFails) throw new Error("worker unavailable");
     },
     diagnose: (item) => diagnostics.push(item),
+    now: () => new Date("2026-09-03T00:00:00.000Z"),
   });
 
   await watcher.runOnce();
@@ -654,6 +657,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   await watcher.runOnce();
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery"]);
+  assert.ok(diagnostics.every((item) => item.observedAt === "2026-09-03T00:00:00.000Z"));
   assert.deepEqual(diagnostics[0].affectedGoalIds, []);
   assert.match(diagnostics[0].retry, /next bounded scan/);
   assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_owner"]);
@@ -1766,6 +1770,7 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
     kind: "source",
     source: "ado-build",
     affectedGoalIds: ["g_release"],
+    observedAt: "2026-09-03T00:00:00.000Z",
     message: "ADO discovery failed",
     retry: "The watcher will retry this provider scope on its next bounded scan.",
   });
@@ -1775,6 +1780,7 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
   assert.match(prompt.text, /ADO discovery failed/);
   assert.match(prompt.text, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
   assert.match(prompt.text, /Affected Goal IDs: g_release/);
+  assert.match(prompt.text, /Observed at: 2026-09-03T00:00:00.000Z/);
   assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
   assert.match(prompt.text, /Do not claim a\n  repair without current evidence/);
   assert.match(prompt.text, /do not create a goal merely because a\s+diagnostic arrived/);
@@ -1789,7 +1795,10 @@ test("watcher diagnostics fail closed when the supervisor is ambiguous", async (
     ] } }),
   });
 
-  await assert.rejects(diagnose({ message: "failure" }), /expected one Pi supervisor, found 2/);
+  await assert.rejects(
+    diagnose({ message: "failure", observedAt: "2026-09-03T00:00:00.000Z" }),
+    /expected one Pi supervisor, found 2/,
+  );
 });
 
 test("GitHub discovery refreshes every remembered pull request within a few bounded scans", async () => {

@@ -517,8 +517,8 @@ goal belongs to the worker, not the supervisor or watcher.
 The general extension seam is **event for fact, knowledge for action**:
 
 1. **Observe facts.** A small adapter reads one trusted source and emits a
-   bounded identity, revision, timestamp, and payload. It reports what the
-   source says, not what an agent should do.
+   bounded identity, revision, and payload. The watcher records the observation
+   timestamp. Both report what happened, not what an agent should do.
 2. **Wake one owner.** Static composition selects one responsible agent for
    that observation path. Goal-linked PR and build events resolve to the exact
    worker. A system-level observation instead prompts the one supervisor

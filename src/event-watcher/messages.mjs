@@ -70,6 +70,10 @@ function bounded(value, limit = 2_000) {
 }
 
 export function supervisorDiagnosticMessage(diagnostic) {
+  const observedAt = bounded(diagnostic?.observedAt, 100);
+  if (!observedAt || !Number.isFinite(Date.parse(observedAt))) {
+    throw new Error("diagnostic observedAt must be an ISO timestamp");
+  }
   const affected = Array.isArray(diagnostic?.affectedGoalIds)
     ? [...new Set(diagnostic.affectedGoalIds.map((goalId) => bounded(goalId, 200)).filter(Boolean))].slice(0, 20)
     : [];
@@ -80,6 +84,7 @@ export function supervisorDiagnosticMessage(diagnostic) {
       diagnostic?.kind ? `Failure kind: ${bounded(diagnostic.kind, 100)}` : undefined,
       diagnostic?.source ? `Source: ${bounded(diagnostic.source, 200)}` : undefined,
       affected.length ? `Affected Goal IDs: ${affected.join(", ")}` : "Affected Goal IDs: not identified",
+      `Observed at: ${observedAt}`,
       `Observed failure: ${bounded(diagnostic?.message || "external event watcher failed")}`,
       diagnostic?.retry ? `Built-in retry: ${bounded(diagnostic.retry)}` : undefined,
     ].filter(Boolean).join("\n"),
