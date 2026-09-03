@@ -208,7 +208,7 @@ not create goals or recovery workflows.
 The daemon gives each configured source a stable source name and calls:
 
 ```js
-scan(knownResources) => ({
+scan(knownResources, { signal }) => ({
   observations: [{ subject, goalId, revision, payload }],
   absent: [subject],
 })
@@ -216,7 +216,9 @@ scan(knownResources) => ({
 
 `knownResources` contains the source's remembered `{ subject, goalId,
 revision, pending }` values so the adapter can refresh old resources as well as
-discover recent ones.
+discover recent ones. `signal` aborts an in-flight scan during daemon shutdown;
+adapters pass it through every provider request rather than delaying process
+exit until request timeouts expire.
 
 - `subject` is the stable resource identity within this source.
 - `goalId` is the exact durable goal address read from trusted metadata.
@@ -227,10 +229,11 @@ discover recent ones.
 - `absent` contains known subjects that were deleted, left configured scope, or
   no longer carry valid goal metadata.
 
-Scans must be safe to repeat. A partial or truncated provider response must
-fail instead of producing a false revision. Credentials and secrets never
-enter observations or watcher state. Untrusted public metadata must not be
-allowed to select a worker; scope and metadata trust are adapter responsibilities.
+Scans must be safe to repeat and abort promptly when `signal` is aborted. A
+partial or truncated provider response must fail instead of producing a false
+revision. Credentials and secrets never enter observations or watcher state.
+Untrusted public metadata must not be allowed to select a worker; scope and
+metadata trust are adapter responsibilities.
 
 ## Adding a built-in source
 
@@ -239,7 +242,8 @@ Extending the watcher is an ordinary reviewed code change:
 
 1. Add `<provider>-<resource>.mjs` with a factory named
    `<provider><Resource>Source`.
-2. Implement the `scan(knownResources)` contract and keep provider details in
+2. Implement the `scan(knownResources, { signal })` contract, pass the signal to
+   provider I/O, and keep provider details in
    that module.
 3. Wire its bounded configuration and source name into `daemon.mjs`.
 4. Add focused tests for linking, revisions, absence, truncation, credentials,

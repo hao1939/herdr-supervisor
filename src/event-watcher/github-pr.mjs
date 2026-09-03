@@ -20,10 +20,12 @@ function parseSubject(value) {
   return match ? { owner: match[1], repository: match[2], number: Number(match[3]) } : undefined;
 }
 
-async function json(fetchImpl, url, headers, label) {
+async function json(fetchImpl, url, headers, label, signal) {
   const response = await fetchImpl(url, {
     headers,
-    signal: AbortSignal.timeout(30_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     const error = new Error(`${label} returned HTTP ${response.status}`);
@@ -73,7 +75,8 @@ export function githubPullRequestSource({
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
   return {
-    async scan(known = []) {
+    async scan(known = [], { signal } = {}) {
+      signal?.throwIfAborted();
       const observations = [];
       const absent = [];
       const pullsBySubject = new Map();
@@ -88,6 +91,7 @@ export function githubPullRequestSource({
           `${base}/pulls?state=all&sort=updated&direction=desc&per_page=100`,
           headers,
           "GitHub pull request discovery",
+          signal,
         );
         if (!Array.isArray(pulls)) throw new Error("GitHub pull request discovery returned an invalid list");
         for (const pull of pulls) {
@@ -105,7 +109,7 @@ export function githubPullRequestSource({
         }
         const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
         try {
-          const pull = await json(fetchImpl, `${base}/pulls/${parsed.number}`, headers, "GitHub pull request");
+          const pull = await json(fetchImpl, `${base}/pulls/${parsed.number}`, headers, "GitHub pull request", signal);
           pullsBySubject.set(resource.subject, pull);
         } catch (error) {
           if (error?.status === 404) absent.push(resource.subject);
@@ -127,8 +131,8 @@ export function githubPullRequestSource({
         const base = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repository)}`;
         const commit = `${base}/commits/${encodeURIComponent(pull.head.sha)}`;
         const [checksResult, statusesResult] = await Promise.all([
-          json(fetchImpl, `${commit}/check-runs?filter=latest&per_page=100`, headers, "GitHub checks"),
-          json(fetchImpl, `${commit}/status?per_page=100`, headers, "GitHub statuses"),
+          json(fetchImpl, `${commit}/check-runs?filter=latest&per_page=100`, headers, "GitHub checks", signal),
+          json(fetchImpl, `${commit}/status?per_page=100`, headers, "GitHub statuses", signal),
         ]);
         const checks = completeCollection(checksResult, "check_runs", "GitHub checks").map((check) => ({
           id: check.id,

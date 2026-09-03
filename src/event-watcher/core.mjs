@@ -180,10 +180,12 @@ export class ExternalEventWatcher {
     }
   }
 
-  async scan() {
+  async scan(signal) {
+    signal?.throwIfAborted();
     const found = [];
     const absent = [];
     for (const [source, adapter] of Object.entries(this.sources)) {
+      signal?.throwIfAborted();
       const known = Object.values(this.state.resources)
         .filter((resource) => resource.source === source)
         .map((resource) => ({
@@ -193,7 +195,8 @@ export class ExternalEventWatcher {
           pending: Boolean(resource.pending),
         }));
       try {
-        const result = await adapter.scan(known);
+        const result = await adapter.scan(known, { signal });
+        signal?.throwIfAborted();
         if (!result || typeof result !== "object" || Array.isArray(result)
           || !Array.isArray(result.observations) || !Array.isArray(result.absent)) {
           throw new Error(`${source} scan returned an invalid result`);
@@ -230,6 +233,7 @@ export class ExternalEventWatcher {
         absent.push(...[...missing].map((subject) => keyFor(source, subject)));
         this.reported.delete(`source:${source}`);
       } catch (error) {
+        signal?.throwIfAborted();
         await this.report(`source:${source}`, {
           kind: "source",
           source,
@@ -295,9 +299,11 @@ export class ExternalEventWatcher {
     this.state = next;
   }
 
-  async run() {
+  async run(signal) {
     await this.ready;
-    const scan = await this.scan();
+    signal?.throwIfAborted();
+    const scan = await this.scan(signal);
+    signal?.throwIfAborted();
     const goalIds = [...new Set([
       ...Object.values(this.state.resources).map((resource) => resource.goalId),
       ...scan.observations.map((item) => item.goalId),
@@ -305,11 +311,13 @@ export class ExternalEventWatcher {
     let active;
     try {
       active = this.activeGoals ? await this.activeGoals() : new Set(goalIds);
+      signal?.throwIfAborted();
       if (!(active instanceof Set) || [...active].some((goalId) => typeof goalId !== "string")) {
         throw new Error("active goal resolver returned an invalid set");
       }
       this.reported.delete("goals");
     } catch (error) {
+      signal?.throwIfAborted();
       await this.report("goals", {
         kind: "goals",
         affectedGoalIds: goalIds.slice(0, 20),
@@ -358,6 +366,7 @@ export class ExternalEventWatcher {
       await save(this.statePath, next);
       this.state = next;
     }
+    signal?.throwIfAborted();
     await this.deliverPending(observed);
     if (capacityFreed) this.reported.delete("capacity");
     if (!deferred.length) {
@@ -377,8 +386,8 @@ export class ExternalEventWatcher {
     });
   }
 
-  runOnce() {
-    const next = this.runs.then(() => this.run());
+  runOnce(signal) {
+    const next = this.runs.then(() => this.run(signal));
     this.runs = next.catch(() => {});
     return next;
   }

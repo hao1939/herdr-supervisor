@@ -48,7 +48,12 @@ try {
     diagnose: herdrSupervisorDiagnostic(),
   });
   while (!controller.signal.aborted) {
-    await watcher.runOnce();
+    try {
+      await watcher.runOnce(controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+      break;
+    }
     try {
       await delay(intervalMs, undefined, { signal: controller.signal });
     } catch (error) {

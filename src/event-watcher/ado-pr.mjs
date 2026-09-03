@@ -26,10 +26,12 @@ function parseSubject(value) {
   } : undefined;
 }
 
-async function json(fetchImpl, url, authorization, label) {
+async function json(fetchImpl, url, authorization, label, signal) {
   const response = await fetchImpl(url, {
     headers: { Accept: "application/json", Authorization: authorization },
-    signal: AbortSignal.timeout(30_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     const error = new Error(`${label} returned HTTP ${response.status}`);
@@ -148,8 +150,9 @@ export function adoPullRequestSource({
     (resource) => resource.subject,
   );
   return {
-    async scan(known = []) {
-      const auth = authorization || await getAuthorization();
+    async scan(known = [], { signal } = {}) {
+      signal?.throwIfAborted();
+      const auth = authorization || await getAuthorization({ signal });
       const pullsBySubject = new Map();
       const active = [];
       const activeSubjects = new Set();
@@ -164,6 +167,7 @@ export function adoPullRequestSource({
           `${pullUrl(scope)}?searchCriteria.status=active&$top=${MAX_ACTIVE_PULLS}&api-version=7.1`,
           auth,
           "ADO pull request discovery",
+          signal,
         );
         const pulls = completeCollection(result, "ADO pull request discovery");
         if (pulls.length >= MAX_ACTIVE_PULLS) {
@@ -182,6 +186,7 @@ export function adoPullRequestSource({
             `${pullUrl(scope, `/${scope.pullRequestId}`)}?api-version=7.1`,
             auth,
             "ADO pull request",
+            signal,
           );
           pullsBySubject.set(subject, pull);
         } catch (error) {
@@ -223,12 +228,14 @@ export function adoPullRequestSource({
             `${pullUrl(scope, `/${scope.pullRequestId}/threads`)}?api-version=7.1`,
             auth,
             "ADO pull request threads",
+            signal,
           ),
           json(
             fetchImpl,
             `${baseUrl(scope)}/_apis/policy/evaluations?artifactId=${encodeURIComponent(artifactId)}&$top=${MAX_POLICIES}&api-version=7.1-preview.1`,
             auth,
             "ADO pull request policies",
+            signal,
           ),
         ]);
         const threads = completeCollection(threadResult, "ADO pull request threads");

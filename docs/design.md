@@ -512,7 +512,9 @@ unrelated shell work; direct human turns retain the agent's ordinary tools.
 One watcher process owns one checkpoint. A process-lifetime filesystem lock
 fails fast on a duplicate owner and recovers after a dead owner, preventing an
 entrypoint watcher and a manually started watcher from sending duplicate wakes
-or overwriting each other's revisions.
+or overwriting each other's revisions. Shutdown cancels an in-flight provider
+scan before releasing that lock, so a normal container restart does not wait
+for sequential provider timeouts or leave temporary ownership behind.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten

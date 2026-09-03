@@ -79,6 +79,47 @@ test("event watcher ownership recovers after its process is gone", async (t) => 
   await release();
 });
 
+test("watcher shutdown interrupts provider I/O and releases checkpoint ownership", async (t) => {
+  const root = await temporary(t, "event-watch-shutdown-");
+  const statePath = join(root, "external-events.json");
+  const daemonModule = new URL("../src/event-watcher/daemon.mjs", import.meta.url).href;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", `
+    globalThis.fetch = async (_url, { signal }) => {
+      process.stdout.write("scanning\\n");
+      await new Promise((resolve, reject) => {
+        const keepAlive = setInterval(() => {}, 1_000);
+        signal.addEventListener("abort", () => {
+          clearInterval(keepAlive);
+          reject(signal.reason);
+        }, { once: true });
+      });
+    };
+    await import(${JSON.stringify(daemonModule)});
+  `], {
+    env: {
+      ...process.env,
+      GITHUB_TOKEN: "token",
+      HERDR_WATCH_GITHUB_REPOSITORIES: "owner/repo",
+      HERDR_WATCH_STATE_HOME: root,
+      HERDR_WATCH_INTERVAL_MS: "60000",
+      HERDR_WATCH_ADO_DEFINITIONS: "",
+      HERDR_WATCH_ADO_REPOSITORIES: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => child.kill("SIGKILL"));
+  const [started] = await once(child.stdout, "data");
+  assert.equal(String(started), "scanning\n");
+
+  child.kill("SIGTERM");
+  const [code, signal] = await once(child, "exit");
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+
+  const release = await acquireWatcherLock(statePath);
+  await release();
+});
+
 test("goal action locks recover after their owning process is gone", async (t) => {
   const root = await temporary(t, "event-watch-stale-action-");
   const lock = join(root, ".action-locks", "g_stale");
@@ -236,6 +277,37 @@ test("provider scans receive the remembered revision and delivery state", async 
     [{ subject: "resource-1", goalId: "g_owner", revision: "one", pending: true }],
     [{ subject: "resource-1", goalId: "g_owner", revision: "one", pending: false }],
   ]);
+});
+
+test("shutdown aborts an in-flight provider scan without reporting a provider failure", async (t) => {
+  const directory = await temporary(t, "event-watch-abort-");
+  const controller = new AbortController();
+  const diagnostics = [];
+  let started;
+  const scanning = new Promise((resolve) => { started = resolve; });
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: {
+        async scan(_known, { signal }) {
+          assert.equal(signal, controller.signal);
+          started();
+          await new Promise((resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        },
+      },
+    },
+    deliver: async () => {},
+    diagnose: async (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const running = watcher.runOnce(controller.signal);
+  await scanning;
+  controller.abort();
+
+  await assert.rejects(running, { name: "AbortError" });
+  assert.deepEqual(diagnostics, []);
 });
 
 test("completed goal metadata does not consume watcher capacity", async (t) => {
@@ -786,6 +858,30 @@ test("GitHub discovery requires credentials and a bounded repository scope", () 
   );
 });
 
+test("built-in sources pass daemon shutdown to provider requests", async () => {
+  const factories = [
+    (fetchImpl) => githubPullRequestSource({ repositories: ["owner/repo"], token: "token", fetchImpl }),
+    (fetchImpl) => adoPullRequestSource({ repositories: ["org/project/repo"], authorization: "Bearer token", fetchImpl }),
+    (fetchImpl) => adoBuildSource({ definitions: ["org/project/1"], authorization: "Bearer token", fetchImpl }),
+  ];
+
+  for (const create of factories) {
+    const controller = new AbortController();
+    let started;
+    const requested = new Promise((resolve) => { started = resolve; });
+    const source = create(async (_url, { signal }) => {
+      started();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const running = source.scan([], { signal: controller.signal });
+    await requested;
+    controller.abort();
+    await assert.rejects(running, { name: "AbortError" });
+  }
+});
+
 for (const truncated of ["checks", "statuses"]) {
   test(`GitHub discovery rejects truncated ${truncated} instead of hashing partial state`, async () => {
     const items = Array.from({ length: 100 }, (_, id) => ({
@@ -1229,6 +1325,26 @@ test("ADO authorization preserves the configured CLI failure", async () => {
     azureCli: "/opt/az",
     exec: async () => { throw new Error("spawn /opt/az ENOENT"); },
   }), /using \/opt\/az: spawn \/opt\/az ENOENT; renew az login, set AZURE_CLI/);
+});
+
+test("ADO authorization passes daemon shutdown to Azure CLI", async () => {
+  const controller = new AbortController();
+  let receivedSignal;
+  const running = ambientAdoAuthorization({
+    pat: "",
+    signal: controller.signal,
+    exec: async (_file, _arguments, options) => {
+      receivedSignal = options.signal;
+      await new Promise((resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      });
+    },
+  });
+
+  controller.abort();
+
+  await assert.rejects(running, { name: "AbortError" });
+  assert.equal(receivedSignal, controller.signal);
 });
 
 test("ADO discovery refreshes a remembered build outside the recent definition window", async () => {
