@@ -778,6 +778,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const snapshotHash = stableHash(compactSnapshot);
     activeGlobalReview = true;
     globalDecisionApplied = false;
+    activateReviewTools(globalReviewTools);
     try {
       pi.sendMessage({
         customType: globalReviewMessageType,
@@ -788,6 +789,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       activeGlobalReview = false;
       pendingGlobalReview ||= reason;
+      restoreOrdinaryTools();
       throw error;
     }
     armGlobalReviewTimer();
@@ -872,6 +874,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const currentMode = mode();
     if (currentMode !== "observe") {
       reviewTurn.begin(paneId, decision.reason);
+      activateReviewTools(focusedReviewTools);
     }
     try {
       pi.sendMessage(
@@ -890,6 +893,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       );
     } catch (error) {
       reviewTurn.end();
+      restoreOrdinaryTools();
       throw error;
     }
     await armReviewTimer();
@@ -2101,12 +2105,17 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     reviewToolsActive = false;
   }
 
+  function activateReviewTools(tools: string[]) {
+    if (reviewToolsActive) return;
+    ordinaryTools = pi.getActiveTools();
+    pi.setActiveTools(tools);
+    reviewToolsActive = true;
+  }
+
   pi.on("before_agent_start", (event) => {
     agentTurnActive = true;
     if (activeGlobalReview || reviewTurn.isBusy()) {
-      if (!reviewToolsActive) ordinaryTools = pi.getActiveTools();
-      pi.setActiveTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
-      reviewToolsActive = true;
+      activateReviewTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
     } else {
       restoreOrdinaryTools();
     }

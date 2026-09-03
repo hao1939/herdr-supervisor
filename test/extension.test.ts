@@ -1720,8 +1720,12 @@ test("an automatic focused review exposes only focused decision tools", async (t
   ]);
   assert.match(start.systemPrompt, /This is an automatic focused review/);
   assert.match(start.systemPrompt, /Do not attempt ordinary tools/);
+  const selectionsBeforeSettlement = pi.activeToolSelections.length;
   await pi.events.get("agent_settled")();
-  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), true);
+  assert.equal(
+    pi.activeToolSelections.slice(selectionsBeforeSettlement).some((tools) => tools.includes("bash")),
+    true,
+  );
   pi.events.get("session_shutdown")();
 });
 
@@ -3877,8 +3881,12 @@ test("a due global review routes explicit reconsideration through ordinary focus
   });
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Queued focused reviews for g_test/);
+  const selectionsBeforeSettlement = pi.activeToolSelections.length;
   await pi.events.get("agent_settled")();
-  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), true);
+  assert.equal(
+    pi.activeToolSelections.slice(selectionsBeforeSettlement).some((tools) => tools.includes("bash")),
+    true,
+  );
   await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
   const focused = pi.messages.find((message) => message.customType === "herdr-supervisor-review");
   assert.match(focused.content, /global supervision review found/);
