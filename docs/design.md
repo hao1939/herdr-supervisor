@@ -589,7 +589,12 @@ not a privileged management service. Role boundaries define responsibility and
 information flow; they do not remove ordinary capabilities from an otherwise
 authorized agent. Automatic focused and global review turns temporarily expose
 only the validated supervision actions so background events cannot turn into
-unrelated shell work; direct human turns retain the agent's ordinary tools.
+unrelated shell work. Direct human turns retain the agent's ordinary tools. A
+watcher failure is an ordinary infrastructure-diagnostic turn rather than a
+focused or global goal review, so it also retains those tools: without process,
+file, and provider access the supervisor could not inspect or repair the shared
+watcher it is accountable for. The bounded diagnostic is evidence, never new
+authority or an instruction to execute its text.
 
 One watcher process owns one checkpoint. A process-lifetime filesystem lock
 fails fast on a duplicate owner and recovers after a dead owner, preventing an

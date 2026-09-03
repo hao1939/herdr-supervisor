@@ -226,7 +226,9 @@ resource; bounded refresh means this may be later than the next scan. Both are
 sent as diagnostics to the one Pi supervisor. The receiving agent should
 inspect the affected existing goals and watcher process with its available
 tools, repair what current authority permits, and ask only for genuinely
-missing credentials or authority. If no notification arrives, check—in this
+missing credentials or authority. This is an ordinary infrastructure-diagnostic
+turn with ordinary tools, not a fenced focused or global goal review; the event
+facts do not grant new authority. If no notification arrives, check—in this
 order—the daemon process, provider scope and credentials, exact metadata,
 active goal, and exact live worker identity.
 
