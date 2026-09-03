@@ -225,17 +225,25 @@ The injected guide explains why it received the event, how to reread authority,
 and what progress report is expected. The full editable source is
 `knowledge/linked-resource-change.md` beside the watcher code.
 
-Source failures are retried on the next bounded scan. Failed delivery remains
-pending and retries after a later successful current observation of that
-resource; bounded refresh means this may be later than the next scan. Both are
-sent as diagnostics to the one Pi supervisor. The receiving agent should
-inspect the affected existing goals and watcher process with its available
-tools, repair what current authority permits, and ask only for genuinely
-missing credentials or authority. This is an ordinary infrastructure-diagnostic
-turn with ordinary tools, not a fenced focused or global goal review; the event
-facts do not grant new authority. If no notification arrives, check—in this
-order—the daemon process, provider scope and credentials, exact metadata,
-active goal, and exact live worker identity.
+Source failures use one watcher-core policy for every adapter: become eligible
+for retry after one minute, then five minutes, fifteen minutes, and one hour
+while the source remains broken. The actual attempt occurs on the first
+configured scan after that threshold. Each due attempt that still fails sends a
+fresh diagnostic to the Pi supervisor; success resets that source to normal
+scanning immediately. Healthy adapters keep scanning while one source backs
+off. This state is process-local, so restart makes one immediate fresh attempt
+instead of adding a durable retry system.
+
+Failed delivery remains pending and retries after a later successful current
+observation of that resource; bounded refresh means this may be later than the
+next scan. Both failure kinds are sent as diagnostics to the one Pi supervisor.
+The receiving agent should inspect the affected existing goals and watcher
+process with its available tools, repair what current authority permits, and
+ask only for genuinely missing credentials or authority. This is an ordinary
+infrastructure-diagnostic turn with ordinary tools, not a fenced focused or
+global goal review; the event facts do not grant new authority. If no
+notification arrives, check—in this order—the daemon process, provider scope
+and credentials, exact metadata, active goal, and exact live worker identity.
 
 To disable a manually started watcher, stop its process. For entrypoint-managed
 watching, clear all three scope variables and recreate the service. Keeping or
@@ -314,7 +322,8 @@ complete boundary is the value returned from `scan`.
 
 `ExternalEventWatcher` validates adapter output, filters inactive goals,
 deduplicates unchanged revisions, persists bounded pending delivery, batches
-changes by goal, and retries safely. It knows no provider-specific workflow.
+changes by goal, and applies the shared process-local source backoff. It knows
+no provider-specific workflow.
 
 ### Worker notification
 

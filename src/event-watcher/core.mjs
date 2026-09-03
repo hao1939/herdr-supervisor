@@ -9,6 +9,7 @@ const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SCAN_RESULTS = 500;
 const DEFAULT_MAX_RESOURCES = 1024;
 const MAX_EVENTS_PER_DELIVERY = 20;
+const SOURCE_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
 
 function requiredText(value, name) {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) {
@@ -168,6 +169,7 @@ export class ExternalEventWatcher {
     this.ready = load(statePath, maxResources).then((state) => { this.state = state; });
     this.runs = Promise.resolve();
     this.reported = new Set();
+    this.sourceFailures = new Map();
   }
 
   async report(key, diagnostic) {
@@ -186,6 +188,8 @@ export class ExternalEventWatcher {
     const absent = [];
     for (const [source, adapter] of Object.entries(this.sources)) {
       signal?.throwIfAborted();
+      const failure = this.sourceFailures.get(source);
+      if (failure && this.now().getTime() < failure.retryAt) continue;
       const known = Object.values(this.state.resources)
         .filter((resource) => resource.source === source)
         .map((resource) => ({
@@ -231,14 +235,20 @@ export class ExternalEventWatcher {
         }
         found.push(...normalized);
         absent.push(...[...missing].map((subject) => keyFor(source, subject)));
+        this.sourceFailures.delete(source);
         this.reported.delete(`source:${source}`);
       } catch (error) {
         signal?.throwIfAborted();
+        const failures = (failure?.failures || 0) + 1;
+        const delay = SOURCE_RETRY_DELAYS_MS[Math.min(failures - 1, SOURCE_RETRY_DELAYS_MS.length - 1)];
+        const retryAt = this.now().getTime() + delay;
+        this.sourceFailures.set(source, { failures, retryAt });
+        this.reported.delete(`source:${source}`);
         await this.report(`source:${source}`, {
           kind: "source",
           source,
           affectedGoalIds: [...new Set(known.map((resource) => resource.goalId))].slice(0, 20),
-          retry: "The watcher will retry this provider scope on its next bounded scan.",
+          retry: `The watcher will retry this provider scope no earlier than ${new Date(retryAt).toISOString()}; repeated failures use bounded backoff.`,
           message: `${source} discovery failed: ${error instanceof Error ? error.message : error}`,
         });
       }

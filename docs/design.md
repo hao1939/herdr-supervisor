@@ -636,6 +636,16 @@ or overwriting each other's revisions. Shutdown cancels an in-flight provider
 scan before releasing that lock, so a normal container restart does not wait
 for sequential provider timeouts or leave temporary ownership behind.
 
+Every source adapter shares the same process-local failure policy in the
+watcher core. A failed source becomes eligible for retry after one minute, then
+five minutes, fifteen minutes, and one hour; the attempt occurs on the first
+configured scan after that threshold. Every due attempt that still fails sends
+a fresh diagnostic to the supervisor, so an interrupted diagnostic is
+eventually offered again without a durable incident queue. A successful scan
+resets that source immediately; unrelated healthy adapters keep their normal
+cadence. Restart forgets the delay and makes one immediate authoritative
+attempt.
+
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
 configured repositories. One watcher also accepts at most ten Azure DevOps
