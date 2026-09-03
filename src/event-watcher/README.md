@@ -82,9 +82,9 @@ Pass secrets through the runtime environment or its secret store; never put
 them in a goal, PR description, build tag, watcher checkpoint, committed file,
 or conversational instruction. `GITHUB_TOKEN` or `GH_TOKEN` must be able to
 read the configured GitHub repositories. ADO uses `AZURE_DEVOPS_EXT_PAT`, or an
-`AZURE_CLI` executable and Azure login available in the same runtime. The stock
-image does not include Azure CLI, and a login on another host or container is
-not shared.
+Azure login and CLI available in the same runtime. It runs `AZURE_CLI` when the
+override is set and otherwise finds `az` on `PATH`. The stock image does not
+include Azure CLI, and a login on another host or container is not shared.
 
 `HERDR_WATCH_INTERVAL_MS` changes the scan interval (minimum 10 seconds;
 default 60 seconds). `HERDR_WATCH_STATE_HOME` changes the persistent checkpoint
@@ -144,13 +144,15 @@ ineligible rather than guessing a worker.
    `~/.local/state/herdr-supervisor/external-events.json`; it is diagnostic
    state, not a file to edit or a second source of truth.
 
-Provider and delivery failures are retried on the next bounded scan and sent as
-diagnostics to the one Pi supervisor. The receiving agent should inspect the
-affected existing goals and watcher process with its available tools, repair
-what current authority permits, and ask only for genuinely missing credentials
-or authority. If no notification arrives, check—in this order—the daemon
-process, provider scope and credentials, exact metadata, active goal, and exact
-live worker identity.
+Source failures are retried on the next bounded scan. Failed delivery remains
+pending and retries after a later successful current observation of that
+resource; bounded refresh means this may be later than the next scan. Both are
+sent as diagnostics to the one Pi supervisor. The receiving agent should
+inspect the affected existing goals and watcher process with its available
+tools, repair what current authority permits, and ask only for genuinely
+missing credentials or authority. If no notification arrives, check—in this
+order—the daemon process, provider scope and credentials, exact metadata,
+active goal, and exact live worker identity.
 
 To disable a manually started watcher, stop its process. For entrypoint-managed
 watching, clear all three scope variables and recreate the service. Keeping or
