@@ -216,8 +216,9 @@ may instead supply Azure CLI, its login state, and `AZURE_CLI` when the executab
 is not on the service `PATH`. The stock image does not bundle Azure CLI.
 Credentials are never copied into goal or watcher state.
 
-Failures follow the same path. The component that sees a failure reports the
-operation, affected goals, observed error, and remaining automatic retry. The
+Warnings and failures follow the same path. The component reports the observed
+condition, affected goals, and remaining automatic behavior. A warning may
+preserve valid bounded results; a failure rejects an invalid scan. The
 supervisor uses the existing goal actions and stable operating guidance to
 decide what to do. A diagnostic never creates a goal or recovery workflow by
 itself.

@@ -142,7 +142,7 @@ export function adoPullRequestSource({
   if (repositories.length > MAX_REPOSITORIES) {
     throw new Error(`ADO pull request discovery supports at most ${MAX_REPOSITORIES} repositories per watcher`);
   }
-  const scopes = repositories.map(parseRepository);
+  const scopes = [...new Set(repositories)].map(parseRepository);
   const allowedRepositories = new Set(repositories);
   const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH, (resource) => resource.subject);
   const recentWindow = boundedRefreshWindow(
@@ -157,6 +157,7 @@ export function adoPullRequestSource({
       const active = [];
       const activeSubjects = new Set();
       const absent = [];
+      const warnings = [];
       const remembered = rememberedWindow(known);
       const rememberedSubjects = new Set(remembered.map((resource) => resource.subject));
       const knownSubjects = new Set(known.map((resource) => resource.subject));
@@ -171,7 +172,11 @@ export function adoPullRequestSource({
         );
         const pulls = completeCollection(result, "ADO pull request discovery");
         if (pulls.length >= MAX_ACTIVE_PULLS) {
-          throw new Error(`ADO pull request discovery reached its ${MAX_ACTIVE_PULLS}-pull limit; narrow the configured repository scope`);
+          const repository = `${scope.organization}/${scope.project}/${scope.repository}`;
+          warnings.push({
+            code: `active-pull-window:${repository}`,
+            message: `ADO pull request discovery inspected its bounded first ${MAX_ACTIVE_PULLS} active pulls for ${repository}; additional active pulls may be undiscovered. Already-known pulls are still refreshed by exact identity.`,
+          });
         }
         for (const pull of pulls) {
           const subject = subjectFor(scope, pull.pullRequestId);
@@ -253,7 +258,11 @@ export function adoPullRequestSource({
         }
         observations.push({ subject, goalId, ...current });
       }
-      return { observations, absent: [...new Set(absent)] };
+      return {
+        observations,
+        absent: [...new Set(absent)],
+        ...(warnings.length ? { warnings } : {}),
+      };
     },
   };
 }

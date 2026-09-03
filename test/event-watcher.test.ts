@@ -244,10 +244,10 @@ test("supervisor diagnostic uses the same versioned fact-and-knowledge contract"
   });
 
   assert.match(message, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
-  assert.match(message, /Event facts\n  Failure kind: source/);
+  assert.match(message, /Event facts\n  Diagnostic kind: source/);
   assert.match(message, /Affected Goal IDs: g_release/);
   assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
-  assert.match(message, /Agent response knowledge\n  # External watcher failure/);
+  assert.match(message, /Agent response knowledge\n  # External watcher diagnostic/);
   assert.match(message, /Inspect the current watcher, provider, and\s+affected existing/);
 });
 
@@ -798,6 +798,43 @@ test("source backoff is disposable across watcher restart", async (t) => {
   await new ExternalEventWatcher(options).runOnce();
 
   assert.equal(scans, 2, "a new process retries immediately from provider authority");
+});
+
+test("source warnings notify the supervisor without discarding valid observations", async (t) => {
+  const directory = await temporary(t, "event-watch-warning-");
+  let warning = true;
+  const diagnostics = [];
+  const delivered = [];
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: { scan: async () => ({
+        ...discovery([{
+          subject: "resource-1",
+          goalId: "g_owner",
+          revision: "one",
+          payload: {},
+        }]),
+        warnings: warning ? [{ code: "bounded-window", message: "Discovery may be incomplete." }] : [],
+      }) },
+    },
+    deliver: async (_goalId, observations) => delivered.push(...observations),
+    diagnose: (item) => diagnostics.push(item),
+    now: () => new Date("2026-09-03T00:00:00.000Z"),
+  });
+
+  await watcher.runOnce();
+  await watcher.runOnce();
+  assert.equal(delivered.length, 1);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["source-warning"]);
+  assert.deepEqual(diagnostics[0].affectedGoalIds, ["g_owner"]);
+  assert.equal(diagnostics[0].message, "Discovery may be incomplete.");
+
+  warning = false;
+  await watcher.runOnce();
+  warning = true;
+  await watcher.runOnce();
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["source-warning", "source-warning"]);
 });
 
 test("a pending delivery stays coalesced while its resource rotates out of a scan", async (t) => {
@@ -1479,6 +1516,44 @@ test("ADO pull request discovery fails when reading a full listed pull request f
   await assert.rejects(source.scan(), /ADO pull request returned HTTP 500/);
 });
 
+test("ADO pull request discovery accepts a bounded full page and refreshes known pulls outside it", async () => {
+  const listed = Array.from({ length: 100 }, (_, index) => ({ pullRequestId: index + 1 }));
+  const listRequests = [];
+  const source = adoPullRequestSource({
+    repositories: ["org/project/repo", "org/project/repo"],
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/pullRequests")) {
+        listRequests.push(parsed);
+        return response({ count: listed.length, value: listed });
+      }
+      if (parsed.pathname.endsWith("/threads")) return response({ count: 0, value: [] });
+      if (parsed.pathname.endsWith("/policy/evaluations")) return response({ count: 0, value: [] });
+      const pullRequestId = Number(parsed.pathname.match(/pullRequests\/(\d+)$/)?.[1]);
+      return response({
+        pullRequestId,
+        description: "## Supervision\n- Goal ID: g_known",
+        status: "active",
+        repository: { project: { id: "project-id" } },
+      });
+    },
+  });
+
+  const found = await source.scan([{
+    subject: "org/project/repo/101",
+    goalId: "g_known",
+  }]);
+
+  assert.equal(listRequests.length, 1);
+  assert.equal(listRequests[0].searchParams.get("$top"), "100");
+  assert.equal(listRequests[0].searchParams.has("$skip"), false);
+  assert.ok(found.observations.some((item) => item.subject === "org/project/repo/101"));
+  assert.deepEqual(found.absent, []);
+  assert.equal(found.warnings.length, 1);
+  assert.match(found.warnings[0].message, /additional active pulls may be undiscovered/);
+});
+
 test("ADO pull request discovery keeps repository scope bounded", () => {
   assert.throws(
     () => adoPullRequestSource({
@@ -1915,7 +1990,7 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
   assert.match(prompt.text, /Affected Goal IDs: g_release/);
   assert.match(prompt.text, /Observed at: 2026-09-03T00:00:00.000Z/);
   assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
-  assert.match(prompt.text, /Do not claim a\n  repair without current evidence/);
+  assert.match(prompt.text, /Do not\s+claim a repair without current evidence/);
   assert.match(prompt.text, /do not create a goal merely because a\s+diagnostic arrived/);
   assert.doesNotMatch(prompt.text, /Inspect current service and provider evidence/);
 });

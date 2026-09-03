@@ -81,11 +81,11 @@ export function supervisorDiagnosticMessage(diagnostic) {
     event: "watcher-diagnostic",
     recipient: "supervisor",
     facts: [
-      diagnostic?.kind ? `Failure kind: ${bounded(diagnostic.kind, 100)}` : undefined,
+      diagnostic?.kind ? `Diagnostic kind: ${bounded(diagnostic.kind, 100)}` : undefined,
       diagnostic?.source ? `Source: ${bounded(diagnostic.source, 200)}` : undefined,
       affected.length ? `Affected Goal IDs: ${affected.join(", ")}` : "Affected Goal IDs: not identified",
       `Observed at: ${observedAt}`,
-      `Observed failure: ${bounded(diagnostic?.message || "external event watcher failed")}`,
+      `Observed condition: ${bounded(diagnostic?.message || "external event watcher needs attention")}`,
       diagnostic?.retry ? `Built-in retry: ${bounded(diagnostic.retry)}` : undefined,
     ].filter(Boolean).join("\n"),
     knowledge: watcherDiagnosticKnowledge,
