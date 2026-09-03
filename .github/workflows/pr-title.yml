@@ -1,0 +1,36 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Conventional Commit title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._-]+\))?!?: .+'
+
+          if [[ "${PR_TITLE}" =~ ${pattern} ]]; then
+            exit 0
+          fi
+
+          {
+            echo "PR titles must follow Conventional Commits because release-please uses the squash commit."
+            echo
+            echo "Examples:"
+            echo "- feat(plugin): add supervised goal export"
+            echo "- fix(plugin): keep release metadata stable"
+            echo "- docs(plugin): explain setup"
+            echo
+            echo "Use ! for breaking changes, for example: feat(plugin)!: change goal storage"
+            echo
+            echo "Current title: ${PR_TITLE}"
+          } >&2
+          exit 1
