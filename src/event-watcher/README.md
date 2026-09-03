@@ -282,7 +282,9 @@ are accurate and sufficient. Only then evaluate the agent response. If the
 event is good but the response is weak, update goal context, response
 knowledge, or general agent guidance. Do not hide bad event data with prompting
 or add watcher code for reasoning the agent can already perform. Return to the
-event layer only for a specifically identified missing authoritative fact.
+event layer only when the delivered event fails accuracy, clarity, relevance,
+or sufficiency; name the concrete event defect. If the event passes, improve
+the agent side instead.
 
 The current worker path proves the complete contract: an adapter emits facts,
 the watcher delivers them to one exact goal worker, and the notifier injects

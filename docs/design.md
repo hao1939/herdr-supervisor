@@ -580,8 +580,9 @@ Improvement follows that ownership in a fixed order:
 
 Never tune a prompt to conceal inaccurate event facts, and never add watcher
 conditionals to compensate for reasoning that the agent can perform from an
-already sufficient event. If agent evaluation exposes one genuinely missing
-authoritative fact, name that specific gap and return to the first gate.
+already sufficient event. Return to the first gate only when the delivered
+event fails accuracy, clarity, relevance, or sufficiency; name the concrete
+event defect. If the event passes, improve the agent side instead.
 
 For example, a future GitHub portfolio observer could prompt the supervisor
 with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and
