@@ -27,7 +27,7 @@ This implementation currently has one fixed notification rule: a linked
 provider resource wakes its exact goal worker. Do not add a generic `target`
 field or runtime router to support another case. If live evidence justifies a
 system-level observer later, wire that observer statically to the supervisor's
-existing global review and keep its facts and response knowledge separate.
+ordinary empowered session and keep its facts and response knowledge separate.
 
 ## Using event-watchd
 

@@ -112,7 +112,7 @@ There are four core roles:
 Every observation path has one fixed responsible role chosen when that path is
 wired. Current pull-request and build changes wake their linked worker. A
 future portfolio observation, if live evidence justifies it, may wake the
-supervisor's existing global review instead. Events do not contain a generic
+ordinary empowered supervisor session instead. Events do not contain a generic
 target, and the watcher does not choose a recipient at runtime.
 
 For a busy portfolio, the human may also open an ordinary Codex **goal
@@ -180,8 +180,8 @@ flowchart LR
     C[Related goal changed] --> Q
     D[Provider metadata changed] --> W[Current worker wakes and rereads]
     W --> A
-    E[System or portfolio fact] --> G[Global review]
-    G -. affected goals .-> Q
+    E[System or portfolio fact] --> S[Ordinary supervisor turn]
+    S -. affected goals .-> Q
 ```
 
 The supervisor sleeps otherwise. It does not poll workers or providers. The
