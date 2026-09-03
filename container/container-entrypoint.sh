@@ -19,7 +19,7 @@ fi
 
 watcher_pid=""
 if [ -n "${HERDR_WATCH_GITHUB_REPOSITORIES:-}${HERDR_WATCH_ADO_DEFINITIONS:-}${HERDR_WATCH_ADO_REPOSITORIES:-}" ]; then
-  echo "Starting the shared provider metadata watcher." >&2
+  echo "Starting the shared external event watcher (event-watchd)." >&2
   node /opt/herdr-supervisor/src/event-watcher/daemon.mjs &
   watcher_pid=$!
 fi
@@ -42,7 +42,7 @@ set +e
 wait -n -p stopped_pid "$main_pid" "$watcher_pid"
 status=$?
 if [ "${stopped_pid:-}" = "$watcher_pid" ]; then
-  echo "The shared provider metadata watcher stopped unexpectedly." >&2
+  echo "The shared external event watcher (event-watchd) stopped unexpectedly." >&2
   [ "$status" -ne 0 ] || status=1
   kill "$main_pid" 2>/dev/null || true
   wait "$main_pid" 2>/dev/null || true

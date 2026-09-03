@@ -1,16 +1,25 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { once } from "node:events";
 import { promisify } from "node:util";
-import { adoBuildDiscovery, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
-import { adoPullRequestDiscovery } from "../src/event-watcher/ado-pr.mjs";
-import { MetadataEventWatcher as DiscoveredEventWatcher } from "../src/event-watcher/core.mjs";
-import { githubPullRequestDiscovery, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
+import { adoBuildSource, ambientAdoAuthorization, taggedGoal } from "../src/event-watcher/ado-build.mjs";
+import { adoPullRequestSource } from "../src/event-watcher/ado-pr.mjs";
+import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
+import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
+import {
+  eventMessageContract,
+  supervisorDiagnosticMessage,
+  watcherHelpMessage,
+  watcherStartupMessage,
+  workerEventMessage,
+} from "../src/event-watcher/messages.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
+import { acquireWatcherLock } from "../src/event-watcher/process-lock.mjs";
 import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 
@@ -37,6 +46,86 @@ async function temporary(t, label) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("one process owns an event watcher checkpoint", async (t) => {
+  const root = await temporary(t, "event-watch-process-lock-");
+  const lock = join(root, "external-events.json");
+  const lockModule = new URL("../src/event-watcher/process-lock.mjs", import.meta.url).href;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", `
+    import { acquireWatcherLock } from ${JSON.stringify(lockModule)};
+    const release = await acquireWatcherLock(process.argv[1]);
+    process.once("SIGTERM", async () => { await release(); process.exit(0); });
+    process.stdout.write("ready\\n");
+    setInterval(() => {}, 1_000);
+  `, lock], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => child.kill("SIGKILL"));
+  const [ready] = await once(child.stdout, "data");
+  assert.equal(String(ready), "ready\n");
+
+  await assert.rejects(
+    acquireWatcherLock(lock),
+    /event-watchd checkpoint .* is already owned by another process/,
+  );
+  child.kill("SIGTERM");
+  const [code] = await once(child, "exit");
+  assert.equal(code, 0);
+
+  const releaseAgain = await acquireWatcherLock(lock);
+  await releaseAgain();
+});
+
+test("event watcher ownership recovers after its process is gone", async (t) => {
+  const root = await temporary(t, "event-watch-stale-process-lock-");
+  const lock = join(root, "external-events.json");
+  const staleLock = `${lock}.lock`;
+  await mkdir(staleLock, { recursive: true });
+  const expired = new Date(Date.now() - 60_000);
+  await utimes(staleLock, expired, expired);
+
+  const release = await acquireWatcherLock(lock);
+  await release();
+});
+
+test("watcher shutdown interrupts provider I/O and releases checkpoint ownership", async (t) => {
+  const root = await temporary(t, "event-watch-shutdown-");
+  const statePath = join(root, "external-events.json");
+  const daemonModule = new URL("../src/event-watcher/daemon.mjs", import.meta.url).href;
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", `
+    globalThis.fetch = async (_url, { signal }) => {
+      process.stdout.write("scanning\\n");
+      await new Promise((resolve, reject) => {
+        const keepAlive = setInterval(() => {}, 1_000);
+        signal.addEventListener("abort", () => {
+          clearInterval(keepAlive);
+          reject(signal.reason);
+        }, { once: true });
+      });
+    };
+    await import(${JSON.stringify(daemonModule)});
+  `], {
+    env: {
+      ...process.env,
+      GITHUB_TOKEN: "token",
+      HERDR_WATCH_GITHUB_REPOSITORIES: "owner/repo",
+      HERDR_WATCH_STATE_HOME: root,
+      HERDR_WATCH_INTERVAL_MS: "60000",
+      HERDR_WATCH_ADO_DEFINITIONS: "",
+      HERDR_WATCH_ADO_REPOSITORIES: "",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  t.after(() => child.kill("SIGKILL"));
+  const [started] = await once(child.stdout, "data");
+  assert.equal(String(started), "scanning\n");
+
+  child.kill("SIGTERM");
+  const [code, signal] = await once(child, "exit");
+  assert.equal(code, 0);
+  assert.equal(signal, null);
+
+  const release = await acquireWatcherLock(statePath);
+  await release();
+});
 
 test("goal action locks recover after their owning process is gone", async (t) => {
   const root = await temporary(t, "event-watch-stale-action-");
@@ -92,6 +181,76 @@ test("provider metadata names one durable goal without a watch registration", ()
   assert.equal(taggedGoal(["herdr-goal=g_one", "herdr-goal=g_two"]), undefined);
 });
 
+test("watcher startup explains its complete observation and delivery path", () => {
+  const message = watcherStartupMessage({
+    scopes: {
+      "github-pr": ["owner/repo"],
+      "ado-pr": [],
+      "ado-build": ["org/project/42"],
+    },
+    intervalMs: 60_000,
+    statePath: "/state/external-events.json",
+  });
+
+  assert.match(message, /event-watchd started/);
+  assert.match(message, /github-pr: owner\/repo/);
+  assert.match(message, /ado-build: org\/project\/42/);
+  assert.doesNotMatch(message, /ado-pr:/);
+  assert.match(message, /linked resource -> durable goal ID -> exact current worker/);
+  assert.match(message, /bounded diagnostic -> one Pi supervisor/);
+  assert.match(message, /startup only; verify provider access, metadata, and one changed-resource delivery/);
+});
+
+test("watcher help explains setup, linking, and end-to-end proof", () => {
+  const message = watcherHelpMessage();
+
+  assert.match(message, /HERDR_WATCH_GITHUB_REPOSITORIES=owner\/repository/);
+  assert.match(message, /HERDR_WATCH_ADO_REPOSITORIES=organization\/project\/repository/);
+  assert.match(message, /HERDR_WATCH_ADO_DEFINITIONS=organization\/project\/definition-id/);
+  assert.match(message, /Goal ID: <durable-goal-id>/);
+  assert.match(message, /herdr-goal=<durable-goal-id>/);
+  assert.match(message, /Verify provider access, exact metadata/);
+});
+
+test("worker event message explains facts, delivery, response, and expected output", () => {
+  const message = workerEventMessage("g_owner", [{
+    source: "github-pr",
+    subject: "owner/repo#42",
+    observedAt: "2026-09-03T00:00:00.000Z",
+    revision: "revision-1",
+    payload: { draft: false, checks: [{ name: "test", conclusion: "failure" }] },
+  }]);
+
+  assert.equal(eventMessageContract, "event-watchd/v1");
+  assert.match(message, /^\[event-watchd\/v1\]\nEvent: linked-resource-change\nRecipient role: goal-worker/);
+  assert.match(message, /Event facts\n  Goal ID: g_owner\n  Resource count: 1/);
+  assert.match(message, /Resource 1\n    Source: github-pr\n    Subject: owner\/repo#42/);
+  assert.match(message, /Why you received this: trusted provider metadata links the resource/);
+  assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(message, /Revision: revision-1/);
+  assert.match(message, /"conclusion": "failure"/);
+  assert.match(message, /rereading the provider's current state/);
+  assert.match(message, /Report what materially changed, what you did/);
+});
+
+test("supervisor diagnostic uses the same versioned fact-and-knowledge contract", () => {
+  const message = supervisorDiagnosticMessage({
+    kind: "source",
+    source: "ado-build",
+    affectedGoalIds: ["g_release"],
+    observedAt: "2026-09-03T00:00:00.000Z",
+    message: "ADO discovery failed",
+    retry: "Retry on the next bounded scan.",
+  });
+
+  assert.match(message, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
+  assert.match(message, /Event facts\n  Failure kind: source/);
+  assert.match(message, /Affected Goal IDs: g_release/);
+  assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(message, /Agent response knowledge\n  # External watcher failure/);
+  assert.match(message, /Inspect the current watcher, provider, and\s+affected existing/);
+});
+
 test("watcher daemon rejects an empty source set without changing its checkpoint", async (t) => {
   const directory = await temporary(t, "event-watch-empty-sources-");
   const statePath = join(directory, "external-events.json");
@@ -115,7 +274,7 @@ test("watcher daemon rejects an empty source set without changing its checkpoint
 
   await assert.rejects(
     execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
-    /configure HERDR_WATCH_GITHUB_REPOSITORIES, HERDR_WATCH_ADO_DEFINITIONS, or HERDR_WATCH_ADO_REPOSITORIES/,
+    /no trusted provider scope configured[\s\S]*HERDR_WATCH_GITHUB_REPOSITORIES=owner\/repository/,
   );
   assert.equal(await readFile(statePath, "utf8"), checkpoint);
 });
@@ -140,7 +299,7 @@ test("first discovery and every later revision wake the goal without renewal", a
   const directory = await temporary(t, "event-watch-discovery-");
   let revision = "one";
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: { revision } }]) },
@@ -167,7 +326,7 @@ test("provider scans receive the remembered revision and delivery state", async 
   const directory = await temporary(t, "event-watch-provider-state-");
   const known = [];
   let deliveries = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: {
@@ -197,10 +356,41 @@ test("provider scans receive the remembered revision and delivery state", async 
   ]);
 });
 
+test("shutdown aborts an in-flight provider scan without reporting a provider failure", async (t) => {
+  const directory = await temporary(t, "event-watch-abort-");
+  const controller = new AbortController();
+  const diagnostics = [];
+  let started;
+  const scanning = new Promise((resolve) => { started = resolve; });
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: {
+        async scan(_known, { signal }) {
+          assert.equal(signal, controller.signal);
+          started();
+          await new Promise((resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        },
+      },
+    },
+    deliver: async () => {},
+    diagnose: async (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const running = watcher.runOnce(controller.signal);
+  await scanning;
+  controller.abort();
+
+  await assert.rejects(running, { name: "AbortError" });
+  assert.deepEqual(diagnostics, []);
+});
+
 test("completed goal metadata does not consume watcher capacity", async (t) => {
   const directory = await temporary(t, "event-watch-completed-goal-");
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       provider: {
@@ -244,7 +434,7 @@ test("metadata moved to an inactive goal removes its former active-owner checkpo
       },
     },
   }, null, 2)}\n`);
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: {
       provider: { scan: async () => discovery([
@@ -278,7 +468,7 @@ test("goal ownership failure preserves the current watcher checkpoint", async (t
   };
   await writeFile(statePath, `${JSON.stringify(original, null, 2)}\n`);
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: {
       provider: { async scan() { return { observations: [], absent: [] }; } },
@@ -299,7 +489,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   const statePath = join(directory, "state.json");
   const diagnostics = [];
   const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision: "one", payload: {} }]) };
-  const failing = new DiscoveredEventWatcher({
+  const failing = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async () => { throw new Error("Herdr unavailable"); },
@@ -310,7 +500,7 @@ test("a failed delivery survives restart and retries from the bounded revision c
   assert.ok((Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any).pending);
 
   const delivered = [];
-  const recovered = new DiscoveredEventWatcher({
+  const recovered = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async (goalId, events) => delivered.push([goalId, events[0].revision]),
@@ -325,7 +515,7 @@ test("restart replaces a pending revision with current provider state before wak
   const statePath = join(directory, "state.json");
   let revision = "old";
   const source = { scan: async () => discovery([{ subject: "resource-1", goalId: "g_owner", revision, payload: {} }]) };
-  const first = new DiscoveredEventWatcher({
+  const first = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async () => { throw new Error("Herdr unavailable"); },
@@ -335,7 +525,7 @@ test("restart replaces a pending revision with current provider state before wak
 
   revision = "current";
   const delivered = [];
-  const recovered = new DiscoveredEventWatcher({
+  const recovered = new ExternalEventWatcher({
     statePath,
     sources: { source },
     deliver: async (_goalId, events) => delivered.push(events[0].revision),
@@ -349,7 +539,7 @@ test("a pending wake waits for a current read of its exact resource", async (t) 
   const directory = await temporary(t, "event-watch-current-read-");
   let scan = 0;
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => {
       scan += 1;
@@ -381,7 +571,7 @@ test("authoritative absence forgets a resource without delivering its stale pend
   const statePath = join(directory, "state.json");
   let present = true;
   let deliveries = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => present
       ? discovery([{ subject: "resource-1", goalId: "g_owner", revision: "old", payload: {} }])
@@ -405,7 +595,7 @@ test("removing a configured provider forgets its checkpoint without stale delive
   const directory = await temporary(t, "event-watch-provider-removed-");
   const statePath = join(directory, "state.json");
   let deliveries = 0;
-  const initial = new DiscoveredEventWatcher({
+  const initial = new ExternalEventWatcher({
     statePath,
     sources: { removed: { scan: async () => discovery([{
       subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
@@ -418,7 +608,7 @@ test("removing a configured provider forgets its checkpoint without stale delive
   });
   await initial.runOnce();
 
-  const cleanup = new DiscoveredEventWatcher({
+  const cleanup = new ExternalEventWatcher({
     statePath,
     sources: {},
     deliver: async () => { deliveries += 1; },
@@ -433,7 +623,7 @@ test("array-shaped checkpoint resources fail instead of losing observations", as
   const directory = await temporary(t, "event-watch-invalid-state-");
   const statePath = join(directory, "state.json");
   await writeFile(statePath, '{"version":1,"resources":[]}\n');
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => discovery() } },
     deliver: async () => {},
@@ -446,7 +636,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   let sourceFails = true;
   let deliveryFails = true;
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       source: { scan: async () => {
@@ -458,6 +648,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
       if (deliveryFails) throw new Error("worker unavailable");
     },
     diagnose: (item) => diagnostics.push(item),
+    now: () => new Date("2026-09-03T00:00:00.000Z"),
   });
 
   await watcher.runOnce();
@@ -466,6 +657,7 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   await watcher.runOnce();
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery"]);
+  assert.ok(diagnostics.every((item) => item.observedAt === "2026-09-03T00:00:00.000Z"));
   assert.deepEqual(diagnostics[0].affectedGoalIds, []);
   assert.match(diagnostics[0].retry, /next bounded scan/);
   assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_owner"]);
@@ -482,7 +674,7 @@ test("a pending delivery stays coalesced while its resource rotates out of a sca
   const directory = await temporary(t, "event-watch-rotated-diagnostic-");
   let present = true;
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(present ? [{
       subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
@@ -503,7 +695,7 @@ test("a pending delivery stays coalesced while its resource rotates out of a sca
 test("a failed diagnostic delivery is retried without blocking observation", async (t) => {
   const directory = await temporary(t, "event-watch-diagnostic-retry-");
   let attempts = 0;
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => { throw new Error("provider unavailable"); } } },
     deliver: async () => {},
@@ -527,7 +719,7 @@ test("the checkpoint stays bounded without evicting remembered resources", async
     { subject: "old", goalId: "g_old", revision: "one", payload: {} },
     { subject: "pending", goalId: "g_pending", revision: "one", payload: {} },
   ];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async (goalId) => {
@@ -555,7 +747,7 @@ test("authoritative absence frees checkpoint capacity without losing pending del
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ];
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath,
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async (_goalId, events) => {
@@ -588,7 +780,7 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ];
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery(observations) } },
     deliver: async () => { throw new Error("worker unavailable"); },
@@ -623,7 +815,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
   ]);
   const diagnostics = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => result } },
     deliver: async () => {},
@@ -656,7 +848,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
 test("one scan coalesces several resource changes into one wake per goal", async (t) => {
   const directory = await temporary(t, "event-watch-coalesce-");
   const delivered = [];
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => discovery([
       { subject: "one", goalId: "g_same", revision: "one", payload: {} },
@@ -680,7 +872,7 @@ test("the shared checkpoint accepts both built-in provider bounds together", asy
     revision: "one",
     payload: {},
   }));
-  const watcher = new DiscoveredEventWatcher({
+  const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: {
       "github-pr": { scan: async () => discovery(observations("pr", 20)) },
@@ -723,7 +915,7 @@ test("GitHub discovery reads only annotated pull requests", async () => {
     if (String(url).includes("/status?")) return response({ statuses: [] });
     throw new Error(`unexpected URL ${url}`);
   };
-  const source = githubPullRequestDiscovery({ repositories: ["owner/repo"], fetchImpl, token: "token" });
+  const source = githubPullRequestSource({ repositories: ["owner/repo"], fetchImpl, token: "token" });
   const { observations: found } = await source.scan();
   assert.equal(found.length, 1);
   assert.equal(found[0].subject, "owner/repo#42");
@@ -733,16 +925,40 @@ test("GitHub discovery reads only annotated pull requests", async () => {
 
 test("GitHub discovery requires credentials and a bounded repository scope", () => {
   assert.throws(
-    () => githubPullRequestDiscovery({ repositories: ["owner/repo"], token: "" }),
+    () => githubPullRequestSource({ repositories: ["owner/repo"], token: "" }),
     /requires GITHUB_TOKEN or GH_TOKEN/,
   );
   assert.throws(
-    () => githubPullRequestDiscovery({
+    () => githubPullRequestSource({
       repositories: Array.from({ length: 11 }, (_, index) => `owner/repo-${index}`),
       token: "token",
     }),
     /at most 10 repositories/,
   );
+});
+
+test("built-in sources pass daemon shutdown to provider requests", async () => {
+  const factories = [
+    (fetchImpl) => githubPullRequestSource({ repositories: ["owner/repo"], token: "token", fetchImpl }),
+    (fetchImpl) => adoPullRequestSource({ repositories: ["org/project/repo"], authorization: "Bearer token", fetchImpl }),
+    (fetchImpl) => adoBuildSource({ definitions: ["org/project/1"], authorization: "Bearer token", fetchImpl }),
+  ];
+
+  for (const create of factories) {
+    const controller = new AbortController();
+    let started;
+    const requested = new Promise((resolve) => { started = resolve; });
+    const source = create(async (_url, { signal }) => {
+      started();
+      await new Promise((resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    const running = source.scan([], { signal: controller.signal });
+    await requested;
+    controller.abort();
+    await assert.rejects(running, { name: "AbortError" });
+  }
 });
 
 for (const truncated of ["checks", "statuses"]) {
@@ -755,7 +971,7 @@ for (const truncated of ["checks", "statuses"]) {
       context: `status-${id}`,
       state: "success",
     }));
-    const source = githubPullRequestDiscovery({
+    const source = githubPullRequestSource({
       repositories: ["owner/repo"],
       token: "token",
       fetchImpl: async (url) => {
@@ -792,7 +1008,7 @@ test("GitHub discovery refreshes a remembered pull request outside the recent wi
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -819,7 +1035,7 @@ test("GitHub discovery retires a delivered closed revision outside the recent wi
     draft: false,
     updated_at: "2026-09-01T00:01:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -856,7 +1072,7 @@ test("GitHub discovery retires a delivered closed revision outside the recent wi
 });
 
 test("GitHub discovery reports removed goal metadata as authoritative absence", async () => {
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -893,7 +1109,7 @@ test("GitHub discovery does not crowd a remembered pull request out with recent 
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   };
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -920,7 +1136,7 @@ test("GitHub discovery rotates through recent annotated pull requests", async ()
     draft: false,
     updated_at: "2026-09-01T00:00:00Z",
   }));
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -943,7 +1159,7 @@ test("GitHub discovery rotates through recent annotated pull requests", async ()
 
 test("ADO discovery uses the durable build tag and current build revision", async () => {
   let lastChangedDate = "2026-09-01T00:00:00Z";
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async () => response({ value: [
@@ -974,7 +1190,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
   let threadStatus = "active";
   let commentUpdated = "2026-09-01T00:01:00Z";
   let policyStatus = "queued";
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1030,7 +1246,7 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
 
 test("ADO pull request discovery rereads remembered pulls and forgets removed metadata", async () => {
   const urls = [];
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1055,7 +1271,7 @@ test("ADO pull request discovery rereads remembered pulls and forgets removed me
 
 test("ADO pull request discovery retires a delivered terminal revision", async () => {
   let listedAsActive = true;
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1113,7 +1329,7 @@ test("ADO pull request discovery retires a delivered terminal revision", async (
 });
 
 test("ADO pull request discovery fails when reading a full listed pull request fails", async () => {
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "******",
     fetchImpl: async (url) => {
@@ -1132,7 +1348,7 @@ test("ADO pull request discovery fails when reading a full listed pull request f
 
 test("ADO pull request discovery keeps repository scope bounded", () => {
   assert.throws(
-    () => adoPullRequestDiscovery({
+    () => adoPullRequestSource({
       repositories: Array.from({ length: 11 }, (_, index) => `org/project/repo-${index}`),
       authorization: "Bearer token",
     }),
@@ -1141,7 +1357,7 @@ test("ADO pull request discovery keeps repository scope bounded", () => {
 });
 
 test("ADO pull request discovery refuses a partial policy revision", async () => {
-  const source = adoPullRequestDiscovery({
+  const source = adoPullRequestSource({
     repositories: ["org/project/repo"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1174,7 +1390,7 @@ test("ADO pull request discovery refuses a partial policy revision", async () =>
 
 test("ADO discovery keeps configured pipeline scope bounded", () => {
   assert.throws(
-    () => adoBuildDiscovery({
+    () => adoBuildSource({
       definitions: Array.from({ length: 11 }, (_, index) => `org/project/${index + 1}`),
       authorization: "Bearer token",
     }),
@@ -1190,9 +1406,29 @@ test("ADO authorization preserves the configured CLI failure", async () => {
   }), /using \/opt\/az: spawn \/opt\/az ENOENT; renew az login, set AZURE_CLI/);
 });
 
+test("ADO authorization passes daemon shutdown to Azure CLI", async () => {
+  const controller = new AbortController();
+  let receivedSignal;
+  const running = ambientAdoAuthorization({
+    pat: "",
+    signal: controller.signal,
+    exec: async (_file, _arguments, options) => {
+      receivedSignal = options.signal;
+      await new Promise((resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+      });
+    },
+  });
+
+  controller.abort();
+
+  await assert.rejects(running, { name: "AbortError" });
+  assert.equal(receivedSignal, controller.signal);
+});
+
 test("ADO discovery refreshes a remembered build outside the recent definition window", async () => {
   const urls = [];
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1228,7 +1464,7 @@ test("ADO discovery refreshes a remembered build outside the recent definition w
 });
 
 test("ADO discovery keeps an undelivered terminal build", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1260,7 +1496,7 @@ test("ADO discovery keeps an undelivered terminal build", async () => {
 });
 
 test("ADO discovery forgets a retained build without hiding valid recent observations", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1282,7 +1518,7 @@ test("ADO discovery forgets a retained build without hiding valid recent observa
 });
 
 test("ADO discovery forgets builds outside the configured definition scope", async () => {
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1304,7 +1540,7 @@ test("ADO discovery forgets builds outside the configured definition scope", asy
 
 test("ADO discovery rotates across full definitions without dropping remembered builds", async () => {
   const definitions = Array.from({ length: 6 }, (_, index) => `org/project/${index + 1}`);
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions,
     authorization: "Bearer token",
     fetchImpl: async (url) => {
@@ -1364,6 +1600,8 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   await deliver("g_exact", [{
     source: "ado-pr",
     subject: "org/project/repo/42",
+    observedAt: "2026-09-03T00:00:00.000Z",
+    revision: "revision-42",
     payload: {
       head: "abc123",
       mergeStatus: "conflicts",
@@ -1377,10 +1615,12 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   assert.equal(prompts[0].text, "/goal resume");
   assert.equal(prompts[1].target, "w1:p9");
   assert.match(prompts[1].text, /org\/project\/repo\/42/);
-  assert.match(prompts[1].text, /"mergeStatus":"conflicts"/);
-  assert.match(prompts[1].text, /"id":71,"status":"active","commentCount":1/);
-  assert.match(prompts[1].text, /"id":"policy-1","status":"rejected"/);
-  assert.match(prompts[1].text, /bounded wake hint, not provider authority or completion proof/);
+  assert.match(prompts[1].text, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(prompts[1].text, /Revision: revision-42/);
+  assert.match(prompts[1].text, /"mergeStatus": "conflicts"/);
+  assert.match(prompts[1].text, /"id": 71/);
+  assert.match(prompts[1].text, /"id": "policy-1"/);
+  assert.match(prompts[1].text, /Do not treat the notification itself as provider authority/);
 });
 
 test("Herdr delivery bounds oversized observed facts without hiding the resource", async (t) => {
@@ -1413,7 +1653,7 @@ test("Herdr delivery bounds oversized observed facts without hiding the resource
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0].text, /org\/project\/repo\/99/);
-  assert.match(prompts[0].text, /Observed facts omitted because they exceed 8192 bytes/);
+  assert.match(prompts[0].text, /Omitted because they exceed 8192 bytes/);
   assert.doesNotMatch(prompts[0].text, /x{100}/);
 });
 
@@ -1530,6 +1770,7 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
     kind: "source",
     source: "ado-build",
     affectedGoalIds: ["g_release"],
+    observedAt: "2026-09-03T00:00:00.000Z",
     message: "ADO discovery failed",
     retry: "The watcher will retry this provider scope on its next bounded scan.",
   });
@@ -1537,10 +1778,12 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
   const prompt = calls.find(([method]) => method === "agent.prompt")[1];
   assert.equal(prompt.target, "w1:p2");
   assert.match(prompt.text, /ADO discovery failed/);
-  assert.match(prompt.text, /Known affected goals: g_release/);
+  assert.match(prompt.text, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
+  assert.match(prompt.text, /Affected Goal IDs: g_release/);
+  assert.match(prompt.text, /Observed at: 2026-09-03T00:00:00.000Z/);
   assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
-  assert.match(prompt.text, /Do not claim to inspect or repair a service/);
-  assert.match(prompt.text, /not a new goal/);
+  assert.match(prompt.text, /Do not claim a\n  repair without current evidence/);
+  assert.match(prompt.text, /do not create a goal merely because a\s+diagnostic arrived/);
   assert.doesNotMatch(prompt.text, /Inspect current service and provider evidence/);
 });
 
@@ -1552,7 +1795,10 @@ test("watcher diagnostics fail closed when the supervisor is ambiguous", async (
     ] } }),
   });
 
-  await assert.rejects(diagnose({ message: "failure" }), /expected one Pi supervisor, found 2/);
+  await assert.rejects(
+    diagnose({ message: "failure", observedAt: "2026-09-03T00:00:00.000Z" }),
+    /expected one Pi supervisor, found 2/,
+  );
 });
 
 test("GitHub discovery refreshes every remembered pull request within a few bounded scans", async () => {
@@ -1561,7 +1807,7 @@ test("GitHub discovery refreshes every remembered pull request within a few boun
     goalId: `g_remembered_${index + 1}`,
   }));
   const reads = [];
-  const source = githubPullRequestDiscovery({
+  const source = githubPullRequestSource({
     repositories: ["owner/repo"],
     token: "token",
     fetchImpl: async (url) => {
@@ -1600,7 +1846,7 @@ test("ADO discovery bounds remembered rereads per scan and still covers them all
     goalId: `g_remembered_${index + 1}`,
   }));
   const reads = [];
-  const source = adoBuildDiscovery({
+  const source = adoBuildSource({
     definitions: ["org/project/77"],
     authorization: "******",
     fetchImpl: async (url) => {

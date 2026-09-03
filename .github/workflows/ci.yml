@@ -65,6 +65,10 @@ jobs:
           docker run --rm herdr-supervisor:ci \
             test -f /opt/herdr-supervisor/src/event-watcher/daemon.mjs
 
+          # Verify the packaged watcher can load its production dependencies
+          docker run --rm herdr-supervisor:ci \
+            node /opt/herdr-supervisor/src/event-watcher/daemon.mjs --help
+
           # Verify the Pi and Codex shims are executable
           docker run --rm herdr-supervisor:ci \
             sh -c 'test -x /usr/local/bin/pi && test -x /usr/local/bin/codex'

@@ -32,6 +32,7 @@ export async function ambientAdoAuthorization({
   pat = process.env.AZURE_DEVOPS_EXT_PAT,
   azureCli = process.env.AZURE_CLI || "az",
   exec = execFileAsync,
+  signal,
 } = {}) {
   if (pat) return `Basic ${Buffer.from(`:${pat}`).toString("base64")}`;
   try {
@@ -44,19 +45,22 @@ export async function ambientAdoAuthorization({
       "accessToken",
       "--output",
       "tsv",
-    ], { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024 });
+    ], { encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024, signal });
     if (!stdout.trim()) throw new Error("empty Azure access token");
     return `Bearer ${stdout.trim()}`;
   } catch (error) {
+    signal?.throwIfAborted();
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`could not obtain Azure DevOps credentials using ${azureCli}: ${detail}; renew az login, set AZURE_CLI to the Azure CLI executable, or set AZURE_DEVOPS_EXT_PAT`, { cause: error });
   }
 }
 
-async function json(fetchImpl, url, authorization) {
+async function json(fetchImpl, url, authorization, signal) {
   const response = await fetchImpl(url, {
     headers: { Accept: "application/json", Authorization: authorization },
-    signal: AbortSignal.timeout(30_000),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   if (!response.ok) {
     const error = new Error(`Azure DevOps build discovery returned HTTP ${response.status}`);
@@ -81,7 +85,7 @@ function currentBuild(build) {
   return { revision: hash(payload), payload };
 }
 
-export function adoBuildDiscovery({
+export function adoBuildSource({
   definitions,
   fetchImpl = fetch,
   authorization,
@@ -100,8 +104,9 @@ export function adoBuildDiscovery({
   const rereadWindow = boundedRefreshWindow(MAX_REMEMBERED_REREADS, (resource) => resource.subject);
   const recentWindow = boundedRefreshWindow(MAX_BUILDS, ([subject]) => subject);
   return {
-    async scan(known = []) {
-      const auth = authorization || await getAuthorization();
+    async scan(known = [], { signal } = {}) {
+      signal?.throwIfAborted();
+      const auth = authorization || await getAuthorization({ signal });
       const recent = new Map();
       const absent = [];
       for (const { organization, project, definitionId } of scopes) {
@@ -110,6 +115,7 @@ export function adoBuildDiscovery({
           fetchImpl,
           `${base}/_apis/build/builds?definitions=${definitionId}&queryOrder=queueTimeDescending&$top=100&api-version=7.1`,
           auth,
+          signal,
         );
         if (!Array.isArray(result.value)) throw new Error("Azure DevOps build discovery returned an invalid list");
         for (const build of result.value) recent.set(`${organization}/${project}/${build.id}`, build);
@@ -137,6 +143,7 @@ export function adoBuildDiscovery({
             fetchImpl,
             `${base}/_apis/build/builds/${parsed.buildId}?api-version=7.1`,
             auth,
+            signal,
           );
           const definition = `${parsed.organization}/${parsed.project}/${build.definition?.id}`;
           const goalId = taggedGoal(build.tags);
