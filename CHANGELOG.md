@@ -3,6 +3,18 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.3.0...herdr-supervisor-v0.4.0) (2026-09-03)
+
+
+### Features
+
+* add explicit saved-goal discard ([06ba7a5](https://github.com/hao1939/herdr-supervisor/commit/06ba7a5dc82c2c942d7822c6a27c24f04ab23b4a))
+
+
+### Bug Fixes
+
+* make saved-goal discard fail closed ([06ba7a5](https://github.com/hao1939/herdr-supervisor/commit/06ba7a5dc82c2c942d7822c6a27c24f04ab23b4a))
+
 ## [0.2.2](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.1...herdr-supervisor-v0.2.2) (2026-08-29)
 
 
