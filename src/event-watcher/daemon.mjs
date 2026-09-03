@@ -7,9 +7,15 @@ import { adoPullRequestSource } from "./ado-pr.mjs";
 import { ExternalEventWatcher } from "./core.mjs";
 import { githubPullRequestSource } from "./github-pr.mjs";
 import { canonicalActiveGoals, herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
+import { watcherHelpMessage, watcherStartupMessage } from "./messages.mjs";
 import { acquireWatcherLock } from "./process-lock.mjs";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
+  console.log(watcherHelpMessage());
+  process.exit(0);
+}
 
 function list(name) {
   return String(process.env[name] || "").split(",").map((item) => item.trim()).filter(Boolean);
@@ -24,7 +30,7 @@ if (adoDefinitions.length) sources["ado-build"] = adoBuildSource({ definitions: 
 if (adoRepositories.length) sources["ado-pr"] = adoPullRequestSource({ repositories: adoRepositories });
 const hasSources = Object.keys(sources).length > 0;
 if (!hasSources) {
-  throw new Error("configure HERDR_WATCH_GITHUB_REPOSITORIES, HERDR_WATCH_ADO_DEFINITIONS, or HERDR_WATCH_ADO_REPOSITORIES");
+  throw new Error(`no trusted provider scope configured\n\n${watcherHelpMessage()}`);
 }
 
 const stateHome = process.env.HERDR_WATCH_STATE_HOME || join(homedir(), ".local", "state", "herdr-supervisor");
@@ -40,6 +46,15 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 const statePath = join(stateHome, "external-events.json");
 const releaseOwnership = await acquireWatcherLock(statePath);
 try {
+  console.error(watcherStartupMessage({
+    scopes: {
+      "github-pr": githubRepositories,
+      "ado-pr": adoRepositories,
+      "ado-build": adoDefinitions,
+    },
+    intervalMs,
+    statePath,
+  }));
   const watcher = new ExternalEventWatcher({
     statePath,
     sources,

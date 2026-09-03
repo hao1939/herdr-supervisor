@@ -11,6 +11,11 @@ import { adoPullRequestSource } from "../src/event-watcher/ado-pr.mjs";
 import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
 import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
+import {
+  watcherHelpMessage,
+  watcherStartupMessage,
+  workerEventMessage,
+} from "../src/event-watcher/messages.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
 import { acquireWatcherLock } from "../src/event-watcher/process-lock.mjs";
 import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
@@ -174,6 +179,56 @@ test("provider metadata names one durable goal without a watch registration", ()
   assert.equal(taggedGoal(["herdr-goal=g_one", "herdr-goal=g_two"]), undefined);
 });
 
+test("watcher startup explains its complete observation and delivery path", () => {
+  const message = watcherStartupMessage({
+    scopes: {
+      "github-pr": ["owner/repo"],
+      "ado-pr": [],
+      "ado-build": ["org/project/42"],
+    },
+    intervalMs: 60_000,
+    statePath: "/state/external-events.json",
+  });
+
+  assert.match(message, /event-watchd started/);
+  assert.match(message, /github-pr: owner\/repo/);
+  assert.match(message, /ado-build: org\/project\/42/);
+  assert.doesNotMatch(message, /ado-pr:/);
+  assert.match(message, /linked resource -> durable goal ID -> exact current worker/);
+  assert.match(message, /bounded diagnostic -> one Pi supervisor/);
+  assert.match(message, /startup only; verify provider access, metadata, and one changed-resource delivery/);
+});
+
+test("watcher help explains setup, linking, and end-to-end proof", () => {
+  const message = watcherHelpMessage();
+
+  assert.match(message, /HERDR_WATCH_GITHUB_REPOSITORIES=owner\/repository/);
+  assert.match(message, /HERDR_WATCH_ADO_REPOSITORIES=organization\/project\/repository/);
+  assert.match(message, /HERDR_WATCH_ADO_DEFINITIONS=organization\/project\/definition-id/);
+  assert.match(message, /Goal ID: <durable-goal-id>/);
+  assert.match(message, /herdr-goal=<durable-goal-id>/);
+  assert.match(message, /Verify provider access, exact metadata/);
+});
+
+test("worker event message explains facts, delivery, response, and expected output", () => {
+  const message = workerEventMessage("g_owner", [{
+    source: "github-pr",
+    subject: "owner/repo#42",
+    observedAt: "2026-09-03T00:00:00.000Z",
+    revision: "revision-1",
+    payload: { draft: false, checks: [{ name: "test", conclusion: "failure" }] },
+  }]);
+
+  assert.match(message, /External provider change/);
+  assert.match(message, /Goal: g_owner/);
+  assert.match(message, /Why you received this: trusted provider metadata links the resource/);
+  assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(message, /Revision: revision-1/);
+  assert.match(message, /"conclusion": "failure"/);
+  assert.match(message, /rereading the provider's current state/);
+  assert.match(message, /Report what materially changed, what you did/);
+});
+
 test("watcher daemon rejects an empty source set without changing its checkpoint", async (t) => {
   const directory = await temporary(t, "event-watch-empty-sources-");
   const statePath = join(directory, "external-events.json");
@@ -197,7 +252,7 @@ test("watcher daemon rejects an empty source set without changing its checkpoint
 
   await assert.rejects(
     execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
-    /configure HERDR_WATCH_GITHUB_REPOSITORIES, HERDR_WATCH_ADO_DEFINITIONS, or HERDR_WATCH_ADO_REPOSITORIES/,
+    /no trusted provider scope configured[\s\S]*HERDR_WATCH_GITHUB_REPOSITORIES=owner\/repository/,
   );
   assert.equal(await readFile(statePath, "utf8"), checkpoint);
 });
@@ -1521,6 +1576,8 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   await deliver("g_exact", [{
     source: "ado-pr",
     subject: "org/project/repo/42",
+    observedAt: "2026-09-03T00:00:00.000Z",
+    revision: "revision-42",
     payload: {
       head: "abc123",
       mergeStatus: "conflicts",
@@ -1534,10 +1591,12 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   assert.equal(prompts[0].text, "/goal resume");
   assert.equal(prompts[1].target, "w1:p9");
   assert.match(prompts[1].text, /org\/project\/repo\/42/);
-  assert.match(prompts[1].text, /"mergeStatus":"conflicts"/);
-  assert.match(prompts[1].text, /"id":71,"status":"active","commentCount":1/);
-  assert.match(prompts[1].text, /"id":"policy-1","status":"rejected"/);
-  assert.match(prompts[1].text, /bounded wake hint, not provider authority or completion proof/);
+  assert.match(prompts[1].text, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(prompts[1].text, /Revision: revision-42/);
+  assert.match(prompts[1].text, /"mergeStatus": "conflicts"/);
+  assert.match(prompts[1].text, /"id": 71/);
+  assert.match(prompts[1].text, /"id": "policy-1"/);
+  assert.match(prompts[1].text, /Do not treat the notification itself as provider authority/);
 });
 
 test("Herdr delivery bounds oversized observed facts without hiding the resource", async (t) => {
@@ -1570,7 +1629,7 @@ test("Herdr delivery bounds oversized observed facts without hiding the resource
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0].text, /org\/project\/repo\/99/);
-  assert.match(prompts[0].text, /Observed facts omitted because they exceed 8192 bytes/);
+  assert.match(prompts[0].text, /Omitted because they exceed 8192 bytes/);
   assert.doesNotMatch(prompts[0].text, /x{100}/);
 });
 

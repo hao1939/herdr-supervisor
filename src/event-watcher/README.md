@@ -90,6 +90,7 @@ From a source checkout, an agent can pass the scope directly when it starts the
 process. Credentials already present in that runtime are inherited:
 
 ```sh
+node src/event-watcher/daemon.mjs --help
 HERDR_WATCH_GITHUB_REPOSITORIES=acme/api,acme/web npm run watch
 ```
 
@@ -105,6 +106,26 @@ scopes. It does not need a supervisor-only tool or configuration registry. The
 daemon claims one process-lifetime lock beside its checkpoint and fails fast if
 another live process already owns it; a stale lock is recovered after its
 process is gone.
+
+On successful startup, the daemon explains its effective configuration without
+printing credentials:
+
+```text
+event-watchd started
+
+Watching trusted scopes
+  - github-pr: acme/api
+
+Scan interval: 60000 ms
+Checkpoint: /home/agent/.local/state/herdr-supervisor/external-events.json
+Delivery: linked resource -> durable goal ID -> exact current worker
+Failures: bounded diagnostic -> one Pi supervisor
+Proof: startup only; verify provider access, metadata, and one changed-resource delivery
+```
+
+This is the effective process configuration, not proof that provider access or
+delivery works. An agent should compare it with the requested scopes and then
+complete the verification below before claiming setup is complete.
 
 ### Credentials
 
@@ -166,13 +187,38 @@ ineligible rather than guessing a worker.
 2. Confirm the PR description or ADO build tag contains the exact active goal
    ID and that its repository or definition is in the configured scope.
 3. Let an authoritative watched field change, such as a check, policy, PR head,
-   or build result. On the next scan, the exact worker receives `External
-   resources changed for goal ...`, rereads the provider, and continues its
-   Goal.
+   or build result. On the next scan, the exact worker receives an `External
+   provider change` message naming its Goal, rereads the provider, and
+   continues its Goal.
 4. Confirm an unchanged later scan sends no duplicate notification. The
    checkpoint is normally at
    `~/.local/state/herdr-supervisor/external-events.json`; it is diagnostic
    state, not a file to edit or a second source of truth.
+
+The receiving worker gets a self-explaining message with four parts: goal,
+resource identity and observation revision, bounded facts, and the complete
+response guide. For example:
+
+```text
+External provider change
+Goal: g_01234567-example
+
+What event-watchd observed
+  Resource: github-pr acme/api#42
+  Observed at: 2026-09-03T00:00:00.000Z
+  Revision: <stable provider-state hash>
+  Observed facts:
+    { ... }
+
+Response knowledge
+  # Linked provider resource changed
+  ...
+```
+
+The worker does not need to locate watcher documentation before responding.
+The injected guide explains why it received the event, how to reread authority,
+and what progress report is expected. The full editable source is
+`knowledge/linked-resource-change.md` beside the watcher code.
 
 Source failures are retried on the next bounded scan. Failed delivery remains
 pending and retries after a later successful current observation of that
@@ -214,6 +260,17 @@ This split lets incident experience improve agent behavior without changing
 watcher state or delivery. Add deterministic code only when the missing fact,
 wake, validation, or effect is genuinely reusable and cannot be handled
 reliably with existing primitives.
+
+The current worker path proves the complete contract: an adapter emits facts,
+the watcher delivers them to one exact goal worker, and the notifier injects
+the colocated response guide. A supervisor-level portfolio event has one
+remaining integration boundary. The external daemon cannot currently enter the
+Pi extension's existing fenced global-review scheduler through Herdr: Herdr can
+subscribe to runtime events and prompt an agent, but it does not publish a
+custom extension event. A normal prompt would be a different, unrestricted
+turn. Do not conceal that difference with message wording. Before adding a
+socket, spool, or queue, validate whether direct supervisor prompting is
+sufficient or whether a small authenticated runtime event primitive is needed.
 
 ### Source adapter
 
@@ -310,6 +367,8 @@ requires goal context, notify the worker and let its model decide.
 - `core.mjs`: provider-independent observation, revision, and delivery state.
 - `daemon.mjs`: static built-in source composition and process lifecycle.
 - `herdr.mjs`: goal-addressed worker notification and supervisor diagnostics.
+- `messages.mjs`: readable startup receipts and fact-plus-knowledge notices.
+- `knowledge/`: plain-language response knowledge injected into event turns.
 - `supervision-metadata.mjs`: strict durable goal metadata parsing.
 - `refresh-window.mjs`: disposable bounded refresh rotation.
 - `github-pr.mjs`, `ado-pr.mjs`, `ado-build.mjs`: built-in source adapters.

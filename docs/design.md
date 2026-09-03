@@ -540,12 +540,26 @@ restricted review cannot depend on opening a document with unavailable tools.
 When incidents teach a reusable response, update the guide or prompt before
 adding watcher conditionals.
 
+The existing linked-resource path demonstrates this contract by injecting the
+colocated worker response guide beside every changed-resource fact. Startup also
+prints the effective non-secret scopes, checkpoint, cadence, and delivery rule,
+so an agent can verify the path from configuration through receipt without
+reading source code.
+
 For example, a future GitHub portfolio observer could report changed draft-PR
 facts to one global review. Its guidance could teach the supervisor to inspect
 readiness, overlap, CI, and blocked goals before reconsidering affected
 workers. The observer would not maintain a hold state or route workers, and the
 periodic review would remain only a missed-event safety net. This is an
 extension seam, not a feature until live evidence justifies it.
+
+A protocol PoC confirmed that the current external Herdr API does not provide a
+custom event publication operation that can enter the Pi extension's existing
+fenced global-review scheduler. A normal `agent.prompt` is an ordinary turn,
+not that transaction. This is the remaining implementation question for
+supervisor-level events. Do not add a local event bus, spool, or queue until a
+live use case proves that direct supervisor prompting is insufficient and that
+a smaller authenticated runtime signal is unavailable.
 
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable
