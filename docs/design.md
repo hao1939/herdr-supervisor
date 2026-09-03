@@ -505,7 +505,14 @@ watcher is hosted or extended.
 This is a small tool set—daemon, adapters, and a colocated operating contract—
 not a privileged management service. Role boundaries define responsibility and
 information flow; they do not remove ordinary capabilities from an otherwise
-authorized agent.
+authorized agent. Automatic focused and global review turns temporarily expose
+only the validated supervision actions so background events cannot turn into
+unrelated shell work; direct human turns retain the agent's ordinary tools.
+
+One watcher process owns one checkpoint. A process-lifetime filesystem lock
+fails fast on a duplicate owner and recovers after a dead owner, preventing an
+entrypoint watcher and a manually started watcher from sending duplicate wakes
+or overwriting each other's revisions.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten

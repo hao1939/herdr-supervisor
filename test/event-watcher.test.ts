@@ -11,6 +11,7 @@ import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
 import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
+import { acquireFilesystemLock } from "../src/filesystem-lock.mjs";
 import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 
@@ -37,6 +38,44 @@ async function temporary(t, label) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
+
+test("one process owns an event watcher checkpoint", async (t) => {
+  const root = await temporary(t, "event-watch-process-lock-");
+  const lock = join(root, "event-watchd.lock");
+  const release = await acquireFilesystemLock(lock, {
+    label: "event-watchd checkpoint",
+    timeoutMs: 0,
+  });
+
+  await assert.rejects(
+    acquireFilesystemLock(lock, { label: "event-watchd checkpoint", timeoutMs: 0 }),
+    /event-watchd checkpoint is already owned by another live process/,
+  );
+  await release();
+
+  const releaseAgain = await acquireFilesystemLock(lock, {
+    label: "event-watchd checkpoint",
+    timeoutMs: 0,
+  });
+  await releaseAgain();
+});
+
+test("event watcher ownership recovers after its process is gone", async (t) => {
+  const root = await temporary(t, "event-watch-stale-process-lock-");
+  const lock = join(root, "event-watchd.lock");
+  await mkdir(lock, { recursive: true });
+  await writeFile(join(lock, "owner.json"), `${JSON.stringify({
+    token: "dead-watcher",
+    pid: 2_147_483_647,
+    startTime: "missing",
+  })}\n`);
+
+  const release = await acquireFilesystemLock(lock, {
+    label: "event-watchd checkpoint",
+    timeoutMs: 0,
+  });
+  await release();
+});
 
 test("goal action locks recover after their owning process is gone", async (t) => {
   const root = await temporary(t, "event-watch-stale-action-");

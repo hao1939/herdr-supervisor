@@ -38,6 +38,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const customMessages = [];
   const userMessages = [];
   const activeToolSelections = [];
+  let activeTools = ["read", "bash", "edit", "write"];
   return {
     commands,
     tools,
@@ -52,7 +53,10 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
     },
-    registerTool(tool) { tools.set(tool.name, tool); },
+    registerTool(tool) {
+      tools.set(tool.name, tool);
+      activeTools.push(tool.name);
+    },
     registerCommand(name, command) { commands.set(name, command); },
     on(name, handler) { events.set(name, handler); },
     sendMessage(message, options) {
@@ -60,7 +64,11 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
       customMessages.push({ message, options });
     },
     sendUserMessage(content, options) { userMessages.push({ content, options }); },
-    setActiveTools(names) { activeToolSelections.push(names); },
+    getActiveTools() { return [...activeTools]; },
+    setActiveTools(names) {
+      activeTools = [...names];
+      activeToolSelections.push([...names]);
+    },
   };
 }
 
@@ -1671,6 +1679,7 @@ test("the supervisor keeps ordinary agent tools available", async (t) => {
   const pi = fakePi();
   herdrSupervisor(pi);
   await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
 
   assert.deepEqual(pi.activeToolSelections, []);
   pi.events.get("session_shutdown")();
@@ -3809,6 +3818,9 @@ test("a due global review routes explicit reconsideration through ordinary focus
   assert.equal(pi.messages[0].customType, "herdr-supervisor-global-review");
   assert.match(pi.messages[0].content, /"goalId": "g_test"/);
   assert.doesNotMatch(pi.messages[0].content, /journal|native messages|terminal output/);
+  pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
+  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), false);
+  assert.equal(pi.activeToolSelections.at(-1).includes("supervisor_global_result"), true);
 
   const result = await pi.tools.get("supervisor_global_result").execute("global", {
     summary: "The worker state conflicts with its recorded progress.",
@@ -3825,6 +3837,7 @@ test("a due global review routes explicit reconsideration through ordinary focus
   assert.equal(result.isError, false);
   assert.match(result.content[0].text, /Queued focused reviews for g_test/);
   await pi.events.get("agent_settled")();
+  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), true);
   await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
   const focused = pi.messages.find((message) => message.customType === "herdr-supervisor-review");
   assert.match(focused.content, /global supervision review found/);

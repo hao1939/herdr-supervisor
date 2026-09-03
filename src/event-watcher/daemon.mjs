@@ -2,6 +2,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { acquireFilesystemLock } from "../filesystem-lock.mjs";
 import { adoBuildSource } from "./ado-build.mjs";
 import { adoPullRequestSource } from "./ado-pr.mjs";
 import { ExternalEventWatcher } from "./core.mjs";
@@ -31,24 +32,32 @@ const intervalMs = Number(process.env.HERDR_WATCH_INTERVAL_MS || 60_000);
 if (!Number.isFinite(intervalMs) || intervalMs < 10_000 || intervalMs > MAX_TIMER_DELAY_MS) {
   throw new Error(`HERDR_WATCH_INTERVAL_MS must be between 10000 and ${MAX_TIMER_DELAY_MS}`);
 }
-const watcher = new ExternalEventWatcher({
-  statePath: join(stateHome, "external-events.json"),
-  sources,
-  deliver: herdrGoalDelivery(),
-  activeGoals: canonicalActiveGoals,
-  diagnose: herdrSupervisorDiagnostic(),
-});
-
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => controller.abort());
 }
 
-while (!controller.signal.aborted) {
-  await watcher.runOnce();
-  try {
-    await delay(intervalMs, undefined, { signal: controller.signal });
-  } catch (error) {
-    if (error?.name !== "AbortError") throw error;
+const statePath = join(stateHome, "external-events.json");
+const releaseOwnership = await acquireFilesystemLock(join(stateHome, "event-watchd.lock"), {
+  label: `event-watchd checkpoint ${statePath}`,
+  timeoutMs: 0,
+});
+try {
+  const watcher = new ExternalEventWatcher({
+    statePath,
+    sources,
+    deliver: herdrGoalDelivery(),
+    activeGoals: canonicalActiveGoals,
+    diagnose: herdrSupervisorDiagnostic(),
+  });
+  while (!controller.signal.aborted) {
+    await watcher.runOnce();
+    try {
+      await delay(intervalMs, undefined, { signal: controller.signal });
+    } catch (error) {
+      if (error?.name !== "AbortError") throw error;
+    }
   }
+} finally {
+  await releaseOwnership();
 }

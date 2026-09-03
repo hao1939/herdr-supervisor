@@ -74,7 +74,10 @@ one watcher owns that checkpoint.
 
 This is ordinary process management, not a watcher-specific control protocol.
 An agent may inspect the process, stop it cleanly, and restart it with different
-scopes. It does not need a supervisor-only tool or configuration registry.
+scopes. It does not need a supervisor-only tool or configuration registry. The
+daemon claims one process-lifetime lock beside its checkpoint and fails fast if
+another live process already owns it; a stale lock is recovered after its
+process is gone.
 
 ### Credentials
 
@@ -253,6 +256,7 @@ requires goal context, notify the worker and let its model decide.
 - `supervision-metadata.mjs`: strict durable goal metadata parsing.
 - `refresh-window.mjs`: disposable bounded refresh rotation.
 - `github-pr.mjs`, `ado-pr.mjs`, `ado-build.mjs`: built-in source adapters.
+- `../filesystem-lock.mjs`: process ownership shared with goal action locking.
 
 The repository's [current design](../../docs/design.md) remains authoritative
 for the wider supervisor architecture.

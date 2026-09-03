@@ -153,9 +153,10 @@ pi -e "$supervisor_extension" --supervisor-mode live
 
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
 supervisor review events without applying decisions. Ordinary Pi tools remain
-available for direct human requests and infrastructure operations; the review
-contract keeps background supervision focused on the exact worker. An operator
-may still pass `--no-builtin-tools` for a deliberately restricted deployment,
+available for direct human requests and infrastructure operations. During an
+automatic focused or global review, the extension temporarily exposes only its
+supervision tools and restores the ordinary tools afterward. An operator may
+still pass `--no-builtin-tools` for a deliberately restricted deployment,
 accepting that such a session cannot operate `event-watchd` itself.
 
 ## How it works
