@@ -113,6 +113,12 @@ Herdr to display it. The opaque goal ID, terminal ID, and native session ID
 remain authoritative. A label helps a human navigate; it is not stored state,
 never selects a worker, and never proves identity.
 
+One goal-store root has one supervisor writer. Management panes are read-only
+clients that relay mutations to that writer; running multiple supervisors
+against the same root is outside the architecture. This keeps goal lifecycle
+serialization local and avoids pretending to provide a distributed
+transaction across goal files and Herdr worker creation.
+
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.
@@ -326,7 +332,9 @@ If the human explicitly selects an exact saved goal that has never started, the
 supervisor may discard it. Code requires a directory containing only
 `goal.json`; active goals, completed goals, audit history, and unknown files
 fail closed. Age, apparent duplication, or a global-review finding never grants
-discard authority.
+discard authority. The store guide explains the hidden `.discarding-*` claim
+and its manual fail-closed recovery if the supervisor exits during that short
+operation; ordinary reads do not grow a recovery workflow for this rare case.
 
 The supervisor's ordinary status view lists the exact IDs and objectives of
 active and unstarted goals. Reading one exact goal returns its complete contract

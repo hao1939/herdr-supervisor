@@ -222,6 +222,11 @@ blockers, next actions, and the latest advisory global-review finding without
 creating another registry or action path. The uniquely named Pi `supervisor`
 still performs every validated goal mutation.
 
+Run only one Pi supervisor against a goal-store root. Goal-management panes may
+read that store and relay requests, but a second supervisor writer is outside
+the supported deployment model. Stop the duplicate before applying more goal
+actions.
+
 The human may refine an active goal in conversation. The supervisor updates the
 durable contract and informs the same worker — no sibling goals or temporary
 steering. For operator control, `/supervise <pane> <goal>` attaches an existing

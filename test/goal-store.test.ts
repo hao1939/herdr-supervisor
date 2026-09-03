@@ -83,6 +83,9 @@ test("the first installed goal makes the store self-explaining", async () => {
   assert.match(GOAL_STORE_GUIDE, /goal\.json.*portable authority/s);
   assert.match(GOAL_STORE_GUIDE, /current\.json.*not live runtime truth/s);
   assert.match(GOAL_STORE_GUIDE, /journal\.jsonl.*audit history/s);
+  assert.match(GOAL_STORE_GUIDE, /\.discarding-.*manual, fail-closed recovery/s);
+  assert.match(GOAL_STORE_GUIDE, /restore the whole directory to its exact.*g_<id>/s);
+  assert.match(GOAL_STORE_GUIDE, /one supervisor writer/i);
   assert.match(GOAL_STORE_GUIDE, /do not edit them manually/i);
 });
 

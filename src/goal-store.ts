@@ -47,6 +47,20 @@ An explicitly selected saved goal may be discarded through the supervisor
 before it starts. Active and terminal goals retain their checkpoint and audit
 history.
 
+Discard first moves the complete goal directory to a hidden
+\`.discarding-g_<id>-<uuid>\` name. Normally this exists only briefly. If the
+supervisor exits during that operation, the hidden directory is deliberately
+left for manual, fail-closed recovery and will not appear in the ordinary
+\`g_*\` listing.
+
+Before reusing a missing goal ID, inspect matching \`.discarding-*\`
+directories. If one is empty, remove it. If it contains only a valid
+\`goal.json\` and the intended discard is certain, finish removing it; if the
+intent is uncertain, restore the whole directory to its exact \`g_<id>\` name.
+If it contains \`current.json\`, \`journal.jsonl\`, unknown files, or malformed
+data, restore the whole directory. Never overwrite an existing \`g_<id>\`
+directory; inspect both copies instead.
+
 To understand the store, list \`g_*\` directories, read each \`goal.json\`, then
 read \`current.json\` only for local progress. Consult \`journal.jsonl\` only
 when an audit trail matters. Compare goals by their meaning, not similar words
@@ -54,7 +68,12 @@ or timestamps.
 
 Read these files freely, but do not edit them manually. Use supervisor actions
 for mutations so validation, identity checks, and atomic writes remain intact.
+The interrupted-discard recovery above is the only manual lifecycle repair.
 Do not put credentials or transient provider state in a goal contract.
+
+One goal-store root has one supervisor writer. Goal-management panes may read
+the store and relay actions to that supervisor, but another supervisor process
+must not mutate the same root.
 
 To move a goal, copy its \`goal.json\` into a valid \`g_<id>/\` directory on the
 other instance and start it there. \`current.json\`, \`journal.jsonl\`, and
