@@ -1645,6 +1645,12 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
   assert.match(result.systemPrompt, /follow the current worker evidence/);
   assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
+  assert.match(result.systemPrompt, /event-watchd is optional deployment-configured plumbing/);
+  assert.match(result.systemPrompt, /HERDR_WATCH_GITHUB_REPOSITORIES takes comma-separated owner\/repository entries/);
+  assert.match(result.systemPrompt, /HERDR_WATCH_ADO_REPOSITORIES takes organization\/project\/repository entries/);
+  assert.match(result.systemPrompt, /HERDR_WATCH_ADO_DEFINITIONS takes organization\/project\/definition-id entries/);
+  assert.match(result.systemPrompt, /Workers link GitHub and ADO PRs through exactly one ## Supervision block/);
+  assert.match(result.systemPrompt, /Do not create a goal for watcher setup/);
   pi.events.get("session_shutdown")();
 });
 

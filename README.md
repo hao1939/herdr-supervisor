@@ -209,9 +209,13 @@ variable is set. For local use, export the same variables and run
 `npm run watch` beside Herdr. Configure only scopes where the supervision
 metadata is written by trusted workers or maintainers.
 
-The [source adapter guide](src/event-watcher/README.md) defines the small coding
-contract for adding another built-in provider or resource type. There is no
-dynamic plugin loader.
+The [event-watchd guide](src/event-watcher/README.md) shows how an operator or
+supervisor-assisted human enables it, links goals, verifies delivery, diagnoses
+failure, and disables it. It also defines the small coding contract for adding
+another built-in provider or resource type. The Pi supervisor can explain and
+check the requested scope and metadata shape, but it has no shell or deployment
+authority to change or verify a running service itself. There is no dynamic
+plugin loader.
 
 The goal-store root includes a concise `README.md` explaining its layout,
 authority, lifecycle, safe inspection, and portability. Each goal directory has
