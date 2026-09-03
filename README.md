@@ -290,9 +290,9 @@ npm test         # node:test suite
 
 ### Release pull requests
 
-This repository uses release-please. Keep the pull request title as the
-Conventional Commit that should become the squash commit so release-please can
-choose the changelog section and version bump.
+This repository uses release-please and squash-merges pull requests. The pull
+request title becomes the squash commit title, so write it as the Conventional
+Commit that should choose the changelog section and version bump.
 
 Use a `plugin` scope for Herdr plugin-facing changes, for example
 `feat(plugin): add ...`, `fix(plugin): correct ...`, or

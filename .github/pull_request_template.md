@@ -8,8 +8,9 @@
 
 ## Release
 
-PR titles must follow Conventional Commits because release-please uses the
-squash commit to decide the changelog entry and version bump.
+Pull requests are squash-merged, and the pull request title becomes the squash
+commit title. It must follow Conventional Commits so release-please can decide
+the changelog entry and version bump.
 
 Use the plugin scope when the change affects Herdr Supervisor as a plugin:
 
