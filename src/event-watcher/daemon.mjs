@@ -13,7 +13,9 @@ import { acquireWatcherLock } from "./process-lock.mjs";
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
-  console.log(watcherHelpMessage());
+  await new Promise((resolve, reject) => {
+    process.stdout.write(`${watcherHelpMessage()}\n`, (error) => error ? reject(error) : resolve());
+  });
   process.exit(0);
 }
 
