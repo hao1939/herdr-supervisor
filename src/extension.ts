@@ -2161,9 +2161,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
     agentTurnActive = true;
     if (!activeGlobalReview && !reviewTurn.isBusy() && !reviewTurn.isClosed()) return;
-    const settledGlobal = await settleGlobalReview();
-    if (!settledGlobal) await settleFocusedReview();
-    restoreOrdinaryTools();
+    try {
+      const settledGlobal = await settleGlobalReview();
+      if (!settledGlobal) await settleFocusedReview();
+    } finally {
+      restoreOrdinaryTools();
+    }
     await armReviewTimer();
     armGlobalReviewTimer();
   });
