@@ -1686,6 +1686,43 @@ test("the supervisor keeps ordinary agent tools available", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
+test("an automatic focused review exposes only focused decision tools", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  const reconsider = await pi.tools.get("supervisor_reconsider").execute("review", {
+    pane_ids: [worker.paneId],
+    reason: "verify focused review tool selection",
+  });
+  assert.equal(reconsider.isError, false);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
+
+  assert.deepEqual(pi.activeToolSelections.at(-1), [
+    "supervisor_status",
+    "supervisor_reconsider",
+    "supervisor_observe",
+    "supervisor_leave",
+    "supervisor_steer",
+    "supervisor_ask_human",
+    "supervisor_finish",
+  ]);
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), true);
+  pi.events.get("session_shutdown")();
+});
+
 test("a worker requires an explicit absolute working directory", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-worker-directory-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -3820,8 +3857,7 @@ test("a due global review routes explicit reconsideration through ordinary focus
   assert.match(pi.messages[0].content, /"goalId": "g_test"/);
   assert.doesNotMatch(pi.messages[0].content, /journal|native messages|terminal output/);
   pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
-  assert.equal(pi.activeToolSelections.at(-1).includes("bash"), false);
-  assert.equal(pi.activeToolSelections.at(-1).includes("supervisor_global_result"), true);
+  assert.deepEqual(pi.activeToolSelections.at(-1), ["supervisor_global_result"]);
 
   const result = await pi.tools.get("supervisor_global_result").execute("global", {
     summary: "The worker state conflicts with its recorded progress.",

@@ -73,19 +73,16 @@ const EvidenceItems = Type.Array(
 const Optional = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
 const Evidence = Optional(EvidenceItems);
 const client = new HerdrClient();
-const supervisorTools = [
-  "supervisor_start_goal",
-  "supervisor_discard_goal",
-  "supervisor_update_goal",
+const focusedReviewTools = [
   "supervisor_status",
   "supervisor_reconsider",
-  "supervisor_global_result",
   "supervisor_observe",
   "supervisor_leave",
   "supervisor_steer",
   "supervisor_ask_human",
   "supervisor_finish",
 ];
+const globalReviewTools = ["supervisor_global_result"];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
@@ -2108,7 +2105,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     agentTurnActive = true;
     if (activeGlobalReview || reviewTurn.isBusy()) {
       if (!reviewToolsActive) ordinaryTools = pi.getActiveTools();
-      pi.setActiveTools(supervisorTools);
+      pi.setActiveTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
       reviewToolsActive = true;
     } else {
       restoreOrdinaryTools();
