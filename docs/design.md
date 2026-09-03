@@ -553,17 +553,35 @@ Every agent notification uses one versioned plain-text envelope:
 Event: <predefined-event-kind>
 Recipient role: <predefined-role>
 
-Facts
+Event facts
   <bounded event-specific fields>
 
-Response knowledge
+Agent response knowledge
   <version-controlled plain-language guide>
 ```
 
 The header, event kind, recipient role, sections, and event-specific fact names
-are stable contract fields. Facts remain data; response knowledge remains
+are stable contract fields. The two sections have different owners. Event
+facts are watcher-owned data; agent response knowledge is recipient-owned
 guidance. Adding an adapter does not add a new message shape. Change the
 contract version only for an incompatible envelope change.
+
+Improvement follows that ownership in a fixed order:
+
+1. **Prove the event first.** Compare the event with current provider authority
+   and verify that identity, durable links, timestamp, revision, and bounded
+   facts are accurate, complete enough for the intended wake, and free of
+   invented action. Fix the adapter, validation, or message facts when this
+   gate fails.
+2. **Then evaluate the agent.** Once the event is proven sufficient, evaluate
+   whether the recipient rereads authority, reasons about the whole goal or
+   portfolio, takes useful action, and reports a clear result. Improve its goal
+   context, response knowledge, or general agent guidance when this gate fails.
+
+Never tune a prompt to conceal inaccurate event facts, and never add watcher
+conditionals to compensate for reasoning that the agent can perform from an
+already sufficient event. If agent evaluation exposes one genuinely missing
+authoritative fact, name that specific gap and return to the first gate.
 
 For example, a future GitHub portfolio observer could prompt the supervisor
 with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and

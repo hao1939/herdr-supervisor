@@ -41,10 +41,10 @@ function eventMessage({ event, recipient, facts, knowledge }) {
     `Event: ${event}`,
     `Recipient role: ${recipient}`,
     "",
-    "Facts",
+    "Event facts",
     indented(facts),
     "",
-    "Response knowledge",
+    "Agent response knowledge",
     indented(knowledge),
   ].join("\n");
 }

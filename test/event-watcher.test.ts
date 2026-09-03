@@ -223,7 +223,7 @@ test("worker event message explains facts, delivery, response, and expected outp
 
   assert.equal(eventMessageContract, "event-watchd/v1");
   assert.match(message, /^\[event-watchd\/v1\]\nEvent: linked-resource-change\nRecipient role: goal-worker/);
-  assert.match(message, /Facts\n  Goal ID: g_owner\n  Resource count: 1/);
+  assert.match(message, /Event facts\n  Goal ID: g_owner\n  Resource count: 1/);
   assert.match(message, /Resource 1\n    Source: github-pr\n    Subject: owner\/repo#42/);
   assert.match(message, /Why you received this: trusted provider metadata links the resource/);
   assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
@@ -243,10 +243,10 @@ test("supervisor diagnostic uses the same versioned fact-and-knowledge contract"
   });
 
   assert.match(message, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
-  assert.match(message, /Facts\n  Failure kind: source/);
+  assert.match(message, /Event facts\n  Failure kind: source/);
   assert.match(message, /Affected Goal IDs: g_release/);
-  assert.match(message, /Response knowledge\n  # External watcher failure/);
-  assert.match(message, /Inspect the current watcher, provider, and affected existing/);
+  assert.match(message, /Agent response knowledge\n  # External watcher failure/);
+  assert.match(message, /Inspect the current watcher, provider, and\s+affected existing/);
 });
 
 test("watcher daemon rejects an empty source set without changing its checkpoint", async (t) => {
@@ -1777,7 +1777,7 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
   assert.match(prompt.text, /Affected Goal IDs: g_release/);
   assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
   assert.match(prompt.text, /Do not claim a\n  repair without current evidence/);
-  assert.match(prompt.text, /do not create a goal merely because a diagnostic arrived/);
+  assert.match(prompt.text, /do not create a goal merely because a\s+diagnostic arrived/);
   assert.doesNotMatch(prompt.text, /Inspect current service and provider evidence/);
 });
 
