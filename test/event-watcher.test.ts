@@ -538,6 +538,7 @@ test("restart replaces a pending revision with current provider state before wak
 test("a pending wake waits for a current read of its exact resource", async (t) => {
   const directory = await temporary(t, "event-watch-current-read-");
   let scan = 0;
+  let now = new Date("2026-09-03T00:00:00.000Z");
   const delivered = [];
   const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
@@ -556,12 +557,14 @@ test("a pending wake waits for a current read of its exact resource", async (t) 
       if (delivered.length === 1) throw new Error("worker unavailable");
     },
     diagnose: () => {},
+    now: () => now,
   });
 
   await watcher.runOnce();
   await watcher.runOnce();
   assert.deepEqual(delivered, ["old"]);
 
+  now = new Date("2026-09-03T00:01:00.000Z");
   await watcher.runOnce();
   assert.deepEqual(delivered, ["old", "current"]);
 });
@@ -631,10 +634,11 @@ test("array-shaped checkpoint resources fail instead of losing observations", as
   await assert.rejects(watcher.runOnce(), /state is invalid or unsupported/);
 });
 
-test("source and delivery diagnostics coalesce but recover naturally", async (t) => {
+test("source backoff and delivery diagnostics recover naturally", async (t) => {
   const directory = await temporary(t, "event-watch-diagnostics-");
   let sourceFails = true;
   let deliveryFails = true;
+  let now = new Date("2026-09-03T00:00:00.000Z");
   const diagnostics = [];
   const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
@@ -648,18 +652,22 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
       if (deliveryFails) throw new Error("worker unavailable");
     },
     diagnose: (item) => diagnostics.push(item),
-    now: () => new Date("2026-09-03T00:00:00.000Z"),
+    now: () => now,
   });
 
   await watcher.runOnce();
   await watcher.runOnce();
   sourceFails = false;
+  now = new Date("2026-09-03T00:01:00.000Z");
   await watcher.runOnce();
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery"]);
-  assert.ok(diagnostics.every((item) => item.observedAt === "2026-09-03T00:00:00.000Z"));
+  assert.deepEqual(diagnostics.map((item) => item.observedAt), [
+    "2026-09-03T00:00:00.000Z",
+    "2026-09-03T00:01:00.000Z",
+  ]);
   assert.deepEqual(diagnostics[0].affectedGoalIds, []);
-  assert.match(diagnostics[0].retry, /next bounded scan/);
+  assert.match(diagnostics[0].retry, /no earlier than 2026-09-03T00:01:00.000Z/);
   assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_owner"]);
   assert.match(diagnostics[1].retry, /remains pending/);
   deliveryFails = false;
@@ -668,6 +676,128 @@ test("source and delivery diagnostics coalesce but recover naturally", async (t)
   await watcher.runOnce();
   assert.deepEqual(diagnostics.map((item) => item.kind), ["source", "delivery", "source"]);
   assert.deepEqual(diagnostics[2].affectedGoalIds, ["g_owner"]);
+});
+
+test("every source shares bounded backoff without delaying healthy sources", async (t) => {
+  const directory = await temporary(t, "event-watch-source-backoff-");
+  let now = new Date("2026-09-03T00:00:00.000Z");
+  let failingScans = 0;
+  let healthyScans = 0;
+  let sourceFails = true;
+  const diagnostics = [];
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      failing: { scan: async () => {
+        failingScans += 1;
+        if (sourceFails) throw new Error("provider unavailable");
+        return discovery();
+      } },
+      healthy: { scan: async () => {
+        healthyScans += 1;
+        return discovery();
+      } },
+    },
+    deliver: async () => {},
+    diagnose: (item) => diagnostics.push(item),
+    now: () => now,
+  });
+
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:00:30.000Z");
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:01:00.000Z");
+  await watcher.runOnce();
+  for (const stamp of [
+    "2026-09-03T00:05:59.000Z",
+    "2026-09-03T00:06:00.000Z",
+    "2026-09-03T00:20:59.000Z",
+    "2026-09-03T00:21:00.000Z",
+    "2026-09-03T01:20:59.000Z",
+    "2026-09-03T01:21:00.000Z",
+    "2026-09-03T02:20:59.000Z",
+    "2026-09-03T02:21:00.000Z",
+  ]) {
+    now = new Date(stamp);
+    await watcher.runOnce();
+  }
+
+  assert.equal(failingScans, 6);
+  assert.equal(healthyScans, 11);
+  assert.deepEqual(diagnostics.map((item) => item.observedAt), [
+    "2026-09-03T00:00:00.000Z",
+    "2026-09-03T00:01:00.000Z",
+    "2026-09-03T00:06:00.000Z",
+    "2026-09-03T00:21:00.000Z",
+    "2026-09-03T01:21:00.000Z",
+    "2026-09-03T02:21:00.000Z",
+  ]);
+  assert.match(diagnostics[0].retry, /2026-09-03T00:01:00.000Z/);
+  assert.match(diagnostics[1].retry, /2026-09-03T00:06:00.000Z/);
+  assert.match(diagnostics[2].retry, /2026-09-03T00:21:00.000Z/);
+  assert.match(diagnostics[3].retry, /2026-09-03T01:21:00.000Z/);
+  assert.match(diagnostics[4].retry, /2026-09-03T02:21:00.000Z/);
+  assert.match(diagnostics[5].retry, /2026-09-03T03:21:00.000Z/);
+
+  sourceFails = false;
+  now = new Date("2026-09-03T03:21:00.000Z");
+  await watcher.runOnce();
+  await watcher.runOnce();
+  assert.equal(failingScans, 8, "success resets the source to the normal scan cadence");
+
+  sourceFails = true;
+  await watcher.runOnce();
+  assert.match(diagnostics[6].retry, /2026-09-03T03:22:00.000Z/);
+});
+
+test("source backoff starts when a failed scan finishes", async (t) => {
+  const directory = await temporary(t, "event-watch-source-duration-");
+  let now = new Date("2026-09-03T00:00:00.000Z");
+  let scans = 0;
+  const diagnostics = [];
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: { source: { scan: async () => {
+      scans += 1;
+      if (scans === 1) now = new Date("2026-09-03T00:00:30.000Z");
+      throw new Error("provider unavailable");
+    } } },
+    deliver: async () => {},
+    diagnose: (item) => diagnostics.push(item),
+    now: () => now,
+  });
+
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:01:29.999Z");
+  await watcher.runOnce();
+  assert.equal(scans, 1);
+  assert.match(diagnostics[0].retry, /2026-09-03T00:01:30.000Z/);
+
+  now = new Date("2026-09-03T00:01:30.000Z");
+  await watcher.runOnce();
+  assert.equal(scans, 2);
+});
+
+test("source backoff is disposable across watcher restart", async (t) => {
+  const directory = await temporary(t, "event-watch-source-restart-");
+  const statePath = join(directory, "state.json");
+  let scans = 0;
+  const source = { scan: async () => {
+    scans += 1;
+    throw new Error("provider unavailable");
+  } };
+  const options = {
+    statePath,
+    sources: { source },
+    deliver: async () => {},
+    diagnose: () => {},
+    now: () => new Date("2026-09-03T00:00:00.000Z"),
+  };
+
+  await new ExternalEventWatcher(options).runOnce();
+  await new ExternalEventWatcher(options).runOnce();
+
+  assert.equal(scans, 2, "a new process retries immediately from provider authority");
 });
 
 test("a pending delivery stays coalesced while its resource rotates out of a scan", async (t) => {
@@ -695,6 +825,7 @@ test("a pending delivery stays coalesced while its resource rotates out of a sca
 test("a failed diagnostic delivery is retried without blocking observation", async (t) => {
   const directory = await temporary(t, "event-watch-diagnostic-retry-");
   let attempts = 0;
+  let now = new Date("2026-09-03T00:00:00.000Z");
   const watcher = new ExternalEventWatcher({
     statePath: join(directory, "state.json"),
     sources: { source: { scan: async () => { throw new Error("provider unavailable"); } } },
@@ -703,10 +834,12 @@ test("a failed diagnostic delivery is retried without blocking observation", asy
       attempts += 1;
       if (attempts === 1) throw new Error("supervisor unavailable");
     },
+    now: () => now,
   });
 
   await watcher.runOnce();
   await watcher.runOnce();
+  now = new Date("2026-09-03T00:01:00.000Z");
   await watcher.runOnce();
 
   assert.equal(attempts, 2);
