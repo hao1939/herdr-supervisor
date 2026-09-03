@@ -3,20 +3,7 @@ import { HerdrClient } from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
-
-const MAX_EVENT_FACT_BYTES = 8 * 1024;
-
-function observedEvent(event) {
-  const lines = [`- ${event.source} ${event.subject}`];
-  if (event.payload === undefined) return lines;
-  const facts = JSON.stringify(event.payload);
-  if (Buffer.byteLength(facts) <= MAX_EVENT_FACT_BYTES) {
-    lines.push(`  Observed facts: ${facts}`);
-  } else {
-    lines.push(`  Observed facts omitted because they exceed ${MAX_EVENT_FACT_BYTES} bytes; reread the provider.`);
-  }
-  return lines;
-}
+import { supervisorDiagnosticMessage, workerEventMessage } from "./messages.mjs";
 
 export function herdrRequest(method, params = {}, {
   socketPath,
@@ -71,12 +58,7 @@ export function herdrGoalDelivery({
     }
     await request("agent.prompt", {
       target: agent.pane_id,
-      text: [
-        `External resources changed for goal ${goalId}:`,
-        ...events.flatMap(observedEvent),
-        "Reread current provider authority, decide what the change means, and continue useful work toward the goal.",
-        "Observed facts are only a bounded wake hint, not provider authority or completion proof.",
-      ].join("\n"),
+      text: workerEventMessage(goalId, events),
     }, options);
     return { paneId: agent.pane_id };
   });
@@ -93,26 +75,9 @@ export function herdrSupervisorDiagnostic({
     if (supervisors.length !== 1) {
       throw new Error(`expected one Pi supervisor, found ${supervisors.length}`);
     }
-    const bounded = (value, limit = 2_000) => String(value || "").trim().slice(0, limit);
-    const affected = Array.isArray(diagnostic?.affectedGoalIds)
-      ? [...new Set(diagnostic.affectedGoalIds.map((goalId) => bounded(goalId, 200)).filter(Boolean))].slice(0, 20)
-      : [];
-    const facts = [
-      diagnostic?.kind ? `Kind: ${bounded(diagnostic.kind, 100)}` : undefined,
-      diagnostic?.source ? `Source: ${bounded(diagnostic.source, 200)}` : undefined,
-      affected.length ? `Known affected goals: ${affected.join(", ")}` : "Known affected goals: not identified",
-      `Observed failure: ${bounded(diagnostic?.message || "external event watcher failed")}`,
-      diagnostic?.retry ? `Built-in retry: ${bounded(diagnostic.retry)}` : undefined,
-    ].filter(Boolean);
     await request("agent.prompt", {
       target: supervisors[0].pane_id,
-      text: [
-        "External event watcher diagnostic:",
-        ...facts,
-        "Use current supervisor status and existing goal actions to keep affected goals moving. Let the stated built-in retry run; do not poll.",
-        "Ask the human only for genuinely missing authority, configuration, or information. Do not claim to inspect or repair a service unless your tools provide that evidence.",
-        "This is evidence, not a new goal and not completion proof.",
-      ].join("\n"),
+      text: supervisorDiagnosticMessage(diagnostic),
     }, options);
   };
 }

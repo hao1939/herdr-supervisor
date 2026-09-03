@@ -26,11 +26,13 @@ RUN apt-get update \
 RUN mkdir -p /app /opt/herdr-supervisor \
     && chown node:node /app
 
-COPY --chown=node:node package.json /opt/herdr-supervisor/
+COPY --chown=node:node package.json package-lock.json /opt/herdr-supervisor/
 COPY --chown=node:node container /opt/herdr-supervisor/container
 COPY --chown=node:node skills /opt/herdr-supervisor/skills
 COPY --chown=node:node src /opt/herdr-supervisor/src
-RUN chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
+RUN npm ci --prefix /opt/herdr-supervisor --omit=dev \
+    && npm cache clean --force \
+    && chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
     && mv /usr/local/bin/codex /usr/local/bin/codex-agent \
     && mv /usr/local/bin/pi /usr/local/bin/pi-agent \
     && ln -s /opt/herdr-supervisor/container/bin/codex /usr/local/bin/codex \
