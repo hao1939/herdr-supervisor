@@ -1,4 +1,4 @@
-import { open, mkdir, readFile, readdir, rename, unlink } from "node:fs/promises";
+import { open, mkdir, readFile, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -43,6 +43,24 @@ Herdr status before judging whether a worker is currently active.
 - Non-terminal \`current.json\`: active goal.
 - Terminal \`current.json\`: completed or explicitly stopped goal.
 
+An explicitly selected saved goal may be discarded through the supervisor
+before it starts. Active and terminal goals retain their checkpoint and audit
+history.
+
+Discard first moves the complete goal directory to a hidden
+\`.discarding-g_<id>-<uuid>\` name. Normally this exists only briefly. If the
+supervisor exits during that operation, the hidden directory is deliberately
+left for manual, fail-closed recovery and will not appear in the ordinary
+\`g_*\` listing.
+
+Before reusing a missing goal ID, inspect matching \`.discarding-*\`
+directories. If one is empty, remove it. If it contains only a valid
+\`goal.json\` and the intended discard is certain, finish removing it; if the
+intent is uncertain, restore the whole directory to its exact \`g_<id>\` name.
+If it contains \`current.json\`, \`journal.jsonl\`, unknown files, or malformed
+data, restore the whole directory. Never overwrite an existing \`g_<id>\`
+directory; inspect both copies instead.
+
 To understand the store, list \`g_*\` directories, read each \`goal.json\`, then
 read \`current.json\` only for local progress. Consult \`journal.jsonl\` only
 when an audit trail matters. Compare goals by their meaning, not similar words
@@ -50,7 +68,12 @@ or timestamps.
 
 Read these files freely, but do not edit them manually. Use supervisor actions
 for mutations so validation, identity checks, and atomic writes remain intact.
+The interrupted-discard recovery above is the only manual lifecycle repair.
 Do not put credentials or transient provider state in a goal contract.
+
+One goal-store root has one supervisor writer. Goal-management panes may read
+the store and relay actions to that supervisor, but another supervisor process
+must not mutate the same root.
 
 To move a goal, copy its \`goal.json\` into a valid \`g_<id>/\` directory on the
 other instance and start it there. \`current.json\`, \`journal.jsonl\`, and
@@ -75,22 +98,15 @@ const stateFields = new Set([
   "wait",
   "terminal",
   "observationCursor",
-  "externalChange",
 ]);
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
-const waitFields = new Set(["condition", "reviewAt", "goalId", "paneId"]);
+const waitFields = new Set(["condition", "reviewAt", "goalId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
-// Read-only compatibility for checkpoints written by the retired in-process
-// watcher. One legacy focused reread removes it; the shared watcher owns all
-// new revisions.
-const externalChangeFields = new Set(["source", "subject", "revision", "observedAt", "workerSequence"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
 const terminalStates = new Set(["accepted", "stopped"]);
-// `recover` was written by an earlier v1 implementation. It remains readable
-// for checkpoint compatibility, but current review tools never produce it.
-const decisions = new Set(["leave", "steer", "ask_human", "recover", "accept", "stop"]);
+const decisions = new Set(["leave", "steer", "ask_human", "accept", "stop"]);
 const writes = new Map();
 
 function serializeWrite(key, operation) {
@@ -238,7 +254,6 @@ export function validateGoalState(state) {
     if (state.wait.goalId !== undefined && !goalIdPattern.test(state.wait.goalId)) {
       throw new Error("goal wait goalId must be a goal ID");
     }
-    if (state.wait.paneId !== undefined) requiredString(state.wait.paneId, "goal wait paneId");
     if (!Number.isFinite(Date.parse(state.wait.reviewAt))) {
       throw new Error("goal wait reviewAt must be an ISO timestamp");
     }
@@ -259,24 +274,6 @@ export function validateGoalState(state) {
       throw new Error("goal state observationCursor must be an object");
     }
     requiredString(state.observationCursor.kind, "observationCursor.kind");
-  }
-  if (state.externalChange !== undefined) {
-    if (!state.externalChange || typeof state.externalChange !== "object" || Array.isArray(state.externalChange)) {
-      throw new Error("goal externalChange must be an object");
-    }
-    onlyFields(state.externalChange, externalChangeFields, "externalChange");
-    for (const field of ["source", "subject", "revision", "observedAt"]) {
-      requiredString(state.externalChange[field], `externalChange.${field}`);
-    }
-    if (!Number.isFinite(Date.parse(state.externalChange.observedAt))) {
-      throw new Error("externalChange.observedAt must be an ISO timestamp");
-    }
-    if (
-      state.externalChange.workerSequence !== undefined
-      && (!Number.isInteger(state.externalChange.workerSequence) || state.externalChange.workerSequence < 0)
-    ) {
-      throw new Error("externalChange.workerSequence must be a non-negative integer");
-    }
   }
   return state;
 }
@@ -357,6 +354,38 @@ export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
   await mkdir(paths.directory, { recursive: true, mode: 0o700 });
   await atomicWrite(paths.contract, jsonContent(contract, MAX_CONTRACT_BYTES, "goal contract"));
   return contract;
+}
+
+export async function discardUnstartedGoal(goalId, root = defaultGoalsRoot()) {
+  const paths = goalPaths(goalId, root);
+  const discardedDirectory = join(root, `.discarding-${goalId}-${randomUUID()}`);
+  await rename(paths.directory, discardedDirectory);
+  let contract;
+  try {
+    const entries = (await readdir(discardedDirectory)).sort();
+    if (entries.length !== 1 || entries[0] !== "goal.json") {
+      throw new Error(`goal ${goalId} is not an unstarted contract with no local state`);
+    }
+    contract = validateGoalContract(JSON.parse(await readFile(join(discardedDirectory, "goal.json"), "utf8")));
+  } catch (error) {
+    try {
+      await rename(discardedDirectory, paths.directory);
+    } catch (restoreError) {
+      throw new Error(
+        `could not validate discarded goal ${goalId} and could not restore its directory: ${restoreError.message}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  let cleanupError;
+  try {
+    await unlink(join(discardedDirectory, "goal.json"));
+    await rmdir(discardedDirectory);
+  } catch (error) {
+    cleanupError = error;
+  }
+  return { goalId, contract, cleanupError };
 }
 
 export async function loadGoalContract(goalId, root = defaultGoalsRoot()) {

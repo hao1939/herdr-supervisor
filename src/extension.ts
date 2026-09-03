@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
 import { HerdrClient } from "./herdr-client.ts";
 import {
+  discardInstalledGoal,
   loadSupervisorGoals,
   installSupervisorGoal,
   recordDecision,
@@ -74,6 +75,7 @@ const Evidence = Optional(EvidenceItems);
 const client = new HerdrClient();
 const supervisorTools = [
   "supervisor_start_goal",
+  "supervisor_discard_goal",
   "supervisor_update_goal",
   "supervisor_status",
   "supervisor_reconsider",
@@ -141,9 +143,16 @@ function workerNameForGoal(goalId: string) {
   return `goal-${suffix}`;
 }
 
-function legacyWorkerNameForGoal(goalId: string) {
-  const suffix = goalId.slice(2).replaceAll("-", "").toLowerCase();
-  return `goal-${suffix.slice(0, 27)}`;
+function unboundWorkersForGoal(snapshot, workspaceId, activeGoals, goalId) {
+  const workerName = workerNameForGoal(goalId);
+  return snapshot.agents?.filter((agent) => (
+    agent.name === workerName
+    && agent.workspace_id === workspaceId
+    && !activeGoals.some((binding) => (
+      binding.paneId === agent.pane_id
+      || sameAgentSession(binding.agentSession, agent.agent_session)
+    ))
+  )) || [];
 }
 
 function exactSessionAgent(snapshot, session) {
@@ -288,9 +297,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       lastDecision: state.lastDecision,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
-      legacyExternalChange: state.externalChange
-        ? structuredClone(state.externalChange)
-        : undefined,
     });
   }
 
@@ -311,7 +317,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     progress,
     evidence,
     reviewAt,
-    resolvedLegacyExternalChange = false,
   ) {
     const result = await recordDecision(binding, "steer", {
       progress,
@@ -319,7 +324,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
-      resolvedLegacyExternalChange,
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
@@ -655,22 +659,19 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   async function wakeDependentWaiters(peer, reason: string) {
     const goals = await activeBindings();
-    const reference = typeof peer === "string"
-      ? goals.active.find((binding) => binding.paneId === peer) || { paneId: peer }
-      : peer;
-    for (const binding of dependentBindings(goals.active, reference)) {
+    for (const binding of dependentBindings(goals.active, peer)) {
       if (runtimeFor(binding).awaitingHuman) continue;
       handleSignal(binding.paneId, {
         force: true,
         reason,
-        key: `peer:${reference.goalId || reference.paneId}:${++workerEventSequence}`,
+        key: `peer:${peer.goalId}:${++workerEventSequence}`,
       });
     }
   }
 
   function wakeTerminalDependents(peer, reason: string) {
     void wakeDependentWaiters(peer, reason).catch((error) => {
-      reportBackgroundFailure(`Could not wake goals waiting on ${peer.goalId || peer.paneId}`, error);
+      reportBackgroundFailure(`Could not wake goals waiting on ${peer.goalId}`, error);
     });
   }
 
@@ -842,7 +843,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const waitingUntil = Date.parse(binding.wait?.reviewAt || "");
     if (
       !signal?.force
-      && !binding.legacyExternalChange
       && Number.isFinite(waitingUntil)
       && waitingUntil > Date.now()
       && (agent?.agent_status === "idle" || agent?.agent_status === "done")
@@ -1001,13 +1001,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const goals = await activeBindings();
 
     let installed;
-    let continuingInstalledGoal = false;
     if (requestedGoalId) {
       const existing = goals.active.find((binding) => binding.goalId === requestedGoalId);
       if (existing) return { binding: existing, existing: true, warning: "" };
       installed = goals.unstarted.find((record) => record.goalId === requestedGoalId);
       if (!installed) throw new Error(`${requestedGoalId} is not an active or unstarted goal.`);
-      continuingInstalledGoal = true;
     } else {
       const objective = typeof params.goal === "string" ? params.goal.trim() : "";
       const acceptance = (params.acceptance || []).map((item) => item.trim()).filter(Boolean);
@@ -1024,7 +1022,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       }, candidate));
       if (existing) return { binding: existing, existing: true, warning: "" };
       installed = goals.unstarted.find((record) => sameContractFields(record.contract, candidate));
-      continuingInstalledGoal = Boolean(installed);
       if (!installed) {
         installed = await installSupervisorGoal(candidate);
         goalCache?.unstarted.push(installed);
@@ -1033,7 +1030,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
     const goalId = installed.goalId;
     const workerName = workerNameForGoal(goalId);
-    const legacyWorkerName = legacyWorkerNameForGoal(goalId);
     let paneId = pendingStarts.get(goalId);
     const retryingPendingStart = Boolean(paneId);
     if (!paneId) {
@@ -1043,34 +1039,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       const snapshot = await client.snapshot();
       const supervisor = findPane(snapshot, supervisorPane);
       if (!supervisor) throw new Error(`The supervisor pane ${supervisorPane} is not present in Herdr.`);
-      const recognizedNames = new Set([workerName]);
-      if (continuingInstalledGoal) recognizedNames.add(legacyWorkerName);
-      const pendingAgents = snapshot.agents?.filter((agent) => (
-        recognizedNames.has(agent.name)
-        && agent.workspace_id === supervisor.workspace_id
-        && !goals.active.some((binding) => (
-          binding.paneId === agent.pane_id
-          || sameAgentSession(binding.agentSession, agent.agent_session)
-        ))
-      )) || [];
+      const pendingAgents = unboundWorkersForGoal(snapshot, supervisor.workspace_id, goals.active, goalId);
       if (pendingAgents.length > 1) {
         throw new Error(`Multiple initialized workers could belong to installed goal ${goalId}; choose the correct worker before retrying.`);
       }
       const pendingAgent = pendingAgents[0];
-      if (pendingAgent?.name === legacyWorkerName) {
-        const recorded = await loadSupervisorGoals();
-        const legacyNameConflict = [
-          ...recorded.active,
-          ...recorded.unstarted,
-          ...recorded.completed,
-        ].some((record) => (
-          record.goalId !== goalId
-          && legacyWorkerNameForGoal(record.goalId) === pendingAgent.name
-        ));
-        if (legacyNameConflict) {
-          throw new Error(`The legacy worker name for installed goal ${goalId} is ambiguous; choose the correct worker before retrying.`);
-        }
-      }
       paneId = pendingAgent?.pane_id;
 
       if (!paneId && params.placement.mode === "related") {
@@ -1212,6 +1185,57 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         return text(`Started and supervised goal ${result.binding.goalId} in Codex worker ${result.binding.paneId}.${result.warning}`);
       } catch (error) {
         return text(`Could not start the supervised goal: ${error.message}`, true);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "supervisor_discard_goal",
+    label: "Discard an unstarted goal",
+    description: "Permanently remove one saved goal contract that has never started on this instance. Use only after the human explicitly asks to discard that exact goal. A global-review finding or apparent duplication is not authorization. Active and completed goals, audit history, and directories containing any local state fail closed.",
+    parameters: Type.Object({
+      goal_id: Type.String({ minLength: 1, description: "Exact unstarted goal ID explicitly selected by the human." }),
+    }),
+    executionMode: "sequential",
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      if (reviewTurn.isBusy() || activeGlobalReview) {
+        return text("Finish the current supervision review before discarding a saved goal.", true);
+      }
+      const goalId = params.goal_id.trim();
+      if (mode() !== "live") {
+        return text(`${mode()} mode: would discard unstarted goal ${goalId}, but no contract was removed.`);
+      }
+      try {
+        if (pendingStarts.has(goalId)) {
+          throw new Error(`goal ${goalId} already has a worker bootstrap in progress`);
+        }
+        const supervisorPaneId = process.env.HERDR_PANE_ID;
+        if (supervisorPaneId) {
+          const [snapshot, goals] = await Promise.all([client.snapshot(), activeBindings()]);
+          const supervisor = findPane(snapshot, supervisorPaneId);
+          if (!supervisor) throw new Error(`the supervisor pane ${supervisorPaneId} is not present in Herdr`);
+          if (unboundWorkersForGoal(snapshot, supervisor.workspace_id, goals.active, goalId).length) {
+            throw new Error(`goal ${goalId} already has an initialized worker; retry the same goal instead of discarding it`);
+          }
+        }
+        const result = await discardInstalledGoal(goalId);
+        goalCache = undefined;
+        let refreshError;
+        try {
+          await refreshStatus(ctx);
+        } catch (error) {
+          refreshError = error;
+        }
+        const cleanupWarning = result.cleanupError
+          ? ` The goal is no longer installed, but its hidden temporary cleanup failed: ${result.cleanupError.message}.`
+          : "";
+        const refreshWarning = refreshError
+          ? ` The goal was discarded, but the supervisor status could not refresh: ${refreshError.message}.`
+          : "";
+        return text(`Discarded unstarted goal ${goalId}: ${result.contract.objective}.${cleanupWarning}${refreshWarning}`);
+      } catch (error) {
+        goalCache = undefined;
+        return text(`Could not discard ${goalId}: ${error.message}`, true);
       }
     },
   });
@@ -1557,7 +1581,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       }
       if (
         waitingFor
-        && !binding.wait?.paneId
+        && !waitingOnGoalId
         && latestAgent.agent_status !== "working"
         && Number.isFinite(previousReviewAt)
         && previousReviewAt <= Date.now()
@@ -1591,7 +1615,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           wait: waitingFor ? {
             condition: waitingFor,
             reviewAt,
-            ...(effectiveWaitingOnPane ? { paneId: effectiveWaitingOnPane, goalId: waitingOnGoalId } : {}),
+            ...(waitingOnGoalId ? { goalId: waitingOnGoalId } : {}),
           } : undefined,
           reviewAt: waitingFor ? undefined : params.review_at?.trim(),
           evidence: params.evidence || binding.evidence,
@@ -1714,13 +1738,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         }
         let continuedBinding = binding;
         let resumed = false;
-        const legacyChange = binding.legacyExternalChange;
-        const instruction = legacyChange
-          ? [
-              `First reread current provider authority for ${legacyChange.source} ${legacyChange.subject}; it changed before the metadata watcher upgrade.`,
-              params.message.trim(),
-            ].join("\n\n")
-          : params.message.trim();
+        const instruction = params.message.trim();
         if (canResumeNow) {
           const request = recoveryRequest(binding, liveSnapshot);
           if (relocated) request.name = workerNameForGoal(binding.goalId);
@@ -1810,7 +1828,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             `The worker was steered to continue: ${params.message.trim()}`,
             params.evidence || continuedBinding.evidence,
             reviewAt,
-            Boolean(continuedBinding.legacyExternalChange),
           );
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed

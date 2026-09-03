@@ -90,10 +90,7 @@ export function nextReviewDelay(workers, now = new Date()) {
 export function dependentBindings(workers, peer) {
   return workers.filter((worker) => (
     worker.goalId !== peer.goalId
-    && (
-      (peer.goalId && worker.wait?.goalId === peer.goalId)
-      || (!worker.wait?.goalId && worker.wait?.paneId === peer.paneId)
-    )
+    && worker.wait?.goalId === peer.goalId
   ));
 }
 
@@ -111,15 +108,6 @@ export function shouldWake(binding, agent, pane) {
   const mismatch = identityMismatch(binding, agent, pane);
   if (mismatch) return { wake: true, reason: mismatch, sequence: undefined, key: `identity:${mismatch}` };
   const sequence = Number(agent.state_change_seq || 0);
-  if (binding.legacyExternalChange) {
-    const change = binding.legacyExternalChange;
-    return {
-      wake: true,
-      reason: `${change.source} ${change.subject} changed before the metadata watcher upgrade; have this worker reread current provider authority`,
-      sequence,
-      key: `legacy-external:${change.source}:${change.subject}:${change.revision}:${sequence}`,
-    };
-  }
   if (sequence > 0 && sequence <= Number(binding.lastReviewStateChangeSeq || 0)) {
     return { wake: false, reason: "transition already reviewed", sequence, key: `state:${sequence}` };
   }

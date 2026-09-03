@@ -31,17 +31,15 @@ export type GoalLoadError = {
 
 export type ReviewDecision = "leave" | "steer" | "ask_human" | "accept";
 export type RecordedDecision = ReviewDecision | "stop";
-export type LegacyRecordedDecision = RecordedDecision | "recover";
 
 export type GoalWait = {
   condition: string;
   reviewAt: string;
   goalId?: string;
-  paneId?: string;
 };
 
 export type LastDecision = {
-  decision: LegacyRecordedDecision;
+  decision: RecordedDecision;
   at: string;
   action: string;
 };
@@ -49,13 +47,6 @@ export type LastDecision = {
 export type ObservationCursor = {
   kind: string;
   [field: string]: unknown;
-};
-
-export type LegacyExternalChange = {
-  source: string;
-  subject: string;
-  revision: string;
-  observedAt: string;
 };
 
 /** Durable goal data loaded from goal.json and current.json. */
@@ -71,7 +62,6 @@ export type GoalBinding = WorkerIdentity & {
   lastDecision?: LastDecision;
   wait?: GoalWait;
   observationCursor?: ObservationCursor;
-  legacyExternalChange?: LegacyExternalChange;
   updatedAt: string;
 };
 

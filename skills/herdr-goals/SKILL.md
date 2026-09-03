@@ -89,6 +89,12 @@ worker; these are local execution inputs, not goal context. Do not relay a
 half-formed draft. If there is no unique supervisor, report that boundary
 instead of guessing a pane.
 
+When the human explicitly asks to discard an exact saved goal that has never
+started, relay its goal ID to the supervisor's discard action. Never infer this
+authority from age, duplication, a global-review finding, or an absent worker.
+The action must fail closed for active or completed goals and for any goal
+directory containing local state or unknown files.
+
 Reconsider only goals materially affected by the new fact. Do not wake an
 entire portfolio merely to refresh its display.
 
@@ -108,6 +114,9 @@ terminal with state `stopped` and that the worker was not stopped. Report:
   is only scheduled or has produced a fresh review, or supervision reached the
   terminal `stopped` state; and
 - any terminal or stopped pane that is now a manual cleanup candidate.
+
+After discarding an explicitly selected unstarted goal, verify that its exact
+ID is no longer listed while unrelated goals and the shared store guide remain.
 
 Do not claim success from a supervisor acknowledgement alone. Do not close a
 pane automatically unless the runtime can atomically require the expected

@@ -114,8 +114,8 @@ test("bindings without a deadline receive one recovery review", () => {
 
 test("a durable peer identity selects only waits linked to that exact goal", () => {
   const workers = [
-    { goalId: "g_waiting", paneId: "w1:p2", wait: { goalId: "g_peer", paneId: "w1:p7" } },
-    { goalId: "g_other", paneId: "w1:p3", wait: { goalId: "g_else", paneId: "w1:p8" } },
+    { goalId: "g_waiting", paneId: "w1:p2", wait: { goalId: "g_peer" } },
+    { goalId: "g_other", paneId: "w1:p3", wait: { goalId: "g_else" } },
     { goalId: "g_external", paneId: "w1:p4", wait: { condition: "an external approval" } },
     { goalId: "g_peer", paneId: "w1:p9" },
   ];
@@ -138,26 +138,6 @@ test("working is quiet while settled and blocked states wake review", () => {
   assert.equal(shouldWake(current, agent({ agent_status: "blocked", state_change_seq: 12 }), pane).wake, true);
   current.lastReviewStateChangeSeq = 12;
   assert.equal(shouldWake(current, agent({ agent_status: "blocked", state_change_seq: 12 }), pane).wake, false);
-});
-
-test("an unresolved legacy provider change wakes one ordinary focused review", () => {
-  const current = binding({
-    legacyExternalChange: {
-      source: "ado-build",
-      subject: "org/project/101",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    },
-  });
-  const pane = findPane(snapshot(), "w1:p2");
-
-  const result = shouldWake(current, agent(), pane);
-
-  assert.equal(result.wake, true);
-  assert.match(result.reason, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
-  assert.match(result.key, /legacy-external:ado-build:org\/project\/101:legacy-revision:10/);
-  const changed = shouldWake(current, agent({ state_change_seq: 11 }), pane);
-  assert.notEqual(changed.key, result.key);
 });
 
 test("a restored idle worker with no transition sequence is reviewed once", () => {

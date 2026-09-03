@@ -30,10 +30,6 @@ function goalWorkerName(goalId: string) {
   return `goal-${createHash("sha256").update(goalId).digest("hex").slice(0, 27)}`;
 }
 
-function legacyGoalWorkerName(goalId: string) {
-  return `goal-${goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
-}
-
 function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const commands = new Map();
   const tools = new Map();
@@ -263,6 +259,67 @@ test("status exposes stored goals without filesystem tools or live worker state"
   });
   assert.equal(ambiguous.isError, true);
   assert.match(ambiguous.content[0].text, /either pane_id or goal_id/);
+});
+
+test("discard removes only the exact unstarted goal authorized by the human", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-discard-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Discard this obsolete saved goal.",
+    acceptance: ["The obsolete contract is gone."],
+  }, root, { goalId: "g_obsolete" });
+  await installSupervisorGoal({
+    objective: "Keep this unrelated saved goal.",
+    acceptance: ["The contract remains available."],
+  }, root, { goalId: "g_keep" });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_discard_goal").execute(
+    "discard",
+    { goal_id: "g_obsolete" },
+    undefined,
+    undefined,
+    { ui: { setStatus() {} } },
+  );
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /Discarded unstarted goal g_obsolete/);
+  const goals = await loadSupervisorGoals(root);
+  assert.deepEqual(goals.unstarted.map((goal) => goal.goalId), ["g_keep"]);
+});
+
+test("discard success remains truthful when status refresh fails", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-discard-refresh-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  await installSupervisorGoal({
+    objective: "Discard despite a stale display.",
+    acceptance: ["The saved contract is gone."],
+  }, root, { goalId: "g_refresh" });
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_discard_goal").execute(
+    "discard",
+    { goal_id: "g_refresh" },
+    undefined,
+    undefined,
+    { ui: { setStatus() { throw new Error("display unavailable"); } } },
+  );
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /goal was discarded, but the supervisor status could not refresh/);
+  assert.deepEqual((await loadSupervisorGoals(root)).unstarted, []);
 });
 
 test("pull request traceability never publishes a path-backed session locator", () => {
@@ -665,88 +722,6 @@ test("an unstarted saved goal starts by exact ID without restating its contract"
   assert.deepEqual(goals.active[0].acceptance, ["The exact saved goal ID owns the worker."]);
   assert.equal(goals.unstarted.length, 0);
   assert.equal(goals.completed.length, 0);
-  pi.events.get("session_shutdown")();
-});
-
-test("a new goal never adopts a legacy-named worker without an existing contract", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-new-goal-legacy-"));
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousPane = process.env.HERDR_PANE_ID;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  process.env.HERDR_PANE_ID = "w1:p1";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-    else process.env.HERDR_PANE_ID = previousPane;
-  });
-
-  const foreign = {
-    pane_id: "w1:p9",
-    terminal_id: "term_foreign",
-    agent_status: "idle",
-    interactive_ready: true,
-    workspace_id: "w1",
-    tab_id: "w1:t9",
-    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_foreign" },
-  };
-  const createdAgent = {
-    pane_id: "w1:p3",
-    terminal_id: "term_created",
-    agent_status: "idle",
-    interactive_ready: true,
-    workspace_id: "w1",
-    tab_id: "w1:t3",
-    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_created" },
-  };
-  let created = false;
-  let starts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
-    const [installed] = (await loadSupervisorGoals(root)).unstarted;
-    const foreignAgent = {
-      ...foreign,
-      name: installed ? legacyGoalWorkerName(installed.goalId) : "foreign-worker",
-    };
-    return {
-      agents: [foreignAgent, ...(created ? [{ ...createdAgent, name: installed ? goalWorkerName(installed.goalId) : "created-worker" }] : [])],
-      panes: [
-        { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
-        { pane_id: foreign.pane_id, terminal_id: foreign.terminal_id, workspace_id: "w1", tab_id: foreign.tab_id },
-        ...(created ? [{ pane_id: createdAgent.pane_id, terminal_id: createdAgent.terminal_id, workspace_id: "w1", tab_id: createdAgent.tab_id }] : []),
-      ],
-    };
-  });
-  t.mock.method(HerdrClient.prototype, "createTab", async () => {
-    created = true;
-    return { root_pane: { pane_id: createdAgent.pane_id } };
-  });
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
-    starts += 1;
-    assert.equal(request.paneId, createdAgent.pane_id);
-    return createdAgent;
-  });
-  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async (paneId) => {
-    assert.equal(paneId, createdAgent.pane_id);
-    return createdAgent;
-  });
-  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  const result = await pi.tools.get("supervisor_start_goal").execute("new", {
-    goal: "Complete one new diagnostic.",
-    acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new" },
-    working_directory: "/app",
-  }, undefined, undefined, { ui: { setStatus() {} } });
-
-  assert.equal(result.isError, false);
-  assert.equal(created, true);
-  assert.equal(starts, 1);
-  const goals = await loadSupervisorGoals(root);
-  assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value), ["session_created"]);
   pi.events.get("session_shutdown")();
 });
 
@@ -1766,12 +1741,22 @@ test("a missing native session cannot leave assigned work running unsupervised",
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /goal was not delivered or bound/);
   assert.equal(prompts.length, 0);
-  assert.equal((await loadSupervisorGoals(root)).active.length, 0);
-  assert.equal((await loadSupervisorGoals(root)).unstarted.length, 1);
+  const stored = await loadSupervisorGoals(root);
+  assert.equal(stored.active.length, 0);
+  assert.equal(stored.unstarted.length, 1);
+  const discard = await pi.tools.get("supervisor_discard_goal").execute(
+    "discard-pending",
+    { goal_id: stored.unstarted[0].goalId },
+    undefined,
+    undefined,
+    { ui: { setStatus() {} } },
+  );
+  assert.equal(discard.isError, true);
+  assert.match(discard.content[0].text, /worker bootstrap in progress/);
   pi.events.get("session_shutdown")();
 });
 
-test("retry reuses a pending initialized pane instead of creating another worker", async (t) => {
+test("restart reuses a pending initialized pane instead of creating another worker", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-retry-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
@@ -1828,86 +1813,8 @@ test("retry reuses a pending initialized pane instead of creating another worker
   t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, prompt) => { prompts.push(prompt); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  const pi = fakePi();
-  herdrSupervisor(pi);
   const request = {
     goal: "Complete one bounded diagnostic.",
-    acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new" },
-    working_directory: "/app",
-  };
-  const first = await pi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
-  const second = await pi.tools.get("supervisor_start_goal").execute("second", request, undefined, undefined, { ui: { setStatus() {} } });
-
-  assert.equal(first.isError, true);
-  assert.equal(second.isError, false);
-  assert.equal(creates, 1);
-  assert.equal(starts, 1);
-  assert.equal(prompts.length, 2);
-  assert.match(prompts[0], /Initialize this worker session only/);
-  assert.match(prompts[1], /^\/goal /);
-  assert.match(prompts[1], /goal\.json/);
-  assert.match(prompts[1], /Do not sleep, poll, or repeatedly reread unchanged state/);
-  assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
-  pi.events.get("session_shutdown")();
-});
-
-test("restart reuses a legacy-named worker for an installed goal instead of creating a duplicate", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-start-restart-"));
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousPane = process.env.HERDR_PANE_ID;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  process.env.HERDR_PANE_ID = "w1:p1";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-    else process.env.HERDR_PANE_ID = previousPane;
-  });
-
-  let creates = 0;
-  let starts = 0;
-  let workerName;
-  let restarted = false;
-  const managed = {
-    pane_id: "w1:p3",
-    terminal_id: "term_managed",
-    agent_status: "idle",
-    interactive_ready: true,
-    tab_id: "w1:t2",
-    workspace_id: "w1",
-  };
-  const identified = {
-    ...managed,
-    name: undefined,
-    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_managed" },
-  };
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: restarted ? [{ ...identified, name: workerName }] : [managed],
-    panes: [
-      { pane_id: "w1:p1", terminal_id: "term_supervisor", tab_id: "w1:t1", workspace_id: "w1" },
-      { pane_id: managed.pane_id, terminal_id: managed.terminal_id, tab_id: managed.tab_id, workspace_id: "w1" },
-    ],
-  }));
-  t.mock.method(HerdrClient.prototype, "createTab", async () => {
-    creates += 1;
-    return { root_pane: { pane_id: managed.pane_id } };
-  });
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
-    starts += 1;
-    workerName = request.name;
-    return managed;
-  });
-  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async () => {
-    if (!restarted) throw new Error("native session unavailable");
-    return { ...identified, name: workerName };
-  });
-  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const request = {
-    goal: "Complete one restart-safe diagnostic.",
     acceptance: ["The diagnostic is verified."],
     placement: { mode: "new" },
     working_directory: "/app",
@@ -1916,195 +1823,32 @@ test("restart reuses a legacy-named worker for an installed goal instead of crea
   herdrSupervisor(firstPi);
   const first = await firstPi.tools.get("supervisor_start_goal").execute("first", request, undefined, undefined, { ui: { setStatus() {} } });
   firstPi.events.get("session_shutdown")();
-  const [installed] = (await loadSupervisorGoals(root)).unstarted;
-  workerName = `goal-${installed.goalId.slice(2).replaceAll("-", "").toLowerCase().slice(0, 27)}`;
-  restarted = true;
+  const goalId = (await loadSupervisorGoals(root)).unstarted[0].goalId;
+  sessionReady = true;
 
   const secondPi = fakePi();
   herdrSupervisor(secondPi);
+  const discard = await secondPi.tools.get("supervisor_discard_goal").execute(
+    "discard-restored",
+    { goal_id: goalId },
+    undefined,
+    undefined,
+    { ui: { setStatus() {} } },
+  );
   const second = await secondPi.tools.get("supervisor_start_goal").execute("second", request, undefined, undefined, { ui: { setStatus() {} } });
 
   assert.equal(first.isError, true);
+  assert.equal(discard.isError, true);
+  assert.match(discard.content[0].text, /already has an initialized worker/);
   assert.equal(second.isError, false);
   assert.equal(creates, 1);
   assert.equal(starts, 1);
-  assert.equal((await loadSupervisorGoals(root)).active.length, 1);
-  assert.equal((await loadSupervisorGoals(root)).unstarted.length, 0);
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /^\/goal /);
+  assert.match(prompts[0], /goal\.json/);
+  assert.match(prompts[0], /Do not sleep, poll, or repeatedly reread unchanged state/);
+  assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   secondPi.events.get("session_shutdown")();
-});
-
-test("restart never adopts a legacy-named session already owned by another goal", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-owned-legacy-"));
-  const ownedSession = { source: "herdr:codex", agent: "codex", kind: "id", value: "session_owned" };
-  await registerSupervisedGoal({
-    paneId: "w1:p2",
-    terminalId: "term_owned_old",
-    agentSession: ownedSession,
-  }, {
-    objective: "Keep the existing release goal moving.",
-    acceptance: ["The release goal is verified."],
-  }, root, { goalId: "g_owner" });
-  await installSupervisorGoal({
-    objective: "Start the independent diagnostic.",
-    acceptance: ["The diagnostic is verified."],
-  }, root, { goalId: "g_unstarted" });
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousPane = process.env.HERDR_PANE_ID;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  process.env.HERDR_PANE_ID = "w1:p1";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-    else process.env.HERDR_PANE_ID = previousPane;
-  });
-
-  const ownedAgent = {
-    pane_id: "w1:p9",
-    terminal_id: "term_owned_new",
-    name: "goal-unstarted",
-    agent_status: "idle",
-    interactive_ready: true,
-    workspace_id: "w1",
-    tab_id: "w1:t9",
-    agent_session: ownedSession,
-  };
-  const newAgent = {
-    pane_id: "w1:p3",
-    terminal_id: "term_new",
-    name: goalWorkerName("g_unstarted"),
-    agent_status: "idle",
-    interactive_ready: true,
-    workspace_id: "w1",
-    tab_id: "w1:t3",
-    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_new" },
-  };
-  let created = false;
-  let starts = 0;
-  const prompts = [];
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: created ? [ownedAgent, newAgent] : [ownedAgent],
-    panes: [
-      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
-      { pane_id: ownedAgent.pane_id, terminal_id: ownedAgent.terminal_id, workspace_id: "w1", tab_id: ownedAgent.tab_id },
-      ...(created ? [{ pane_id: newAgent.pane_id, terminal_id: newAgent.terminal_id, workspace_id: "w1", tab_id: newAgent.tab_id }] : []),
-    ],
-  }));
-  t.mock.method(HerdrClient.prototype, "createTab", async () => {
-    created = true;
-    return { root_pane: { pane_id: newAgent.pane_id } };
-  });
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async (request) => {
-    starts += 1;
-    assert.equal(request.paneId, newAgent.pane_id);
-    return newAgent;
-  });
-  t.mock.method(HerdrClient.prototype, "waitForAgentSession", async (paneId) => {
-    assert.equal(paneId, newAgent.pane_id);
-    return newAgent;
-  });
-  t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, prompt) => { prompts.push({ paneId, prompt }); });
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
-    goal: "Start the independent diagnostic.",
-    acceptance: ["The diagnostic is verified."],
-    placement: { mode: "new" },
-    working_directory: "/app",
-  }, undefined, undefined, { ui: { setStatus() {} } });
-
-  assert.equal(result.isError, false);
-  assert.equal(starts, 1);
-  assert.equal(prompts.some(({ paneId }) => paneId === ownedAgent.pane_id), false);
-  const goals = await loadSupervisorGoals(root);
-  assert.deepEqual(goals.active.map(({ agentSession }) => agentSession.value).sort(), ["session_new", "session_owned"]);
-  assert.equal(goals.unstarted.length, 0);
-  pi.events.get("session_shutdown")();
-});
-
-test("restart never infers legacy ownership from a completed goal name collision", async (t) => {
-  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-completed-legacy-collision-"));
-  const completedGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_completed";
-  const targetGoalId = "g_aaaaaaaaaaaaaaaaaaaaaaaaaaa_target";
-  const completed = await registerSupervisedGoal({
-    paneId: "w1:p9",
-    terminalId: "term_completed",
-    agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
-  }, {
-    objective: "Complete the earlier diagnostic.",
-    acceptance: ["The earlier diagnostic is verified."],
-  }, root, { goalId: completedGoalId });
-  await recordDecision(completed, "accept", {
-    progress: "The earlier diagnostic is verified.",
-    action: "Accepted the earlier goal.",
-    evidence: ["The expected result was observed."],
-    terminal: { state: "accepted", summary: "The expected result was observed." },
-  }, root);
-  await installSupervisorGoal({
-    objective: "Start the later diagnostic.",
-    acceptance: ["The later diagnostic is verified."],
-  }, root, { goalId: targetGoalId });
-
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousPane = process.env.HERDR_PANE_ID;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  process.env.HERDR_PANE_ID = "w1:p1";
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-    if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
-    else process.env.HERDR_PANE_ID = previousPane;
-  });
-
-  const completedAgent = {
-    pane_id: "w1:p9",
-    terminal_id: "term_completed",
-    name: legacyGoalWorkerName(targetGoalId),
-    agent_status: "idle",
-    interactive_ready: true,
-    workspace_id: "w1",
-    tab_id: "w1:t9",
-    agent_session: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_completed" },
-  };
-  let creates = 0;
-  let starts = 0;
-  let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
-    agents: [completedAgent],
-    panes: [
-      { pane_id: "w1:p1", terminal_id: "term_supervisor", workspace_id: "w1", tab_id: "w1:t1" },
-      { pane_id: completedAgent.pane_id, terminal_id: completedAgent.terminal_id, workspace_id: "w1", tab_id: completedAgent.tab_id },
-    ],
-  }));
-  t.mock.method(HerdrClient.prototype, "createTab", async () => {
-    creates += 1;
-    return { root_pane: { pane_id: "w1:p3" } };
-  });
-  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { starts += 1; });
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  const result = await pi.tools.get("supervisor_start_goal").execute("start", {
-    goal: "Start the later diagnostic.",
-    acceptance: ["The later diagnostic is verified."],
-    placement: { mode: "new" },
-    working_directory: "/app",
-  }, undefined, undefined, { ui: { setStatus() {} } });
-
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /legacy worker name.*ambiguous/i);
-  assert.equal(creates, 0);
-  assert.equal(starts, 0);
-  assert.equal(prompts, 0);
-  const goals = await loadSupervisorGoals(root);
-  assert.equal(goals.completed.length, 1);
-  assert.equal(goals.unstarted.length, 1);
-  pi.events.get("session_shutdown")();
 });
 
 test("restart refreshes active worker names without treating completed goals as live", async (t) => {
@@ -2747,7 +2491,6 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
   assert.equal(stored.wait.condition, "w1:p7 to report that shared ADO capacity is available");
   assert.equal(stored.wait.goalId, "g_peer");
-  assert.equal(stored.wait.paneId, "w1:p7");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
 });
@@ -2781,7 +2524,6 @@ test("a peer review wakes only the dependent wait selected by the model", async 
     action: "Wait for the peer's capacity decision.",
     wait: {
       condition: "w1:p7 to stop using shared capacity",
-      paneId: peerWorker.paneId,
       goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
@@ -2796,7 +2538,6 @@ test("a peer review wakes only the dependent wait selected by the model", async 
     action: "Wait for the peer's final report.",
     wait: {
       condition: "w1:p7 to publish its final capacity report",
-      paneId: peerWorker.paneId,
       goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
@@ -3259,7 +3000,7 @@ test("a live checkpoint keeps later unchanged working checks quiet", async (t) =
   pi.events.get("session_shutdown")();
 });
 
-test("restart restores a settled wait without a no-change review before its deadline", async (t) => {
+test("restart preserves a peer wait and requires fresh evidence before replacing it with an external wait", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-wait-restart-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
   const sessionFile = join(sessions, "worker.jsonl");
@@ -3279,9 +3020,9 @@ test("restart restores a settled wait without a no-change review before its dead
   }, root, { goalId: "g_wait_restart" });
   const reviewAt = new Date(Date.now() + 1200).toISOString();
   await recordDecision(binding, "leave", {
-    progress: "The service asked us to wait.\nExternal watch target: github-pr owner/repository#16",
-    action: "Wait for the service retry boundary; observe github-pr owner/repository#16 when supervision resumes.",
-    wait: { condition: "the service retry boundary", reviewAt },
+    progress: "A peer owns the next attempt.\nExternal watch target: github-pr owner/repository#16",
+    action: "Wait for the peer to release capacity; observe github-pr owner/repository#16 when supervision resumes.",
+    wait: { condition: "the peer releases capacity", reviewAt, goalId: "g_previous_peer" },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
     evidence: ["The server returned a retry deadline."],
   }, root);
@@ -3328,46 +3069,6 @@ test("restart restores a settled wait without a no-change review before its dead
   });
   assert.equal(staleLeave.isError, true);
   assert.match(staleLeave.content[0].text, /Cannot extend this expired external wait without fresh worker evidence/);
-  pi.events.get("session_shutdown")();
-});
-
-test("restart reviews a legacy provider change before a persisted future wait", async (t) => {
-  const root = await fixture();
-  const [binding] = (await loadSupervisorGoals(root)).active;
-  const reviewAt = new Date(Date.now() + 60_000).toISOString();
-  await recordDecision(binding, "leave", {
-    progress: "The worker was waiting before the watcher upgrade.",
-    action: "Wait for the old provider boundary.",
-    wait: { condition: "the old provider boundary", reviewAt },
-  }, root);
-  await updateGoalState(binding.goalId, (state) => {
-    state.externalChange = {
-      source: "ado-build",
-      subject: "org/project/101",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    };
-    return state;
-  }, root);
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-  });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
-    agent_status: "done",
-    state_change_seq: 3,
-  }));
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-
-  assert.match(pi.messages[0].content, /ado-build org\/project\/101 changed before the metadata watcher upgrade/);
-  assert.doesNotMatch(pi.messages[0].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
 });
 
@@ -3444,104 +3145,6 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
   assert.equal(prompts, 1);
   assert.equal(repeated.isError, true);
   assert.match(repeated.content[0].text, /already applied/);
-  pi.events.get("session_shutdown")();
-});
-
-test("an uncertain steer delivery fails closed until fresh evidence", async (t) => {
-  const root = await fixture();
-  await updateGoalState("g_test", (state) => {
-    state.externalChange = {
-      source: "ado-build",
-      subject: "org/project/101",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    };
-    return state;
-  }, root);
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-  });
-  let prompts = 0;
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Work needs one more proof.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
-    prompts += 1;
-    throw new Error("prompt response timed out");
-  });
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const result = await pi.tools.get("supervisor_steer").execute("steer", {
-    pane_id: worker.paneId,
-    message: "Run the focused proof.",
-  });
-
-  assert.equal(prompts, 1);
-  assert.equal(result.isError, true);
-  assert.match(result.content[0].text, /Could not confirm whether w1:p2 received the instruction/);
-  assert.match(result.content[0].text, /Do not send it again/);
-  const [stored] = (await loadSupervisorGoals(root)).active;
-  assert.equal(stored.lastDecision.decision, "steer");
-  assert.match(stored.lastDecision.action, /First reread current provider authority for ado-build org\/project\/101/);
-  assert.equal(stored.legacyExternalChange?.revision, "legacy-revision");
-  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
-    pane_id: worker.paneId,
-    message: "Run the focused proof.",
-  });
-  assert.equal(prompts, 1);
-  assert.match(repeated.content[0].text, /already applied/);
-  pi.events.get("session_shutdown")();
-});
-
-test("confirmed legacy reread delivery clears the migration marker", async (t) => {
-  const root = await fixture();
-  await updateGoalState("g_test", (state) => {
-    state.externalChange = {
-      source: "ado-build",
-      subject: "org/project/101",
-      revision: "legacy-revision",
-      observedAt: "2026-08-30T05:01:00.000Z",
-    };
-    return state;
-  }, root);
-  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
-    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
-  });
-  const prompts = [];
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
-    read: { text: "The old build state still needs a current reread.", truncated: false },
-  }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-  });
-  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
-
-  const pi = fakePi();
-  herdrSupervisor(pi);
-  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
-  await waitFor(() => pi.messages.length === 1);
-  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
-  const result = await pi.tools.get("supervisor_steer").execute("steer", {
-    pane_id: worker.paneId,
-    message: "Continue the focused proof after the reread.",
-  });
-
-  assert.equal(result.isError, false);
-  assert.equal(prompts.length, 1);
-  assert.match(prompts[0], /First reread current provider authority for ado-build org\/project\/101/);
-  assert.match(prompts[0], /Continue the focused proof after the reread/);
-  assert.equal((await loadSupervisorGoals(root)).active[0].legacyExternalChange, undefined);
   pi.events.get("session_shutdown")();
 });
 
@@ -3998,7 +3601,7 @@ test("a failed post-relocation reload cannot strand a durable dependent wake", a
     evidence: [],
     wait: {
       condition: "the peer goal to finish",
-      paneId: worker.paneId,
+      goalId: "g_test",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
   }, root);
