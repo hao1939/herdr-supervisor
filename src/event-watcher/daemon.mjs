@@ -38,7 +38,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 const statePath = join(stateHome, "external-events.json");
-const releaseOwnership = await acquireFilesystemLock(join(stateHome, "event-watchd.lock"), {
+const releaseOwnership = await acquireFilesystemLock(statePath, {
   label: `event-watchd checkpoint ${statePath}`,
   timeoutMs: 0,
 });
