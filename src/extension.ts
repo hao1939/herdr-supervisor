@@ -2110,7 +2110,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } else {
       restoreOrdinaryTools();
     }
-    return { systemPrompt: supervisorSystemPrompt(event.systemPrompt) };
+    return {
+      systemPrompt: supervisorSystemPrompt(
+        event.systemPrompt,
+        activeGlobalReview ? "global" : reviewTurn.isBusy() ? "focused" : undefined,
+      ),
+    };
   });
 
   async function settleGlobalReview() {

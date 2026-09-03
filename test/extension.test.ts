@@ -1707,7 +1707,7 @@ test("an automatic focused review exposes only focused decision tools", async (t
   assert.equal(reconsider.isError, false);
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 1);
-  pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
+  const start = pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
 
   assert.deepEqual(pi.activeToolSelections.at(-1), [
     "supervisor_status",
@@ -1718,6 +1718,8 @@ test("an automatic focused review exposes only focused decision tools", async (t
     "supervisor_ask_human",
     "supervisor_finish",
   ]);
+  assert.match(start.systemPrompt, /This is an automatic focused review/);
+  assert.match(start.systemPrompt, /Do not attempt ordinary tools/);
   await pi.events.get("agent_settled")();
   assert.equal(pi.activeToolSelections.at(-1).includes("bash"), true);
   pi.events.get("session_shutdown")();
@@ -3856,8 +3858,10 @@ test("a due global review routes explicit reconsideration through ordinary focus
   assert.equal(pi.messages[0].customType, "herdr-supervisor-global-review");
   assert.match(pi.messages[0].content, /"goalId": "g_test"/);
   assert.doesNotMatch(pi.messages[0].content, /journal|native messages|terminal output/);
-  pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
+  const start = pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." });
   assert.deepEqual(pi.activeToolSelections.at(-1), ["supervisor_global_result"]);
+  assert.match(start.systemPrompt, /This is an automatic global review/);
+  assert.match(start.systemPrompt, /Only supervisor_global_result is available/);
 
   const result = await pi.tools.get("supervisor_global_result").execute("global", {
     summary: "The worker state conflicts with its recorded progress.",

@@ -259,6 +259,11 @@ const supervisorPolicy = [
 const globalReviewPolicy =
   "A global supervision review is a compact, low-frequency health check across goals. In that turn, call supervisor_global_result exactly once. Identify relationships and affected existing goals, but never inspect logs, steer workers, create goals, or make focused decisions.";
 
-export function supervisorSystemPrompt(basePrompt: string) {
-  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}`;
+export function supervisorSystemPrompt(basePrompt: string, automaticReview?: "focused" | "global") {
+  const toolAvailability = automaticReview === "global"
+    ? "This is an automatic global review. Only supervisor_global_result is available. Do not attempt ordinary tools or other supervisor tools; guidance about ordinary tools applies only to direct human turns."
+    : automaticReview === "focused"
+      ? "This is an automatic focused review. Only supervisor_status, supervisor_reconsider, supervisor_observe, supervisor_leave, supervisor_steer, supervisor_ask_human, and supervisor_finish are available. Do not attempt ordinary tools; guidance about ordinary tools applies only to direct human turns."
+      : "";
+  return `${basePrompt}\n\n${globalReviewPolicy}\n\n${supervisorPolicy}${toolAvailability ? `\n\n${toolAvailability}` : ""}`;
 }
