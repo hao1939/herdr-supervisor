@@ -2,12 +2,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { acquireFilesystemLock } from "../filesystem-lock.mjs";
 import { adoBuildSource } from "./ado-build.mjs";
 import { adoPullRequestSource } from "./ado-pr.mjs";
 import { ExternalEventWatcher } from "./core.mjs";
 import { githubPullRequestSource } from "./github-pr.mjs";
 import { canonicalActiveGoals, herdrGoalDelivery, herdrSupervisorDiagnostic } from "./herdr.mjs";
+import { acquireWatcherLock } from "./process-lock.mjs";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
@@ -38,10 +38,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 const statePath = join(stateHome, "external-events.json");
-const releaseOwnership = await acquireFilesystemLock(statePath, {
-  label: `event-watchd checkpoint ${statePath}`,
-  timeoutMs: 0,
-});
+const releaseOwnership = await acquireWatcherLock(statePath);
 try {
   const watcher = new ExternalEventWatcher({
     statePath,

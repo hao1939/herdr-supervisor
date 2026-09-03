@@ -12,7 +12,7 @@ import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
 import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
 import { boundedRefreshWindow } from "../src/event-watcher/refresh-window.mjs";
-import { acquireFilesystemLock } from "../src/filesystem-lock.mjs";
+import { acquireWatcherLock } from "../src/event-watcher/process-lock.mjs";
 import { recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 
@@ -43,10 +43,10 @@ async function temporary(t, label) {
 test("one process owns an event watcher checkpoint", async (t) => {
   const root = await temporary(t, "event-watch-process-lock-");
   const lock = join(root, "external-events.json");
-  const lockModule = new URL("../src/filesystem-lock.mjs", import.meta.url).href;
+  const lockModule = new URL("../src/event-watcher/process-lock.mjs", import.meta.url).href;
   const child = spawn(process.execPath, ["--input-type=module", "--eval", `
-    import { acquireFilesystemLock } from ${JSON.stringify(lockModule)};
-    const release = await acquireFilesystemLock(process.argv[1], { timeoutMs: 0 });
+    import { acquireWatcherLock } from ${JSON.stringify(lockModule)};
+    const release = await acquireWatcherLock(process.argv[1]);
     process.once("SIGTERM", async () => { await release(); process.exit(0); });
     process.stdout.write("ready\\n");
     setInterval(() => {}, 1_000);
@@ -56,17 +56,14 @@ test("one process owns an event watcher checkpoint", async (t) => {
   assert.equal(String(ready), "ready\n");
 
   await assert.rejects(
-    acquireFilesystemLock(lock, { label: "event-watchd checkpoint", timeoutMs: 0 }),
-    /event-watchd checkpoint is already owned by another live process/,
+    acquireWatcherLock(lock),
+    /event-watchd checkpoint .* is already owned by another process/,
   );
   child.kill("SIGTERM");
   const [code] = await once(child, "exit");
   assert.equal(code, 0);
 
-  const releaseAgain = await acquireFilesystemLock(lock, {
-    label: "event-watchd checkpoint",
-    timeoutMs: 0,
-  });
+  const releaseAgain = await acquireWatcherLock(lock);
   await releaseAgain();
 });
 
@@ -78,19 +75,19 @@ test("event watcher ownership recovers after its process is gone", async (t) => 
   const expired = new Date(Date.now() - 60_000);
   await utimes(staleLock, expired, expired);
 
-  const release = await acquireFilesystemLock(lock, {
-    label: "event-watchd checkpoint",
-    timeoutMs: 0,
-  });
+  const release = await acquireWatcherLock(lock);
   await release();
 });
 
 test("goal action locks recover after their owning process is gone", async (t) => {
   const root = await temporary(t, "event-watch-stale-action-");
-  const lock = join(root, ".action-locks", "g_stale.lock");
+  const lock = join(root, ".action-locks", "g_stale");
   await mkdir(lock, { recursive: true });
-  const expired = new Date(Date.now() - 60_000);
-  await utimes(lock, expired, expired);
+  await writeFile(join(lock, "owner.json"), `${JSON.stringify({
+    token: "dead-owner",
+    pid: 2_147_483_647,
+    startTime: "missing",
+  })}\n`);
   let ran = false;
   await withGoalActionLock(root, "g_stale", async () => { ran = true; });
   assert.equal(ran, true);

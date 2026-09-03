@@ -259,8 +259,8 @@ requires goal context, notify the worker and let its model decide.
 - `supervision-metadata.mjs`: strict durable goal metadata parsing.
 - `refresh-window.mjs`: disposable bounded refresh rotation.
 - `github-pr.mjs`, `ado-pr.mjs`, `ado-build.mjs`: built-in source adapters.
-- `../filesystem-lock.mjs`: small, mature filesystem-lock wrapper used to
-  prevent two processes from owning the same checkpoint.
+- `process-lock.mjs`: small, mature lease used only to prevent two watcher
+  processes from owning the same checkpoint.
 
 The repository's [current design](../../docs/design.md) remains authoritative
 for the wider supervisor architecture.
