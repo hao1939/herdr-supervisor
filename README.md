@@ -97,10 +97,13 @@ Codex runs sandboxed with its normal approval prompts by default. Set
 for unattended operation, when you have decided the container is an adequate
 security boundary.
 
-> **Security:** full-access mode lets Codex modify every writable path visible
-> in the container, including a bind-mounted host workspace. Mount only the
-> workspace you intend agents to change. Keep API keys in your local environment
-> or a secret store; never commit them to this repository.
+> **Security:** the Pi supervisor has ordinary process and file tools, and
+> full-access mode lets Codex modify every writable path visible in the
+> container, including a bind-mounted host workspace. Mount only the workspace
+> you intend agents to change. Keep API keys in your local environment or a
+> secret store; never commit them to this repository. Use Pi's
+> `--no-builtin-tools` only when you intentionally prefer a restricted
+> supervisor over direct infrastructure operation.
 
 Detaching from the Herdr client does not stop the server, supervisor, or workers.
 Reattach with `docker compose exec herdr herdr`. Compose restarts the service
@@ -145,12 +148,15 @@ Start Pi in a Herdr pane from a stable directory separate from any worker projec
 ```sh
 supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-pi --no-builtin-tools -e "$supervisor_extension" --supervisor-mode live
+pi -e "$supervisor_extension" --supervisor-mode live
 ```
 
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
-supervisor review events without applying decisions. `--no-builtin-tools` ensures
-the supervisor cannot become a second worker.
+supervisor review events without applying decisions. Ordinary Pi tools remain
+available for direct human requests and infrastructure operations; the review
+contract keeps background supervision focused on the exact worker. An operator
+may still pass `--no-builtin-tools` for a deliberately restricted deployment,
+accepting that such a session cannot operate `event-watchd` itself.
 
 ## How it works
 
@@ -204,18 +210,17 @@ supervisor uses the existing goal actions and stable operating guidance to
 decide what to do. A diagnostic never creates a goal or recovery workflow by
 itself.
 
-The container starts the watcher automatically when either provider-scope
-variable is set. For local use, export the same variables and run
-`npm run watch` beside Herdr. Configure only scopes where the supervision
-metadata is written by trusted workers or maintainers.
+Any agent with ordinary shell access can inspect and start the watcher directly
+by passing provider scopes to `npm run watch`. The container can also start it
+automatically when a provider-scope variable is injected at boot; that is an
+optional restart convenience, not a required control path. Configure only
+scopes where supervision metadata is written by trusted workers or maintainers.
 
-The [event-watchd guide](src/event-watcher/README.md) shows how an operator or
-supervisor-assisted human enables it, links goals, verifies delivery, diagnoses
-failure, and disables it. It also defines the small coding contract for adding
-another built-in provider or resource type. The Pi supervisor can explain and
-check the requested scope and metadata shape, but it has no shell or deployment
-authority to change or verify a running service itself. There is no dynamic
-plugin loader.
+The [event-watchd guide](src/event-watcher/README.md) shows how an agent starts,
+inspects, verifies, changes, stops, and extends it. It also defines the small
+coding contract for adding another built-in provider or resource type. The
+agent uses its ordinary environment authority; no watcher-specific management
+tool or dynamic plugin loader is needed.
 
 The goal-store root includes a concise `README.md` explaining its layout,
 authority, lifecycle, safe inspection, and portability. Each goal directory has

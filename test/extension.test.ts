@@ -37,6 +37,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const messages = [];
   const customMessages = [];
   const userMessages = [];
+  const activeToolSelections = [];
   return {
     commands,
     tools,
@@ -44,6 +45,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
     messages,
     customMessages,
     userMessages,
+    activeToolSelections,
     registerFlag() {},
     getFlag(name) {
       if (name === "supervisor-mode") return "live";
@@ -58,7 +60,7 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
       customMessages.push({ message, options });
     },
     sendUserMessage(content, options) { userMessages.push({ content, options }); },
-    setActiveTools() {},
+    setActiveTools(names) { activeToolSelections.push(names); },
   };
 }
 
@@ -1645,12 +1647,31 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
   assert.match(result.systemPrompt, /follow the current worker evidence/);
   assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
-  assert.match(result.systemPrompt, /event-watchd is optional deployment-configured plumbing/);
+  assert.match(result.systemPrompt, /event-watchd is agent-operable infrastructure/);
   assert.match(result.systemPrompt, /HERDR_WATCH_GITHUB_REPOSITORIES takes comma-separated owner\/repository entries/);
   assert.match(result.systemPrompt, /HERDR_WATCH_ADO_REPOSITORIES takes organization\/project\/repository entries/);
   assert.match(result.systemPrompt, /HERDR_WATCH_ADO_DEFINITIONS takes organization\/project\/definition-id entries/);
   assert.match(result.systemPrompt, /Workers link GitHub and ADO PRs through exactly one ## Supervision block/);
-  assert.match(result.systemPrompt, /Do not create a goal for watcher setup/);
+  assert.match(result.systemPrompt, /watcher setup needs no watcher-specific management tool/);
+  pi.events.get("session_shutdown")();
+});
+
+test("the supervisor keeps ordinary agent tools available", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-agent-tools-"));
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => ({ agents: [], panes: [] }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+
+  assert.deepEqual(pi.activeToolSelections, []);
   pi.events.get("session_shutdown")();
 });
 

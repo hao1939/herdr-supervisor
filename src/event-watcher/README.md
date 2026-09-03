@@ -17,33 +17,39 @@ for its goal. Only watcher or delivery failures go to the supervisor.
 
 ## Using event-watchd
 
-`event-watchd` is optional deployment plumbing. There is no subscription UI or
-per-goal registration: configure trusted provider scopes once, then let workers
-identify the resources they create with the durable goal ID they already own.
+`event-watchd` is an agent-operable external observation tool. There is no
+subscription UI or per-goal registration: start it for trusted provider scopes,
+then let workers identify the resources they create with the durable goal ID
+they already own.
 
-### What the supervisor does
+### What an agent does
 
-You can tell the Pi supervisor which GitHub repositories, Azure DevOps (ADO)
-repositories, or ADO pipeline definitions should wake workers. The supervisor
-should:
+You can ask the Pi supervisor or another agent with ordinary shell access to
+watch GitHub repositories, Azure DevOps (ADO) repositories, or ADO pipeline
+definitions. The agent should:
 
 1. help you identify the smallest trusted provider scopes;
-2. explain the exact deployment variables below;
-3. instruct supervised workers to put their current goal ID on new PRs and builds;
-4. use watcher diagnostics to keep affected existing goals moving.
+2. inspect existing watcher processes and avoid starting a duplicate;
+3. start the watcher with the exact scope variables below;
+4. verify the process, provider access, metadata, and worker delivery;
+5. diagnose or stop it with ordinary process tools; and
+6. when needed, extend its source code through the documented adapter contract.
 
-For example, ask: `Set up external watching for GitHub acme/api and ADO
-pipeline acme/platform/42. Tell me exactly what I must configure.` The
-supervisor should return the required scope and credential variables, explain
-the worker metadata, and clearly identify the service recreation as your
-operator step.
+Workers remain unaware of this machinery. They only put their current goal ID
+on new PRs and builds, receive bounded notifications, and reread provider
+authority to decide what to do.
 
-The supervisor does not have shell or deployment tools. It cannot change a
-running container's environment, start the daemon, inspect its process, or
-claim setup succeeded. An operator applies the configuration and restarts the
-service. This is an intentional boundary, not another goal for a worker.
+For example, ask: `Watch GitHub acme/api and ADO pipeline
+acme/platform/42 for my supervised goals. Set it up and verify it.` An agent
+with sufficient access should inspect, act, and return evidence. It should ask
+you only for a missing credential or authority that it cannot obtain safely.
 
-### Configure provider scopes
+Having no shell or process capability is a limitation of that particular agent
+session, not part of the watcher design. In that case the agent should give the
+smallest exact command for a capable agent or human to run; it must not claim
+setup succeeded.
+
+### Configure and start it
 
 The three scope variables are comma-separated lists. Configure at least one:
 
@@ -53,39 +59,52 @@ The three scope variables are comma-separated lists. Configure at least one:
 | `HERDR_WATCH_ADO_REPOSITORIES` | `organization/project/repository` | ADO PR head, state, merge status, reviewers, discussions, and policies |
 | `HERDR_WATCH_ADO_DEFINITIONS` | `organization/project/definition-id` | ADO build source revision, state, result, and finish time |
 
-For the container, export the desired values in the shell that runs Compose
-and recreate the service so its environment changes:
+From a source checkout, an agent can pass the scope directly when it starts the
+process. Credentials already present in that runtime are inherited:
+
+```sh
+HERDR_WATCH_GITHUB_REPOSITORIES=acme/api,acme/web npm run watch
+```
+
+The command stays in the foreground so its first failure is visible. Once the
+configuration is proven, the agent may run the same command through the
+runtime's ordinary long-lived process facility. It should preserve the goal
+store, Herdr socket, credentials, and `HERDR_WATCH_STATE_HOME`, and ensure only
+one watcher owns that checkpoint.
+
+This is ordinary process management, not a watcher-specific control protocol.
+An agent may inspect the process, stop it cleanly, and restart it with different
+scopes. It does not need a supervisor-only tool or configuration registry.
+
+### Credentials
+
+Pass secrets through the runtime environment or its secret store; never put
+them in a goal, PR description, build tag, watcher checkpoint, committed file,
+or conversational instruction. `GITHUB_TOKEN` or `GH_TOKEN` must be able to
+read the configured GitHub repositories. ADO uses `AZURE_DEVOPS_EXT_PAT`, or an
+`AZURE_CLI` executable and Azure login available in the same runtime. The stock
+image does not include Azure CLI, and a login on another host or container is
+not shared.
+
+`HERDR_WATCH_INTERVAL_MS` changes the scan interval (minimum 10 seconds;
+default 60 seconds). `HERDR_WATCH_STATE_HOME` changes the persistent checkpoint
+directory.
+
+### Optional container auto-start
+
+For unattended restart recovery, the container entrypoint can start one watcher
+automatically. Export the desired values in the shell that runs Compose and
+recreate the service:
 
 ```sh
 export HERDR_WATCH_GITHUB_REPOSITORIES=acme/api,acme/web
-export GITHUB_TOKEN='<token able to read those repositories>'
-export HERDR_WATCH_ADO_REPOSITORIES=acme/platform/service
-export HERDR_WATCH_ADO_DEFINITIONS=acme/platform/42
-export AZURE_DEVOPS_EXT_PAT='<token able to read those ADO resources>'
+export GITHUB_TOKEN='<token supplied by the deployment secret store>'
 docker compose up -d --force-recreate herdr
 ```
 
-Pass secrets through the deployment environment or its secret store; never put
-them in a goal, PR description, build tag, watcher checkpoint, or committed
-Compose file. `GH_TOKEN` also works for GitHub. For ADO, a custom deployment may
-omit the PAT when `AZURE_CLI` names an available Azure CLI executable whose
-login can obtain an ADO access token. The stock image does not include Azure
-CLI, and a login on another host or container is not shared.
-
-The container entrypoint starts one watcher automatically whenever any scope
-variable is non-empty. `HERDR_WATCH_INTERVAL_MS` changes the scan interval
-(minimum 10 seconds; default 60 seconds), and `HERDR_WATCH_STATE_HOME` changes
-the persistent checkpoint directory.
-
-For local use, give the watcher the same goal store and Herdr socket environment
-as the supervisor, export the provider scopes and credentials, and run it as a
-long-lived process:
-
-```sh
-export HERDR_WATCH_GITHUB_REPOSITORIES=acme/api
-export GITHUB_TOKEN='<token>'
-npm run watch
-```
+This is a deployment convenience, not the only supported setup path. Before
+starting another watcher manually, inspect whether the entrypoint already
+started one.
 
 ### Link a resource to a goal
 
@@ -126,16 +145,17 @@ ineligible rather than guessing a worker.
    state, not a file to edit or a second source of truth.
 
 Provider and delivery failures are retried on the next bounded scan and sent as
-diagnostics to the one Pi supervisor. The supervisor should use the affected
-existing goal when possible and ask for operator action only for missing
-credentials, scope, or deployment authority. If no notification arrives,
-check—in this order—the daemon process, provider scope and credentials, exact
-metadata, active goal, and exact live worker identity.
+diagnostics to the one Pi supervisor. The receiving agent should inspect the
+affected existing goals and watcher process with its available tools, repair
+what current authority permits, and ask only for genuinely missing credentials
+or authority. If no notification arrives, check—in this order—the daemon
+process, provider scope and credentials, exact metadata, active goal, and exact
+live worker identity.
 
-To disable container watching, clear all three scope variables and recreate the
-service. To disable a local watcher, stop its process. Keeping or deleting its
-checkpoint does not alter goals or provider resources; keeping it avoids a
-fresh notification for every still-linked resource after restart.
+To disable a manually started watcher, stop its process. For entrypoint-managed
+watching, clear all three scope variables and recreate the service. Keeping or
+deleting its checkpoint does not alter goals or provider resources; keeping it
+avoids a fresh notification for every still-linked resource after restart.
 
 ## Boundaries
 
@@ -216,7 +236,7 @@ Extending the watcher is an ordinary reviewed code change:
 3. Wire its bounded configuration and source name into `daemon.mjs`.
 4. Add focused tests for linking, revisions, absence, truncation, credentials,
    bounds, and remembered-resource refresh.
-5. Document operator configuration in the root README and container setup.
+5. Document agent operation in this guide and any optional deployment setup.
 
 Keep one shared daemon unless a source has a proven separate security or
 lifecycle boundary. Do not add semantic routing, suggestions, per-resource

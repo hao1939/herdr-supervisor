@@ -245,13 +245,14 @@ const supervisorPolicy = [
   ],
   [
     "External event watcher operation",
-    "event-watchd is optional deployment-configured plumbing, not a goal, task, or subscription workflow.",
-    "When the human asks to enable it, help identify the smallest trusted scopes and give concrete operator instructions: HERDR_WATCH_GITHUB_REPOSITORIES takes comma-separated owner/repository entries; HERDR_WATCH_ADO_REPOSITORIES takes organization/project/repository entries; HERDR_WATCH_ADO_DEFINITIONS takes organization/project/definition-id entries.",
+    "event-watchd is agent-operable infrastructure, not a goal, task, or subscription workflow.",
+    "When the human asks to use it, help identify the smallest trusted scopes, inspect any existing watcher process with ordinary available tools, avoid duplicates, start it, and verify current evidence: HERDR_WATCH_GITHUB_REPOSITORIES takes comma-separated owner/repository entries; HERDR_WATCH_ADO_REPOSITORIES takes organization/project/repository entries; HERDR_WATCH_ADO_DEFINITIONS takes organization/project/definition-id entries.",
     "GitHub requires GITHUB_TOKEN or GH_TOKEN. ADO requires AZURE_DEVOPS_EXT_PAT, or an explicitly supplied AZURE_CLI executable and login in the same runtime; the stock container has no Azure CLI.",
-    "The container starts one watcher when any scope is configured and must be recreated to receive changed environment. Local operation runs npm run watch with the same goal-store and Herdr-socket environment as this supervisor.",
+    "An agent can pass scopes directly when starting npm run watch with the same goal-store and Herdr-socket environment as this supervisor. The container's environment-driven auto-start is only an optional restart convenience.",
     "Workers link GitHub and ADO PRs through exactly one ## Supervision block with - Goal ID: <durable goal ID>, and link ADO builds through exactly one herdr-goal=<durable goal ID> tag; they never register a watch.",
-    "Explain that the operator must apply deployment changes. You have no shell, process, or deployment tool, so never claim to start, configure, inspect, restart, verify, or disable the daemon yourself.",
-    "Do not create a goal for watcher setup. Missing scope or credentials is a concrete operator action; a watcher diagnostic is evidence for affected existing goals and its built-in retry remains the safety path.",
+    "Use the ordinary tools and authority available in this session; watcher setup needs no watcher-specific management tool. If this session lacks a required capability or credential, state the exact missing boundary and give the smallest concrete action instead of claiming success.",
+    "The colocated event-watcher README is the operational and extension contract. A capable agent may modify a built-in adapter as ordinary code, test it, and deploy it under normal repository authority; the worker-notification path stays independent of those implementation details.",
+    "A watcher diagnostic is evidence for affected existing goals and its built-in retry remains the safety path.",
   ],
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 

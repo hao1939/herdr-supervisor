@@ -491,8 +491,21 @@ wired source adapter, not a runtime plugin. An adapter identifies the durable
 goal from trusted provider metadata and returns `{ subject, goalId, revision,
 payload }`; it never resolves or contacts a worker. Shared delivery maps that
 goal ID through canonical state to the exact current native session. The
-colocated source adapter guide documents the coding convention for adding a
-built-in source.
+colocated guide documents both agent operation and the coding convention for
+adding a built-in source.
+
+`event-watchd` is infrastructure supplied to agents, not a boundary imposed on
+them. An agent with ordinary process and repository access may inspect it,
+start it with provider scopes in its environment, verify it, stop or restart
+it, and extend its built-in adapters through a normal reviewed code change.
+Container auto-start is only a deployment convenience. The worker-notification
+contract remains intentionally narrow so goal workers need not know how the
+watcher is hosted or extended.
+
+This is a small tool set—daemon, adapters, and a colocated operating contract—
+not a privileged management service. Role boundaries define responsibility and
+information flow; they do not remove ordinary capabilities from an otherwise
+authorized agent.
 
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
