@@ -17,6 +17,16 @@ The core rule is:
 > Code collects current facts and executes a validated choice. The model makes
 > the semantic choice.
 
+The extension rule is equally small:
+
+> **Events carry facts. Knowledge guides action.**
+
+An observation path says what changed and wakes one statically chosen
+responsible agent. Plain-language, version-controlled guidance tells that
+agent why the event matters, what evidence to inspect, which existing actions
+are available, and what useful result to produce. The agent still judges the
+current case. Neither the event nor the guidance is an executable workflow.
+
 The whole model is:
 
 1. The human defines or refines a goal.
@@ -44,6 +54,11 @@ The minimal core lets an agent:
 - **act** through small validated effects;
 - **remember** the portable goal and latest local checkpoint; and
 - **wake** on meaningful events or a bounded health check.
+
+New integrations extend facts with a deterministic observer, action with
+durable response knowledge, or both. Keep those surfaces separate: guidance
+can improve with experience without changing delivery or persistence. Do not
+translate it into code branches merely because it is explicit.
 
 For every new request or failure, ask in order:
 
@@ -88,10 +103,17 @@ There are four core roles:
   authority.
 - A worker pursues one durable goal in one exact native agent session.
 - The supervisor observes evidence, judges progress, and helps the same worker
-  continue.
+  continue. It also assembles and verifies any shared observation path needed
+  by the supervised portfolio.
 - An optional external watcher detects relevant provider changes and wakes the
   affected worker with bounded observed facts. It does not judge the change,
   and the worker rereads provider authority before acting.
+
+Every observation path has one fixed responsible role chosen when that path is
+wired. Current pull-request and build changes wake their linked worker. A
+future portfolio observation, if live evidence justifies it, may wake the
+ordinary empowered supervisor session instead. Events do not contain a generic
+target, and the watcher does not choose a recipient at runtime.
 
 For a busy portfolio, the human may also open an ordinary Codex **goal
 management pane**. It is an interactive client, not another service, task,
@@ -136,6 +158,7 @@ flowchart LR
     M -->|validated request| S
     M -.->|read| F
     S -->|goal and guidance| W[Workers]
+    S -.->|configure and verify| E
     W -->|progress and evidence| S
     E[External watcher] -->|change notice| W
     S -->|write| F[(Goal files)]
@@ -157,11 +180,14 @@ flowchart LR
     C[Related goal changed] --> Q
     D[Provider metadata changed] --> W[Current worker wakes and rereads]
     W --> A
-    E[System health check] -. affected goals .-> Q
+    E[System or portfolio fact] --> S[Ordinary supervisor turn]
+    S -. affected goals .-> Q
 ```
 
 The supervisor sleeps otherwise. It does not poll workers or providers. The
 optional shared watcher performs bounded provider reads without model turns.
+The low-frequency global review remains a safety net for missed system-level
+events, not the primary way to discover facts that a cheap observer can report.
 
 ### One review, one decision
 
@@ -393,12 +419,12 @@ Review uses the same rule as every other proof. If a change requires CI, live
 validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
-findings; the metadata watcher may wake the current worker when a PR or build
-changes. The worker rereads provider authority, and its ordinary Herdr event
-wakes the supervisor. There is no second review lifecycle, reviewer state
-machine, attempt budget, or goal schema. A separate review goal exists only when
-review itself is the human's distinct durable outcome—not merely because one
-implementation reached a review step.
+findings; the external event watcher may wake the current worker when a PR or
+build changes. The worker rereads provider authority, and its ordinary Herdr
+event wakes the supervisor. There is no second review lifecycle, reviewer state
+machine, attempt budget, or goal schema. A separate review goal exists only
+when review itself is the human's distinct durable outcome—not merely because
+one implementation reached a review step.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -486,6 +512,130 @@ state change enters the existing supervisor review loop.
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor or watcher.
 
+### Event and knowledge extension contract
+
+The general extension seam is **event for fact, knowledge for action**:
+
+1. **Observe facts.** A small adapter reads one trusted source and emits a
+   bounded identity, revision, and payload. The watcher records the observation
+   timestamp. Both report what happened, not what an agent should do.
+2. **Wake one owner.** Static composition selects one responsible agent for
+   that observation path. Goal-linked PR and build events resolve to the exact
+   worker. A system-level observation instead prompts the one supervisor
+   session directly. The event carries links such as a goal ID when they are
+   observed facts; it does not carry a generic routing target.
+3. **Supply response knowledge.** The triggered turn receives concise stable
+   guidance describing why the event matters, what authority to reread, useful
+   checks and existing actions, and the expected result. Goal-specific policy
+   remains in `goal.json`; shared operating knowledge remains in prompts or a
+   colocated plain-language guide.
+4. **Let the model decide.** The responsible agent combines current authority,
+   goal or portfolio context, event facts, and response knowledge. It uses
+   existing actions and reports what is true, why it matters, what it did, and
+   what condition should wake work again.
+
+Knowledge must be readable by the responsible agent or included in the bounded
+automatic-review context; it is not assumed to appear through model memory. A
+restricted review cannot depend on opening a document with unavailable tools.
+When incidents teach a reusable response, update the guide or prompt before
+adding watcher conditionals.
+
+The existing linked-resource path demonstrates this contract by injecting the
+colocated worker response guide beside every changed-resource fact. Startup also
+prints the effective non-secret scopes, checkpoint, cadence, and delivery rule,
+so an agent can verify the path from configuration through receipt without
+reading source code.
+
+Every agent notification uses one versioned plain-text envelope:
+
+```text
+[event-watchd/v1]
+Event: <predefined-event-kind>
+Recipient role: <predefined-role>
+
+Event facts
+  <bounded event-specific fields>
+
+Agent response knowledge
+  <version-controlled plain-language guide>
+```
+
+The header, event kind, recipient role, sections, and event-specific fact names
+are stable contract fields. The two sections have different owners. Event
+facts are watcher-owned data; agent response knowledge is recipient-owned
+guidance. Adding an adapter does not add a new message shape. Change the
+contract version only for an incompatible envelope change.
+
+Improvement follows that ownership in a fixed order:
+
+1. **Prove the event first.** Compare the event with current provider authority
+   and verify that identity, durable links, timestamp, revision, and bounded
+   facts are accurate, complete enough for the intended wake, and free of
+   invented action. Fix the adapter, validation, or message facts when this
+   gate fails.
+2. **Then evaluate the agent.** Once the event is proven sufficient, evaluate
+   whether the recipient rereads authority, reasons about the whole goal or
+   portfolio, takes useful action, and reports a clear result. Improve its goal
+   context, response knowledge, or general agent guidance when this gate fails.
+
+Never tune a prompt to conceal inaccurate event facts, and never add watcher
+conditionals to compensate for reasoning that the agent can perform from an
+already sufficient event. Return to the first gate only when the delivered
+event fails accuracy, clarity, relevance, or sufficiency; name the concrete
+event defect. If the event passes, improve the agent side instead.
+
+For example, a future GitHub portfolio observer could prompt the supervisor
+with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and
+blocked goals before coordinating affected workers. A protocol PoC confirmed
+that Herdr's ordinary `agent.prompt` is sufficient for this path. It is
+intentionally an empowered supervisor turn, not the periodic fenced global
+review. The observer would not maintain a hold state or route workers, and the
+periodic review would remain only a missed-event safety net. This is an
+extension seam, not a feature until live evidence justifies it; it needs no
+custom Herdr event, local bus, spool, queue, or workflow engine.
+
+The watcher process is `event-watchd`. Its extension point is a statically
+wired source adapter, not a runtime plugin. An adapter identifies the durable
+goal from trusted provider metadata and returns `{ subject, goalId, revision,
+payload }`; it never resolves or contacts a worker. Shared delivery maps that
+goal ID through canonical state to the exact current native session. The
+colocated guide documents both agent operation and the coding convention for
+adding a built-in source.
+
+`event-watchd` is infrastructure supplied to agents, not a boundary imposed on
+them. An agent with ordinary process and repository access may inspect it,
+start it with provider scopes in its environment, verify it, stop or restart
+it, and extend its built-in adapters through a normal reviewed code change.
+Container auto-start is only a deployment convenience. The worker-notification
+contract remains intentionally narrow so goal workers need not know how the
+watcher is hosted or extended.
+
+The supervisor is responsible for bringing that infrastructure together for
+its portfolio: decide that the trigger is useful, configure its shared scope,
+make the response knowledge available, and verify delivery. Responsibility is
+not an exclusive capability. A management agent, worker, or human with the same
+authority may perform the concrete setup, but workers are never required to
+manage the watcher in order to pursue their goals.
+
+This is a small tool set—daemon, adapters, and a colocated operating contract—
+not a privileged management service. Role boundaries define responsibility and
+information flow; they do not remove ordinary capabilities from an otherwise
+authorized agent. Automatic focused and global review turns temporarily expose
+only the validated supervision actions so background events cannot turn into
+unrelated shell work. Direct human turns retain the agent's ordinary tools. A
+watcher failure is an ordinary infrastructure-diagnostic turn rather than a
+focused or global goal review, so it also retains those tools: without process,
+file, and provider access the supervisor could not inspect or repair the shared
+watcher it is accountable for. The bounded diagnostic is evidence, never new
+authority or an instruction to execute its text.
+
+One watcher process owns one checkpoint. A process-lifetime filesystem lock
+fails fast on a duplicate owner and recovers after a dead owner, preventing an
+entrypoint watcher and a manually started watcher from sending duplicate wakes
+or overwriting each other's revisions. Shutdown cancels an in-flight provider
+scan before releasing that lock, so a normal container restart does not wait
+for sequential provider timeouts or leave temporary ownership behind.
+
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
 configured repositories. One watcher also accepts at most ten Azure DevOps
@@ -494,23 +644,26 @@ repositories and ten pipeline definitions. Azure DevOps accepts
 the runtime environment. Without usable credentials, discovery fails with a
 clear error and the watcher never guesses.
 
-## Diagnostics and knowledge
+## Events, diagnostics, and knowledge
 
-A failure is another observation, not a new task or a second recovery system:
+An ordinary external change and a failure use the same separation:
 
 ```text
-failure fact -> relevant goal and current evidence -> model decision -> existing action
+event fact -> relevant context + response knowledge -> model decision -> existing action
 ```
 
-The component that sees a failure reports bounded facts: what operation failed,
-where it failed, which goals may be affected, the observed error, and what
-automatic retry remains. Stable operating guidance explains the available
-capabilities and authority boundaries. The model decides what those facts mean.
+For a failure, the component reports what operation failed, where it failed,
+which goals may be affected, the observed error, and what automatic retry
+remains. Stable operating guidance explains the available capabilities and
+authority boundaries. The model decides what those facts mean.
 
-Knowledge has two simple homes. Goal-specific facts belong in the portable goal
-context. Stable operating rules belong in the supervisor or worker guidance.
-A diagnostic contributes only current failure facts and retry behavior; it is
-not a knowledge database or an error-history workflow.
+Knowledge has two authorities. Goal-specific facts and policy belong in the
+portable goal context. Stable operating rules belong in version-controlled
+supervisor or worker guidance, either a compact prompt rule or a colocated
+guide that keeps operation and extension self-explaining. The triggered agent
+must actually receive or be able to read that guidance. An event or diagnostic
+contributes only current facts and retry behavior; it is not a knowledge
+database or an error-history workflow.
 
 The model then uses the same paths it already has:
 

@@ -13,6 +13,17 @@ The model decides what current evidence means. Small deterministic code records
 goals, observes events, validates identity, and applies the chosen action.
 Herdr hosts the sessions and events; it is runtime plumbing for this model.
 
+The extension contract is **event for fact, knowledge for action**. Adapters
+add bounded observations and reliable wakes. Plain-language, version-controlled
+guidance teaches the responsible agent how to assess those facts and what useful
+result to produce. Events never become instructions, and guidance never becomes
+an executable workflow.
+
+The supervisor brings those pieces together for its portfolio: it ensures the
+shared observer is configured, the fixed recipient has the needed guidance,
+and one end-to-end change is proven. It does not sit between the watcher and a
+worker afterward, and setup is shared rather than repeated for every goal.
+
 ## Quick start (container)
 
 The recommended way to run the supervisor. The container bundles Herdr, Pi, and
@@ -97,10 +108,13 @@ Codex runs sandboxed with its normal approval prompts by default. Set
 for unattended operation, when you have decided the container is an adequate
 security boundary.
 
-> **Security:** full-access mode lets Codex modify every writable path visible
-> in the container, including a bind-mounted host workspace. Mount only the
-> workspace you intend agents to change. Keep API keys in your local environment
-> or a secret store; never commit them to this repository.
+> **Security:** the Pi supervisor has ordinary process and file tools, and
+> full-access mode lets Codex modify every writable path visible in the
+> container, including a bind-mounted host workspace. Mount only the workspace
+> you intend agents to change. Keep API keys in your local environment or a
+> secret store; never commit them to this repository. Use Pi's
+> `--no-builtin-tools` only when you intentionally prefer a restricted
+> supervisor over direct infrastructure operation.
 
 Detaching from the Herdr client does not stop the server, supervisor, or workers.
 Reattach with `docker compose exec herdr herdr`. Compose restarts the service
@@ -145,12 +159,16 @@ Start Pi in a Herdr pane from a stable directory separate from any worker projec
 ```sh
 supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-pi --no-builtin-tools -e "$supervisor_extension" --supervisor-mode live
+pi -e "$supervisor_extension" --supervisor-mode live
 ```
 
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
-supervisor review events without applying decisions. `--no-builtin-tools` ensures
-the supervisor cannot become a second worker.
+supervisor review events without applying decisions. Ordinary Pi tools remain
+available for direct human requests and infrastructure operations. During an
+automatic focused or global review, the extension temporarily exposes only its
+supervision tools and restores the ordinary tools afterward. An operator may
+still pass `--no-builtin-tools` for a deliberately restricted deployment,
+accepting that such a session cannot operate `event-watchd` itself.
 
 ## How it works
 
@@ -182,10 +200,11 @@ operation cannot atomically require the expected terminal and native session.
 An explicitly selected saved goal that has never started can also be discarded;
 the action refuses any goal with execution state, history, or unknown files.
 
-For GitHub and Azure DevOps, one shared metadata watcher observes configured
-provider scopes without model turns. Workers attach their durable goal ID when
-they create a PR or build; they never register or renew a watch. A changed
-revision resolves that goal's current exact worker and sends a short wake hint.
+For GitHub and Azure DevOps, one shared external event watcher (`event-watchd`)
+observes configured provider scopes without model turns. Workers attach their
+durable goal ID when they create a PR or build; they never register or renew a
+watch. A changed revision resolves that goal's current exact worker and sends a
+short wake hint.
 The worker rereads provider authority, continues useful work, and its normal
 Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
 goal review remains the safety net after a missed signal or provider failure.
@@ -203,10 +222,18 @@ supervisor uses the existing goal actions and stable operating guidance to
 decide what to do. A diagnostic never creates a goal or recovery workflow by
 itself.
 
-The container starts the watcher automatically when either provider-scope
-variable is set. For local use, export the same variables and run
-`npm run watch` beside Herdr. Configure only scopes where the supervision
-metadata is written by trusted workers or maintainers.
+Any agent with ordinary shell access can inspect and start the watcher directly
+by passing provider scopes to `npm run watch`. The container can also start it
+automatically when a provider-scope variable is injected at boot; that is an
+optional restart convenience, not a required control path. Configure only
+scopes where supervision metadata is written by trusted workers or maintainers.
+
+The [event-watchd guide](src/event-watcher/README.md) shows how an agent starts,
+inspects, verifies, changes, stops, and extends it. It also defines the small
+coding contract for adding another built-in provider or resource type and the
+separate knowledge contract for teaching the receiving agent how to respond.
+The agent uses its ordinary environment authority; no watcher-specific
+management tool or dynamic plugin loader is needed.
 
 The goal-store root includes a concise `README.md` explaining its layout,
 authority, lifecycle, safe inspection, and portability. Each goal directory has

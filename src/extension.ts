@@ -73,19 +73,16 @@ const EvidenceItems = Type.Array(
 const Optional = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
 const Evidence = Optional(EvidenceItems);
 const client = new HerdrClient();
-const supervisorTools = [
-  "supervisor_start_goal",
-  "supervisor_discard_goal",
-  "supervisor_update_goal",
+const focusedReviewTools = [
   "supervisor_status",
   "supervisor_reconsider",
-  "supervisor_global_result",
   "supervisor_observe",
   "supervisor_leave",
   "supervisor_steer",
   "supervisor_ask_human",
   "supervisor_finish",
 ];
+const globalReviewTools = ["supervisor_global_result"];
 const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
@@ -187,6 +184,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let globalState = emptyGlobalReviewState();
   let reviewPumpRunning = false;
   let agentTurnActive = false;
+  let ordinaryTools: string[] | undefined;
+  let reviewToolsActive = false;
   let shuttingDown = false;
   let lastBackgroundError = "";
   let reconnectDelay = 250;
@@ -779,6 +778,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const snapshotHash = stableHash(compactSnapshot);
     activeGlobalReview = true;
     globalDecisionApplied = false;
+    activateReviewTools(globalReviewTools);
     try {
       pi.sendMessage({
         customType: globalReviewMessageType,
@@ -789,6 +789,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       activeGlobalReview = false;
       pendingGlobalReview ||= reason;
+      restoreOrdinaryTools();
       throw error;
     }
     armGlobalReviewTimer();
@@ -873,6 +874,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const currentMode = mode();
     if (currentMode !== "observe") {
       reviewTurn.begin(paneId, decision.reason);
+      activateReviewTools(focusedReviewTools);
     }
     try {
       pi.sendMessage(
@@ -891,6 +893,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       );
     } catch (error) {
       reviewTurn.end();
+      restoreOrdinaryTools();
       throw error;
     }
     await armReviewTimer();
@@ -2095,9 +2098,33 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     return { action: "handled" };
   });
 
+  function restoreOrdinaryTools() {
+    if (!reviewToolsActive || !ordinaryTools) return;
+    pi.setActiveTools(ordinaryTools);
+    ordinaryTools = undefined;
+    reviewToolsActive = false;
+  }
+
+  function activateReviewTools(tools: string[]) {
+    if (reviewToolsActive) return;
+    ordinaryTools = pi.getActiveTools();
+    pi.setActiveTools(tools);
+    reviewToolsActive = true;
+  }
+
   pi.on("before_agent_start", (event) => {
     agentTurnActive = true;
-    return { systemPrompt: supervisorSystemPrompt(event.systemPrompt) };
+    if (activeGlobalReview || reviewTurn.isBusy()) {
+      activateReviewTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
+    } else {
+      restoreOrdinaryTools();
+    }
+    return {
+      systemPrompt: supervisorSystemPrompt(
+        event.systemPrompt,
+        activeGlobalReview ? "global" : reviewTurn.isBusy() ? "focused" : undefined,
+      ),
+    };
   });
 
   async function settleGlobalReview() {
@@ -2148,8 +2175,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
     agentTurnActive = true;
     if (!activeGlobalReview && !reviewTurn.isBusy() && !reviewTurn.isClosed()) return;
-    const settledGlobal = await settleGlobalReview();
-    if (!settledGlobal) await settleFocusedReview();
+    try {
+      const settledGlobal = await settleGlobalReview();
+      if (!settledGlobal) await settleFocusedReview();
+    } finally {
+      restoreOrdinaryTools();
+    }
     await armReviewTimer();
     armGlobalReviewTimer();
   });
@@ -2180,8 +2211,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    // This Pi session is a supervisor, not a second implementation worker.
-    pi.setActiveTools(supervisorTools);
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
     const storedGoals = await reloadGoals();
@@ -2215,6 +2244,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("agent_settled", async () => {
     agentTurnActive = false;
+    restoreOrdinaryTools();
     if (await settleGlobalReview()) {
       await drainSignals();
       await armReviewTimer();
@@ -2227,6 +2257,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("session_shutdown", () => {
+    restoreOrdinaryTools();
     shuttingDown = true;
     stopSubscription?.();
     if (reconnectTimer) clearTimeout(reconnectTimer);
