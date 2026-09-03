@@ -3,6 +3,23 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.4.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.3.0...herdr-supervisor-v0.4.0) (2026-09-03)
+
+
+### Features
+
+* add an agent-operable external event watcher with structured fact and knowledge messages ([#61](https://github.com/hao1939/herdr-supervisor/pull/61))
+* add a lightweight Codex goal-management pane ([#58](https://github.com/hao1939/herdr-supervisor/pull/58))
+* observe Azure DevOps pull requests, builds, GitHub pull requests, and their current evidence ([#55](https://github.com/hao1939/herdr-supervisor/pull/55), [#56](https://github.com/hao1939/herdr-supervisor/pull/56))
+* add explicit saved-goal discard ([#59](https://github.com/hao1939/herdr-supervisor/pull/59))
+
+
+### Bug Fixes
+
+* retire completed external resources without losing pending delivery ([#57](https://github.com/hao1939/herdr-supervisor/pull/57))
+* isolate goal formation and preserve collaborative goal ordering ([#53](https://github.com/hao1939/herdr-supervisor/pull/53), [#54](https://github.com/hao1939/herdr-supervisor/pull/54))
+* make saved-goal lifecycle operations fail closed ([#59](https://github.com/hao1939/herdr-supervisor/pull/59))
+
 ## [0.2.2](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.2.1...herdr-supervisor-v0.2.2) (2026-08-29)
 
 
