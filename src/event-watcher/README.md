@@ -51,7 +51,10 @@ setup succeeded.
 
 ### Configure and start it
 
-The three scope variables are comma-separated lists. Configure at least one:
+The three scope variables are comma-separated lists. Configure at least one.
+Each built-in list accepts at most ten entries; narrow the trusted scope or
+make an ordinary reviewed code change instead of silently splitting ownership
+across watcher processes.
 
 | Variable | Entry shape | Observes |
 |---|---|---|

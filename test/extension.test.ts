@@ -1659,6 +1659,7 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /HERDR_WATCH_GITHUB_REPOSITORIES takes comma-separated owner\/repository entries/);
   assert.match(result.systemPrompt, /HERDR_WATCH_ADO_REPOSITORIES takes organization\/project\/repository entries/);
   assert.match(result.systemPrompt, /HERDR_WATCH_ADO_DEFINITIONS takes organization\/project\/definition-id entries/);
+  assert.match(result.systemPrompt, /Each built-in list accepts at most ten entries/);
   assert.match(result.systemPrompt, /AZURE_CLI overrides the executable and otherwise the watcher uses az from PATH/);
   assert.match(result.systemPrompt, /Workers link GitHub and ADO PRs through exactly one ## Supervision block/);
   assert.match(result.systemPrompt, /watcher setup needs no watcher-specific management tool/);
