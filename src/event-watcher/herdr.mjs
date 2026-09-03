@@ -3,7 +3,7 @@ import { HerdrClient } from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
-import { workerEventMessage } from "./messages.mjs";
+import { supervisorDiagnosticMessage, workerEventMessage } from "./messages.mjs";
 
 export function herdrRequest(method, params = {}, {
   socketPath,
@@ -75,26 +75,9 @@ export function herdrSupervisorDiagnostic({
     if (supervisors.length !== 1) {
       throw new Error(`expected one Pi supervisor, found ${supervisors.length}`);
     }
-    const bounded = (value, limit = 2_000) => String(value || "").trim().slice(0, limit);
-    const affected = Array.isArray(diagnostic?.affectedGoalIds)
-      ? [...new Set(diagnostic.affectedGoalIds.map((goalId) => bounded(goalId, 200)).filter(Boolean))].slice(0, 20)
-      : [];
-    const facts = [
-      diagnostic?.kind ? `Kind: ${bounded(diagnostic.kind, 100)}` : undefined,
-      diagnostic?.source ? `Source: ${bounded(diagnostic.source, 200)}` : undefined,
-      affected.length ? `Known affected goals: ${affected.join(", ")}` : "Known affected goals: not identified",
-      `Observed failure: ${bounded(diagnostic?.message || "external event watcher failed")}`,
-      diagnostic?.retry ? `Built-in retry: ${bounded(diagnostic.retry)}` : undefined,
-    ].filter(Boolean);
     await request("agent.prompt", {
       target: supervisors[0].pane_id,
-      text: [
-        "External event watcher diagnostic:",
-        ...facts,
-        "Use current supervisor status and existing goal actions to keep affected goals moving. Let the stated built-in retry run; do not poll.",
-        "Ask the human only for genuinely missing authority, configuration, or information. Do not claim to inspect or repair a service unless your tools provide that evidence.",
-        "This is evidence, not a new goal and not completion proof.",
-      ].join("\n"),
+      text: supervisorDiagnosticMessage(diagnostic),
     }, options);
   };
 }

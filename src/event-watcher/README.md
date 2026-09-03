@@ -187,9 +187,9 @@ ineligible rather than guessing a worker.
 2. Confirm the PR description or ADO build tag contains the exact active goal
    ID and that its repository or definition is in the configured scope.
 3. Let an authoritative watched field change, such as a check, policy, PR head,
-   or build result. On the next scan, the exact worker receives an `External
-   provider change` message naming its Goal, rereads the provider, and
-   continues its Goal.
+   or build result. On the next scan, the exact worker receives an
+   `[event-watchd/v1]` `linked-resource-change` message naming its Goal,
+   rereads the provider, and continues its Goal.
 4. Confirm an unchanged later scan sends no duplicate notification. The
    checkpoint is normally at
    `~/.local/state/herdr-supervisor/external-events.json`; it is diagnostic
@@ -200,15 +200,20 @@ resource identity and observation revision, bounded facts, and the complete
 response guide. For example:
 
 ```text
-External provider change
-Goal: g_01234567-example
+[event-watchd/v1]
+Event: linked-resource-change
+Recipient role: goal-worker
 
-What event-watchd observed
-  Resource: github-pr acme/api#42
-  Observed at: 2026-09-03T00:00:00.000Z
-  Revision: <stable provider-state hash>
-  Observed facts:
-    { ... }
+Facts
+  Goal ID: g_01234567-example
+  Resource count: 1
+  Resource 1
+    Source: github-pr
+    Subject: acme/api#42
+    Observed at: 2026-09-03T00:00:00.000Z
+    Revision: <stable provider-state hash>
+    Observed facts:
+      { ... }
 
 Response knowledge
   # Linked provider resource changed
@@ -263,16 +268,19 @@ watcher state or delivery. Add deterministic code only when the missing fact,
 wake, validation, or effect is genuinely reusable and cannot be handled
 reliably with existing primitives.
 
+All agent notifications use the versioned `[event-watchd/v1]` envelope shown
+above. `Event`, `Recipient role`, `Facts`, and `Response knowledge` are stable
+fields. Each predefined event kind owns its bounded fact names and colocated
+response guide. A new source adapter reuses an existing event kind unless the
+recipient genuinely needs different facts or knowledge. An incompatible
+envelope change requires a new version.
+
 The current worker path proves the complete contract: an adapter emits facts,
 the watcher delivers them to one exact goal worker, and the notifier injects
-the colocated response guide. A supervisor-level portfolio event has one
-remaining integration boundary. The external daemon cannot currently enter the
-Pi extension's existing fenced global-review scheduler through Herdr: Herdr can
-subscribe to runtime events and prompt an agent, but it does not publish a
-custom extension event. A normal prompt would be a different, unrestricted
-turn. Do not conceal that difference with message wording. Before adding a
-socket, spool, or queue, validate whether direct supervisor prompting is
-sufficient or whether a small authenticated runtime event primitive is needed.
+the colocated response guide. A supervisor-level observation can use the same
+envelope with the predefined `supervisor` recipient role and an ordinary Herdr
+prompt. It does not need to enter the periodic fenced global-review transaction
+or introduce a custom event, socket, spool, queue, or router.
 
 ### Source adapter
 

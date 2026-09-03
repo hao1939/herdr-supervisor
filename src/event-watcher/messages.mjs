@@ -5,42 +5,86 @@ const linkedResourceKnowledge = readFileSync(
   new URL("./knowledge/linked-resource-change.md", import.meta.url),
   "utf8",
 ).trim();
+const watcherDiagnosticKnowledge = readFileSync(
+  new URL("./knowledge/watcher-diagnostic.md", import.meta.url),
+  "utf8",
+).trim();
+
+export const eventMessageContract = "event-watchd/v1";
 
 function indented(value, prefix = "  ") {
   return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
 }
 
-function observedResource(event) {
+function observedResource(event, index) {
   const lines = [
-    `Resource: ${event.source} ${event.subject}`,
-    event.observedAt ? `Observed at: ${event.observedAt}` : undefined,
-    event.revision ? `Revision: ${event.revision}` : undefined,
+    `Resource ${index + 1}`,
+    `  Source: ${event.source}`,
+    `  Subject: ${event.subject}`,
+    event.observedAt ? `  Observed at: ${event.observedAt}` : undefined,
+    event.revision ? `  Revision: ${event.revision}` : undefined,
   ].filter(Boolean);
   if (event.payload === undefined) return lines.join("\n");
   const facts = JSON.stringify(event.payload, null, 2);
   lines.push(
-    "Observed facts:",
+    "  Observed facts:",
     Buffer.byteLength(facts) <= MAX_EVENT_FACT_BYTES
-      ? indented(facts)
-      : `  Omitted because they exceed ${MAX_EVENT_FACT_BYTES} bytes; reread the provider.`,
+      ? indented(facts, "    ")
+      : `    Omitted because they exceed ${MAX_EVENT_FACT_BYTES} bytes; reread the provider.`,
   );
   return lines.join("\n");
 }
 
-export function workerEventMessage(goalId, events) {
+function eventMessage({ event, recipient, facts, knowledge }) {
   return [
-    "External provider change",
-    `Goal: ${goalId}`,
+    `[${eventMessageContract}]`,
+    `Event: ${event}`,
+    `Recipient role: ${recipient}`,
     "",
-    "What event-watchd observed",
-    ...events.flatMap((event, index) => [
-      index ? "" : undefined,
-      indented(observedResource(event)),
-    ].filter(Boolean)),
+    "Facts",
+    indented(facts),
     "",
     "Response knowledge",
-    indented(linkedResourceKnowledge),
+    indented(knowledge),
   ].join("\n");
+}
+
+export function workerEventMessage(goalId, events) {
+  return eventMessage({
+    event: "linked-resource-change",
+    recipient: "goal-worker",
+    facts: [
+      `Goal ID: ${goalId}`,
+      `Resource count: ${events.length}`,
+      ...events.flatMap((observed, index) => [
+        index ? "" : undefined,
+        observedResource(observed, index),
+      ].filter(Boolean)),
+    ].join("\n"),
+    knowledge: linkedResourceKnowledge,
+  });
+}
+
+function bounded(value, limit = 2_000) {
+  return String(value || "").trim().slice(0, limit);
+}
+
+export function supervisorDiagnosticMessage(diagnostic) {
+  const affected = Array.isArray(diagnostic?.affectedGoalIds)
+    ? [...new Set(diagnostic.affectedGoalIds.map((goalId) => bounded(goalId, 200)).filter(Boolean))].slice(0, 20)
+    : [];
+  return eventMessage({
+    event: "watcher-diagnostic",
+    recipient: "supervisor",
+    facts: [
+      diagnostic?.kind ? `Failure kind: ${bounded(diagnostic.kind, 100)}` : undefined,
+      diagnostic?.source ? `Source: ${bounded(diagnostic.source, 200)}` : undefined,
+      affected.length ? `Affected Goal IDs: ${affected.join(", ")}` : "Affected Goal IDs: not identified",
+      `Observed failure: ${bounded(diagnostic?.message || "external event watcher failed")}`,
+      diagnostic?.retry ? `Built-in retry: ${bounded(diagnostic.retry)}` : undefined,
+    ].filter(Boolean).join("\n"),
+    knowledge: watcherDiagnosticKnowledge,
+  });
 }
 
 export function watcherStartupMessage({ scopes, intervalMs, statePath }) {

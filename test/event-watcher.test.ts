@@ -12,6 +12,8 @@ import { ExternalEventWatcher } from "../src/event-watcher/core.mjs";
 import { githubPullRequestSource, supervisionGoal } from "../src/event-watcher/github-pr.mjs";
 import { herdrGoalDelivery, herdrSupervisorDiagnostic } from "../src/event-watcher/herdr.mjs";
 import {
+  eventMessageContract,
+  supervisorDiagnosticMessage,
   watcherHelpMessage,
   watcherStartupMessage,
   workerEventMessage,
@@ -219,14 +221,32 @@ test("worker event message explains facts, delivery, response, and expected outp
     payload: { draft: false, checks: [{ name: "test", conclusion: "failure" }] },
   }]);
 
-  assert.match(message, /External provider change/);
-  assert.match(message, /Goal: g_owner/);
+  assert.equal(eventMessageContract, "event-watchd/v1");
+  assert.match(message, /^\[event-watchd\/v1\]\nEvent: linked-resource-change\nRecipient role: goal-worker/);
+  assert.match(message, /Facts\n  Goal ID: g_owner\n  Resource count: 1/);
+  assert.match(message, /Resource 1\n    Source: github-pr\n    Subject: owner\/repo#42/);
   assert.match(message, /Why you received this: trusted provider metadata links the resource/);
   assert.match(message, /Observed at: 2026-09-03T00:00:00.000Z/);
   assert.match(message, /Revision: revision-1/);
   assert.match(message, /"conclusion": "failure"/);
   assert.match(message, /rereading the provider's current state/);
   assert.match(message, /Report what materially changed, what you did/);
+});
+
+test("supervisor diagnostic uses the same versioned fact-and-knowledge contract", () => {
+  const message = supervisorDiagnosticMessage({
+    kind: "source",
+    source: "ado-build",
+    affectedGoalIds: ["g_release"],
+    message: "ADO discovery failed",
+    retry: "Retry on the next bounded scan.",
+  });
+
+  assert.match(message, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
+  assert.match(message, /Facts\n  Failure kind: source/);
+  assert.match(message, /Affected Goal IDs: g_release/);
+  assert.match(message, /Response knowledge\n  # External watcher failure/);
+  assert.match(message, /Inspect the current watcher, provider, and affected existing/);
 });
 
 test("watcher daemon rejects an empty source set without changing its checkpoint", async (t) => {
@@ -1753,10 +1773,11 @@ test("watcher failures wake the one Pi supervisor with bounded evidence", async 
   const prompt = calls.find(([method]) => method === "agent.prompt")[1];
   assert.equal(prompt.target, "w1:p2");
   assert.match(prompt.text, /ADO discovery failed/);
-  assert.match(prompt.text, /Known affected goals: g_release/);
+  assert.match(prompt.text, /^\[event-watchd\/v1\]\nEvent: watcher-diagnostic\nRecipient role: supervisor/);
+  assert.match(prompt.text, /Affected Goal IDs: g_release/);
   assert.match(prompt.text, /Built-in retry:.*next bounded scan/);
-  assert.match(prompt.text, /Do not claim to inspect or repair a service/);
-  assert.match(prompt.text, /not a new goal/);
+  assert.match(prompt.text, /Do not claim a\n  repair without current evidence/);
+  assert.match(prompt.text, /do not create a goal merely because a diagnostic arrived/);
   assert.doesNotMatch(prompt.text, /Inspect current service and provider evidence/);
 });
 

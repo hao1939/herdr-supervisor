@@ -521,9 +521,9 @@ The general extension seam is **event for fact, knowledge for action**:
    source says, not what an agent should do.
 2. **Wake one owner.** Static composition selects one responsible agent for
    that observation path. Goal-linked PR and build events resolve to the exact
-   worker. A system-level observation may instead request the supervisor's
-   existing global review. The event carries links such as a goal ID when they
-   are observed facts; it does not carry a generic routing target.
+   worker. A system-level observation instead prompts the one supervisor
+   session directly. The event carries links such as a goal ID when they are
+   observed facts; it does not carry a generic routing target.
 3. **Supply response knowledge.** The triggered turn receives concise stable
    guidance describing why the event matters, what authority to reread, useful
    checks and existing actions, and the expected result. Goal-specific policy
@@ -546,20 +546,34 @@ prints the effective non-secret scopes, checkpoint, cadence, and delivery rule,
 so an agent can verify the path from configuration through receipt without
 reading source code.
 
-For example, a future GitHub portfolio observer could report changed draft-PR
-facts to one global review. Its guidance could teach the supervisor to inspect
-readiness, overlap, CI, and blocked goals before reconsidering affected
-workers. The observer would not maintain a hold state or route workers, and the
-periodic review would remain only a missed-event safety net. This is an
-extension seam, not a feature until live evidence justifies it.
+Every agent notification uses one versioned plain-text envelope:
 
-A protocol PoC confirmed that the current external Herdr API does not provide a
-custom event publication operation that can enter the Pi extension's existing
-fenced global-review scheduler. A normal `agent.prompt` is an ordinary turn,
-not that transaction. This is the remaining implementation question for
-supervisor-level events. Do not add a local event bus, spool, or queue until a
-live use case proves that direct supervisor prompting is insufficient and that
-a smaller authenticated runtime signal is unavailable.
+```text
+[event-watchd/v1]
+Event: <predefined-event-kind>
+Recipient role: <predefined-role>
+
+Facts
+  <bounded event-specific fields>
+
+Response knowledge
+  <version-controlled plain-language guide>
+```
+
+The header, event kind, recipient role, sections, and event-specific fact names
+are stable contract fields. Facts remain data; response knowledge remains
+guidance. Adding an adapter does not add a new message shape. Change the
+contract version only for an incompatible envelope change.
+
+For example, a future GitHub portfolio observer could prompt the supervisor
+with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and
+blocked goals before coordinating affected workers. A protocol PoC confirmed
+that Herdr's ordinary `agent.prompt` is sufficient for this path. It is
+intentionally an empowered supervisor turn, not the periodic fenced global
+review. The observer would not maintain a hold state or route workers, and the
+periodic review would remain only a missed-event safety net. This is an
+extension seam, not a feature until live evidence justifies it; it needs no
+custom Herdr event, local bus, spool, queue, or workflow engine.
 
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable
