@@ -192,6 +192,38 @@ test("resumeNativeGoal clears a command left by an uncertain prior submission", 
   ]);
 });
 
+test("resumeNativeGoal uses one deadline for command submission and confirmation", async (t) => {
+  const client = new HerdrClient();
+  const timeouts = [];
+  t.mock.method(client, "request", async (method, _params, timeoutMs) => {
+    timeouts.push(timeoutMs);
+    if (method === "agent.get") return { agent: { agent_status: "working" } };
+    return { type: "ok" };
+  });
+
+  await client.resumeNativeGoal("w1:p2", 1_000);
+
+  assert.equal(timeouts.length, 3);
+  assert.ok(timeouts[0] <= 1_000 && timeouts[0] > 0);
+  assert.ok(timeouts[1] < timeouts[0]);
+  assert.ok(timeouts[2] <= timeouts[1]);
+});
+
+test("resumeNativeGoal does not submit Enter after its shared deadline", async (t) => {
+  const client = new HerdrClient();
+  const requests = [];
+  t.mock.method(client, "request", async (method, params) => {
+    requests.push({ method, params });
+    return { type: "ok" };
+  });
+
+  await assert.rejects(client.resumeNativeGoal("w1:p2", 10), /did not resume/);
+  assert.deepEqual(requests, [{
+    method: "agent.send_keys",
+    params: { target: "w1:p2", keys: ["ctrl+u", ..."/goal", "space", ..."resume"] },
+  }]);
+});
+
 test("only idle and done Herdr agents need a native Goal resume", () => {
   assert.equal(canResumeNativeGoal({ agent_status: "idle" }), true);
   assert.equal(canResumeNativeGoal({ agent_status: "done" }), true);

@@ -11,26 +11,30 @@ export function canResumeNativeGoal(agent) {
 }
 
 export async function submitNativeGoalResume(request, paneId, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => {
+    const milliseconds = deadline - Date.now();
+    if (milliseconds <= 0) throw new Error(`native Goal in ${paneId} did not resume`);
+    return milliseconds;
+  };
   await request("agent.send_keys", {
     target: paneId,
     keys: nativeGoalResumeKeys,
-  }, timeoutMs);
+  }, remaining());
   // Clear any command text retained after an uncertain earlier write. Herdr
   // writes logical keys directly to the TUI; keep Enter in a later write so
   // Codex has parsed the slash command before it is submitted.
-  await wait(100);
+  await wait(Math.min(100, remaining()));
   await request("agent.send_keys", {
     target: paneId,
     keys: ["enter"],
-  }, timeoutMs);
+  }, remaining());
 
-  const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error(`native Goal in ${paneId} did not resume`);
-    const result = await request("agent.get", { target: paneId }, remaining);
+    const remainingMs = remaining();
+    const result = await request("agent.get", { target: paneId }, remainingMs);
     if (result.agent?.agent_status === "working") return result.agent;
-    await wait(Math.min(50, remaining));
+    await wait(Math.min(50, remaining()));
   }
 }
 
