@@ -524,7 +524,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
   assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
   assert.match(deliveredPrompts[0].prompt, /continue safe independent work/i);
-  assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
+  assert.match(deliveredPrompts[0].prompt, /no safe work remains.*blocked\/stalled/s);
+  assert.match(deliveredPrompts[0].prompt, /parks execution.*does not finish the durable goal/s);
   assert.match(deliveredPrompts[0].prompt, /Keep independent useful paths moving while a pull request, pipeline, or another path is pending/);
   assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
   assert.match(deliveredPrompts[0].prompt, /run the required tests/);
@@ -1003,11 +1004,11 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
   assert.match(prompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
-  assert.match(prompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
+  assert.match(prompts[0].prompt, /no safe work remains.*blocked\/stalled/s);
   assert.match(prompts[0].prompt, /review the exact final diff/);
   assert.match(prompts[0].prompt, /run the required tests/);
   assert.match(prompts[0].prompt, /evidence matches the current candidate revision/);
-  assert.match(prompts[0].prompt, /Keep the native Goal active/);
+  assert.match(prompts[0].prompt, /Native blocked\/stalled only parks an exhausted wait/);
   assert.match(prompts[0].prompt, /## Supervision/);
   assert.match(prompts[0].prompt, /copy the current objective from the canonical goal\.json/);
   assert.match(prompts[0].prompt, /- Worker: "refined-worker"/);
@@ -1940,7 +1941,7 @@ test("restart reuses a pending initialized pane instead of creating another work
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /^\/goal /);
   assert.match(prompts[0], /goal\.json/);
-  assert.match(prompts[0], /Do not sleep, poll, or repeatedly reread unchanged state/);
+  assert.match(prompts[0], /Never sleep, poll, or reread unchanged state/);
   assert.equal((await loadSupervisorGoals(root)).active[0].paneId, managed.pane_id);
   secondPi.events.get("session_shutdown")();
 });

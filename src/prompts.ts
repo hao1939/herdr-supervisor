@@ -14,7 +14,7 @@ const workerExecutionBoundary = [
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
   "A pending pull request, pipeline run, or peer condition is one workstream, not the goal. Dispatch every ready, nonduplicate validation immediately, let the provider queue it, and continue safe independent work.",
-  "When you have genuinely exhausted the safe work you can do now, report the exact remaining condition once and yield. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
+  "When no safe work remains, report the exact resume condition and let the native Goal become blocked/stalled after its audit. This only parks execution; it does not finish the durable goal. Never sleep, poll, or reread unchanged state; an event or bounded check will resume this session.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
 ].join(" ");
@@ -67,7 +67,7 @@ export function refinedGoalPrompt(binding: GoalTrace, workerName: string) {
     `The human refined the canonical contract for your active Codex Goal at ${JSON.stringify(resolve(goalPaths(goalId).contract))}.`,
     "Re-read the complete goal.json now and continue under its latest objective, context, completion criteria, and constraints.",
     workerExecutionBoundary,
-    "Keep the native Goal active until the revised contract is fully proved. If you had already completed it, start the same native Goal again from this canonical contract.",
+    "Complete the native Goal only when the revised contract is proved. Native blocked/stalled only parks an exhausted wait; it does not finish the durable goal. If you had already completed it, start the same native Goal again from this canonical contract.",
     pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language.",
   ].join(" ");

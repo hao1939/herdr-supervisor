@@ -456,7 +456,9 @@ its own earlier work.
 
 The worker never sleeps or polls for an external condition. When it has
 genuinely exhausted the safe work it can do now, it reports the exact remaining
-condition once and yields. An idle worker costs nothing.
+condition once and lets its native Codex Goal enter the blocked/stalled state
+after the native blocked audit. That state parks execution; it does not complete
+or stop the durable supervised goal. An idle worker costs nothing.
 
 Idle is not the same as inactive. An unfinished goal keeps its pane because it
 may still own a wait, review, or immediate next action. Herdr preserves native
