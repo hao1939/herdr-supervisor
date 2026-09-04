@@ -523,7 +523,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /unless evidence proves provider throttling/);
   assert.match(deliveredPrompts[0].prompt, /Queue each owned ADO build.*by returned ID/);
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
-  assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer work/);
+  assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer condition/);
   assert.match(deliveredPrompts[0].prompt, /continue independent work/i);
   assert.match(deliveredPrompts[0].prompt, /no safe work remains.*block\/stall/s);
   assert.match(deliveredPrompts[0].prompt, /parks execution; the durable goal stays active/);
@@ -1006,7 +1006,7 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
-  assert.match(prompts[0].prompt, /Pending review, pipeline, or peer work/);
+  assert.match(prompts[0].prompt, /Pending review, pipeline, or peer condition/);
   assert.match(prompts[0].prompt, /no safe work remains.*block\/stall/s);
   assert.match(prompts[0].prompt, /then reread authority once, even if unchanged/);
   assert.match(prompts[0].prompt, /review the exact final diff/);
