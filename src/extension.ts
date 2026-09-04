@@ -1716,6 +1716,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               throw new Error("canonical worker routing changed while waiting to continue");
             }
             binding = { ...lockedBinding, ...runtimeFor(lockedBinding) };
+            continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
             if (!lockedAgent) {

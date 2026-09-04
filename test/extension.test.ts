@@ -518,14 +518,13 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[0].prompt, /Submit ready nonduplicate validations/);
-  assert.match(deliveredPrompts[0].prompt, /unless evidence proves provider throttle, quota, collision, or conflict/);
-  assert.match(deliveredPrompts[0].prompt, /let the provider accept or queue/);
-  assert.match(deliveredPrompts[0].prompt, /preserve rejections verbatim/);
+  assert.match(deliveredPrompts[0].prompt, /Submit each ready, nonduplicate validation/);
+  assert.match(deliveredPrompts[0].prompt, /let the provider accept or queue it/);
+  assert.match(deliveredPrompts[0].prompt, /preserve any rejection verbatim/);
   assert.match(deliveredPrompts[0].prompt, /After submitting each owned ADO build.*by returned ID/);
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
   assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer state/);
-  assert.match(deliveredPrompts[0].prompt, /Keep useful work moving/);
+  assert.match(deliveredPrompts[0].prompt, /Keep other useful work moving/);
   assert.match(deliveredPrompts[0].prompt, /no safe work remains.*block\/stall/s);
   assert.match(deliveredPrompts[0].prompt, /parks execution; the durable goal stays active/);
   assert.match(deliveredPrompts[0].prompt, /Do not poll or reread until a fresh event\/check/);
@@ -1645,7 +1644,7 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
-  assert.match(result.systemPrompt, /Dispatch every ready, nonduplicate validation immediately unless current evidence proves provider throttle, quota, resource collision, or conflicting operation/);
+  assert.match(result.systemPrompt, /Dispatch every ready, nonduplicate validation immediately/);
   assert.match(result.systemPrompt, /A queued run is execution progress, not completion proof/);
   assert.match(result.systemPrompt, /React to an actual rejection or conflicting operation/);
   assert.match(result.systemPrompt, /stop speculative new work while still validating every ready change/);
@@ -2536,6 +2535,56 @@ test("working Goal steering rechecks canonical activity after waiting for its ac
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /goal is no longer active/);
   assert.deepEqual(prompts, []);
+  pi.events.get("session_shutdown")();
+});
+
+test("live steering carries a newer active checkpoint forward after waiting for its action lock", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let release;
+  let enter;
+  const entered = new Promise((resolve) => { enter = resolve; });
+  const held = withGoalActionLock(root, "g_test", async () => {
+    enter();
+    await new Promise((resolve) => { release = resolve; });
+    await recordDecision(binding, "leave", {
+      progress: "Concurrent work produced fresh evidence.",
+      action: "Preserve the fresh checkpoint.",
+      evidence: ["Fresh evidence recorded while steering waited."],
+      wait: { condition: "the next exact event", reviewAt: new Date(Date.now() + 60_000).toISOString() },
+    }, root);
+  });
+  await entered;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "blocked" }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker can use one fresh instruction.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue from the fresh checkpoint.",
+  });
+
+  release();
+  await held;
+  const result = await steering;
+  assert.equal(result.isError, false, result.content[0].text);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.deepEqual(stored.evidence, ["Fresh evidence recorded while steering waited."]);
+  assert.equal(stored.lastDecision.decision, "steer");
   pi.events.get("session_shutdown")();
 });
 
