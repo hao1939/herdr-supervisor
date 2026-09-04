@@ -307,7 +307,7 @@ export class ExternalEventWatcher {
     for (const [deliveryKey, { goalId, event, items }] of groups) {
       const batch = items.slice(0, MAX_EVENTS_PER_DELIVERY);
       try {
-        await this.deliver(goalId, batch.map(({ resource, pending }) => ({
+        const outcome = await this.deliver(goalId, batch.map(({ resource, pending }) => ({
           event,
           source: resource.source,
           subject: resource.subject,
@@ -324,6 +324,16 @@ export class ExternalEventWatcher {
           delivered.push([key, pending.goalId, pending.revision, event]);
         }
         this.reported.delete(deliveryKey);
+        if (outcome?.warning) {
+          const subjects = batch.map(({ resource }) => `${resource.source} ${resource.subject}`).join(", ");
+          await this.report(deliveryKey, {
+            kind: "delivery",
+            goalId,
+            affectedGoalIds: [goalId],
+            retry: "The event will not be sent again automatically because delivery may already have taken effect. Inspect current worker evidence before deciding whether to act.",
+            message: `delivery outcome for ${goalId} and ${subjects} is uncertain: ${outcome.warning}`,
+          });
+        }
       } catch (error) {
         const subjects = batch.map(({ resource }) => `${resource.source} ${resource.subject}`).join(", ");
         await this.report(deliveryKey, {

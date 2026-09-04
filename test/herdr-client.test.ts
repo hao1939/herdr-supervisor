@@ -4,7 +4,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { canResumeNativeGoal, HerdrClient } from "../src/herdr-client.ts";
+import {
+  canResumeNativeGoal,
+  HerdrClient,
+  NativeGoalResumeUncertainError,
+} from "../src/herdr-client.ts";
 
 async function fakeHerdr(handler) {
   const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
@@ -166,14 +170,13 @@ test("resumeNativeGoal submits the slash command as TUI keys and confirms work",
   assert.equal(requests.some(({ method }) => method === "agent.prompt"), false);
 });
 
-test("resumeNativeGoal clears a command left by an uncertain prior submission", async (t) => {
+test("resumeNativeGoal reports uncertain Enter delivery without retrying", async (t) => {
   const client = new HerdrClient();
   const keyWrites = [];
-  let enterAttempts = 0;
   t.mock.method(client, "request", async (method, params) => {
     if (method === "agent.send_keys") {
       keyWrites.push(params.keys);
-      if (params.keys.includes("enter") && enterAttempts++ === 0) {
+      if (params.keys.includes("enter")) {
         throw new Error("uncertain Enter delivery");
       }
     }
@@ -181,12 +184,12 @@ test("resumeNativeGoal clears a command left by an uncertain prior submission", 
     return { type: "ok" };
   });
 
-  await assert.rejects(client.resumeNativeGoal("w1:p2", 1_000), /uncertain Enter delivery/);
-  await client.resumeNativeGoal("w1:p2", 1_000);
+  await assert.rejects(
+    client.resumeNativeGoal("w1:p2", 1_000),
+    (error) => error instanceof NativeGoalResumeUncertainError && /uncertain Enter delivery/.test(error.message),
+  );
 
   assert.deepEqual(keyWrites, [
-    ["ctrl+u", ..."/goal", "space", ..."resume"],
-    ["enter"],
     ["ctrl+u", ..."/goal", "space", ..."resume"],
     ["enter"],
   ]);

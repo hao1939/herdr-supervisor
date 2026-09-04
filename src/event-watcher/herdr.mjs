@@ -1,5 +1,10 @@
 import { loadSupervisorGoals } from "../goal-registry.ts";
-import { canResumeNativeGoal, HerdrClient, submitNativeGoalResume } from "../herdr-client.ts";
+import {
+  canResumeNativeGoal,
+  HerdrClient,
+  NativeGoalResumeUncertainError,
+  submitNativeGoalResume,
+} from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
@@ -27,41 +32,70 @@ export function herdrGoalDelivery({
   ...options
 } = {}) {
   const root = goalsRoot || defaultGoalsRoot();
-  return async (goalId, events) => withGoalActionLock(root, goalId, async () => {
-    if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource event");
-    const goals = await loadSupervisorGoals(root);
-    const binding = goals.active.find((goal) => goal.goalId === goalId);
-    if (!binding) {
-      if (goals.completed.some((goal) => goal.goalId === goalId)) return { ignored: "goal completed" };
-      if (goals.errors.some((goal) => goal.goalId === goalId)) throw new Error("canonical goal state is unreadable");
-      throw new Error("active canonical goal was not found");
-    }
-    const findExact = async () => {
-      const result = await request("session.snapshot", {}, options);
-      const matches = result.snapshot.agents.filter((agent) => !identityMismatch(binding, agent));
-      if (matches.length !== 1) {
-        throw new Error(`canonical goal worker resolved to ${matches.length} live native sessions`);
+  return async (goalId, events) => {
+    let outcome;
+    try {
+      return await withGoalActionLock(root, goalId, async () => {
+        if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource event");
+        const goals = await loadSupervisorGoals(root);
+        const binding = goals.active.find((goal) => goal.goalId === goalId);
+        if (!binding) {
+          if (goals.completed.some((goal) => goal.goalId === goalId)) {
+            outcome = { ignored: "goal completed" };
+            return outcome;
+          }
+          if (goals.errors.some((goal) => goal.goalId === goalId)) throw new Error("canonical goal state is unreadable");
+          throw new Error("active canonical goal was not found");
+        }
+        const findExact = async () => {
+          const result = await request("session.snapshot", {}, options);
+          const matches = result.snapshot.agents.filter((agent) => !identityMismatch(binding, agent));
+          if (matches.length !== 1) {
+            throw new Error(`canonical goal worker resolved to ${matches.length} live native sessions`);
+          }
+          return matches[0];
+        };
+        let agent = await findExact();
+        if (binding.agentSession.agent === "codex" && canResumeNativeGoal(agent)) {
+          try {
+            await submitNativeGoalResume(
+              (method, params, timeoutMs) => request(method, params, { ...options, timeoutMs }),
+              agent.pane_id,
+              10_000,
+            );
+          } catch (error) {
+            if (!(error instanceof NativeGoalResumeUncertainError)) throw error;
+            outcome = { paneId: agent.pane_id, warning: error.message };
+            return outcome;
+          }
+          agent = await findExact();
+          if (agent.agent_status !== "working") {
+            throw new Error("exact worker settled again before event delivery");
+          }
+        }
+        try {
+          await request("agent.prompt", {
+            target: agent.pane_id,
+            text: workerEventMessage(goalId, events),
+          }, options);
+        } catch (error) {
+          outcome = {
+            paneId: agent.pane_id,
+            warning: `event prompt delivery in ${agent.pane_id} is uncertain: ${error instanceof Error ? error.message : error}`,
+          };
+          return outcome;
+        }
+        outcome = { paneId: agent.pane_id };
+        return outcome;
+      });
+    } catch (error) {
+      if (outcome) {
+        const lockWarning = `goal action lock release failed: ${error.message}`;
+        return { ...outcome, warning: [outcome.warning, lockWarning].filter(Boolean).join("; ") };
       }
-      return matches[0];
-    };
-    let agent = await findExact();
-    if (binding.agentSession.agent === "codex" && canResumeNativeGoal(agent)) {
-      await submitNativeGoalResume(
-        (method, params, timeoutMs) => request(method, params, { ...options, timeoutMs }),
-        agent.pane_id,
-        10_000,
-      );
-      agent = await findExact();
-      if (agent.agent_status !== "working") {
-        throw new Error("exact worker settled again before event delivery");
-      }
+      throw error;
     }
-    await request("agent.prompt", {
-      target: agent.pane_id,
-      text: workerEventMessage(goalId, events),
-    }, options);
-    return { paneId: agent.pane_id };
-  });
+  };
 }
 
 export function herdrSupervisorDiagnostic({

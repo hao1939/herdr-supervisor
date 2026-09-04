@@ -380,7 +380,11 @@ left by an uncertain prior write. It submits Enter separately and verifies that
 the same worker reports `working` before sending the event message. Herdr's
 `blocked` status means an approval or question UI and is not this resume case.
 Delivery fails closed if the transition cannot be confirmed; it does not create
-a replacement worker or a delivery queue.
+a replacement worker or a delivery queue. If Herdr may have accepted a resume
+or event prompt but its response is lost, the watcher does not send that event
+again automatically. It clears the pending event and reports the uncertainty to
+the supervisor so fresh worker evidence can guide the next action without
+duplicating an instruction.
 
 ### Diagnostics
 

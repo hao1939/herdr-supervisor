@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -657,6 +657,37 @@ test("a failed delivery survives restart and retries from the bounded revision c
   });
   await recovered.runOnce();
   assert.deepEqual(delivered, [["g_owner", "one"]]);
+  assert.equal((Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any).pending, undefined);
+});
+
+test("an uncertain delivery is diagnosed without automatically sending the event again", async (t) => {
+  const directory = await temporary(t, "event-watch-uncertain-delivery-");
+  const statePath = join(directory, "state.json");
+  const diagnostics = [];
+  let deliveries = 0;
+  const watcher = new ExternalEventWatcher({
+    statePath,
+    sources: {
+      source: {
+        scan: async () => discovery([{
+          subject: "resource-1", goalId: "g_owner", revision: "one", payload: {},
+        }]),
+      },
+    },
+    deliver: async () => {
+      deliveries += 1;
+      return { warning: "the transport response was lost" };
+    },
+    diagnose: async (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  await watcher.runOnce();
+  await watcher.runOnce();
+
+  assert.equal(deliveries, 1);
+  assert.equal(diagnostics.length, 1);
+  assert.match(diagnostics[0].message, /transport response was lost/);
+  assert.match(diagnostics[0].retry, /will not be sent again automatically/);
   assert.equal((Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any).pending, undefined);
 });
 
@@ -2043,6 +2074,69 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   assert.match(prompts[0].text, /"id": 71/);
   assert.match(prompts[0].text, /"id": "policy-1"/);
   assert.match(prompts[0].text, /Do not treat the notification itself as provider authority/);
+});
+
+test("Herdr delivery preserves uncertain native resume without resubmitting the event", async (t) => {
+  const root = await temporary(t, "event-watch-uncertain-resume-");
+  const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" };
+  await registerSupervisedGoal({ paneId: "w1:p1", terminalId: "terminal-1", agentSession: session }, {
+    objective: "Finish the exact goal.",
+    acceptance: ["Current evidence proves completion."],
+  }, root, { goalId: "g_uncertain" });
+  const calls = [];
+  const deliver = herdrGoalDelivery({
+    goalsRoot: root,
+    request: async (method, params) => {
+      calls.push([method, params]);
+      if (method === "session.snapshot") return { snapshot: { agents: [{
+        pane_id: "w1:p1",
+        terminal_id: "terminal-1",
+        agent_session: session,
+        agent_status: "done",
+      }] } };
+      if (method === "agent.send_keys" && params.keys?.includes("enter")) {
+        throw new Error("Enter response was lost");
+      }
+      return {};
+    },
+  });
+
+  const result = await deliver("g_uncertain", [{ source: "github-pr", subject: "owner/repo#42" }]);
+
+  assert.match(result.warning, /Enter response was lost/);
+  assert.equal(calls.filter(([method]) => method === "agent.send_keys").length, 2);
+  assert.equal(calls.some(([method]) => method === "agent.prompt"), false);
+});
+
+test("Herdr delivery preserves success when action-lock cleanup fails", async (t) => {
+  const root = await temporary(t, "event-watch-lock-release-");
+  const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session-1" };
+  await registerSupervisedGoal({ paneId: "w1:p1", terminalId: "terminal-1", agentSession: session }, {
+    objective: "Finish the exact goal.",
+    acceptance: ["Current evidence proves completion."],
+  }, root, { goalId: "g_release" });
+  let prompts = 0;
+  const deliver = herdrGoalDelivery({
+    goalsRoot: root,
+    request: async (method) => {
+      if (method === "session.snapshot") return { snapshot: { agents: [{
+        pane_id: "w1:p1",
+        terminal_id: "terminal-1",
+        agent_session: session,
+        agent_status: "working",
+      }] } };
+      if (method === "agent.prompt") {
+        prompts += 1;
+        await unlink(join(root, ".action-locks", "g_release", "owner.json"));
+      }
+      return {};
+    },
+  });
+
+  const result = await deliver("g_release", [{ source: "github-pr", subject: "owner/repo#42" }]);
+
+  assert.equal(prompts, 1);
+  assert.match(result.warning, /goal action lock release failed: goal action lock disappeared/);
 });
 
 test("Herdr delivery bounds oversized observed facts without hiding the resource", async (t) => {

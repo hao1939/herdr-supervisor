@@ -5,6 +5,16 @@ import { join } from "node:path";
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const nativeGoalResumeKeys = ["ctrl+u", ..."/goal", "space", ..."resume"];
 
+export class NativeGoalResumeUncertainError extends Error {
+  cause: unknown;
+
+  constructor(paneId, cause) {
+    super(`native Goal resume delivery in ${paneId} is uncertain: ${cause instanceof Error ? cause.message : cause}`);
+    this.name = "NativeGoalResumeUncertainError";
+    this.cause = cause;
+  }
+}
+
 export function canResumeNativeGoal(agent) {
   // Herdr `blocked` means an approval or question UI, not a parked native Goal.
   return agent?.agent_status === "idle" || agent?.agent_status === "done";
@@ -31,16 +41,21 @@ export async function submitNativeGoalResume(request, paneId, timeoutMs = 5_000)
     remaining();
   }
   await wait(parseDelayMs);
-  await request("agent.send_keys", {
-    target: paneId,
-    keys: ["enter"],
-  }, remaining());
+  const enterTimeout = remaining();
+  try {
+    await request("agent.send_keys", {
+      target: paneId,
+      keys: ["enter"],
+    }, enterTimeout);
 
-  for (;;) {
-    const remainingMs = remaining();
-    const result = await request("agent.get", { target: paneId }, remainingMs);
-    if (result.agent?.agent_status === "working") return result.agent;
-    await wait(Math.min(50, remaining()));
+    for (;;) {
+      const remainingMs = remaining();
+      const result = await request("agent.get", { target: paneId }, remainingMs);
+      if (result.agent?.agent_status === "working") return result.agent;
+      await wait(Math.min(50, remaining()));
+    }
+  } catch (error) {
+    throw new NativeGoalResumeUncertainError(paneId, error);
   }
 }
 
