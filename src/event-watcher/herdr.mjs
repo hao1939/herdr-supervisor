@@ -1,5 +1,5 @@
 import { loadSupervisorGoals } from "../goal-registry.ts";
-import { HerdrClient } from "../herdr-client.ts";
+import { canResumeNativeGoal, HerdrClient, submitNativeGoalResume } from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
@@ -45,12 +45,12 @@ export function herdrGoalDelivery({
       return matches[0];
     };
     let agent = await findExact();
-    if (binding.agentSession.agent === "codex" && ["idle", "done"].includes(agent.agent_status)) {
-      await request("agent.prompt", {
-        target: agent.pane_id,
-        text: "/goal resume",
-        wait: { until: ["working"], timeout_ms: 10_000 },
-      }, { ...options, timeoutMs: 12_000 });
+    if (binding.agentSession.agent === "codex" && canResumeNativeGoal(agent)) {
+      await submitNativeGoalResume(
+        (method, params, timeoutMs) => request(method, params, { ...options, timeoutMs }),
+        agent.pane_id,
+        10_000,
+      );
       agent = await findExact();
       if (agent.agent_status !== "working") {
         throw new Error("exact worker settled again before event delivery");

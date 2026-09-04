@@ -44,8 +44,8 @@ parallel sources of goal truth.
 
 The Supervisor implements the small foundation that every goal needs and lets
 the model handle situational judgment. The practical heuristic is **solidify
-the common 20%; teach the model the remaining 80%**. This is not a feature
-quota. It is a test for whether a behavior belongs in code.
+the common 20%; teach the model the remaining 80%**. This is a decision rule
+for whether behavior belongs in code, not a target count.
 
 The minimal core lets an agent:
 
@@ -259,7 +259,7 @@ Goal equivalence is intentionally stricter than relatedness. The objective,
 continuity horizon, expected artifacts, and acceptance evidence must be
 substantially the same. Sharing a topic, source, tool, repository, or worker
 capability does not make two outcomes equivalent, and a constraint inside one
-goal never becomes an admission rule for other goals.
+goal does not restrict starting other distinct outcomes.
 
 A new distinct goal owns its own duties. Its creation does not authorize
 rewriting a related goal to permit coexistence or adding coordination work to
@@ -306,6 +306,31 @@ empty pane restored with a new terminal refreshes that transient checkpoint. A
 missing pane may be replaced as a routing location only when the recorded
 session supports exact resume and code verifies that saved identity. A changed
 or unsupported session fails closed.
+
+Model input and Codex TUI commands are different transport surfaces. Sending
+`/goal resume` through `agent.prompt` only asks the model to read that text; it
+does not operate the native Goal. For an exact settled pane, the executor sends
+the native slash command as logical keys, submits Enter separately after the
+TUI can parse it, and verifies that the same worker reports `working` before it
+sends any follow-up. This is one deterministic wake primitive, not another
+queue or lifecycle state machine.
+
+Before typing, the executor clears the current composer line so retrying an
+uncertain text write cannot append a second command. Herdr's `blocked` lifecycle
+state means an approval or question UI; it is distinct from the native Goal's
+blocked/stalled label and must not receive `/goal resume`.
+
+Supervisor steering, durable refinement delivery, and external event delivery
+share the same process-safe per-goal action lock from their final identity read
+through any native resume and follow-up delivery. Internal action paths
+therefore cannot interleave TUI commands or prompts for one goal.
+
+Herdr 0.8 does not let `agent.send_keys` require an expected terminal and
+native session. The executor checks exact identity before and after native Goal
+resume and fails closed on a detected replacement, but it cannot make the two
+TUI writes atomic across pane replacement. That remaining runtime race needs a
+small identity-conditioned Herdr operation; the Supervisor does not imitate it
+with another lock, receipt store, or lifecycle.
 
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
@@ -456,7 +481,9 @@ its own earlier work.
 
 The worker never sleeps or polls for an external condition. When it has
 genuinely exhausted the safe work it can do now, it reports the exact remaining
-condition once and yields. An idle worker costs nothing.
+condition once and lets its native Codex Goal enter the blocked/stalled state
+after the native blocked audit. That state parks execution; it does not complete
+or stop the durable supervised goal. An idle worker costs nothing.
 
 Idle is not the same as inactive. An unfinished goal keeps its pane because it
 may still own a wait, review, or immediate next action. Herdr preserves native
@@ -604,13 +631,14 @@ event defect. If the event passes, improve the agent side instead.
 
 For example, a future GitHub portfolio observer could prompt the supervisor
 with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and
-blocked goals before coordinating affected workers. A protocol PoC confirmed
-that Herdr's ordinary `agent.prompt` is sufficient for this path. It is
-intentionally an empowered supervisor turn, not the periodic fenced global
-review. The observer would not maintain a hold state or route workers, and the
-periodic review would remain only a missed-event safety net. This is an
-extension seam, not a feature until live evidence justifies it; it needs no
-custom Herdr event, local bus, spool, queue, or workflow engine.
+blocked goals before coordinating affected workers. A supervisor turn that is
+already able to receive model input may use Herdr's ordinary `agent.prompt`;
+resuming a settled native Codex Goal first requires the exact-pane TUI command
+described above. This would be an empowered supervisor turn, not the periodic
+fenced global review. The observer would not maintain a hold state or route
+workers, and the periodic review would remain only a missed-event safety net.
+This is an extension seam, not a feature until live evidence justifies it; it
+needs no custom Herdr event, local bus, spool, queue, or workflow engine.
 
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable
@@ -722,6 +750,14 @@ the remedy belongs in knowledge rather than another mechanism.
 
 Workers run concurrently. The one supervisor session makes one semantic
 decision at a time.
+
+Start every ready, nonduplicate validation immediately and keep unrelated work
+moving while results are pending. A submitted run is useful execution
+progress, but it is not completion proof or a reason to delay other ready
+validation. If the provider reports a concrete failure or two operations truly
+conflict, preserve that fact and continue unaffected work. Asking the portfolio
+to focus on existing work limits speculative new work; every ready change still
+gets validated.
 
 - Each worker has at most one pending in-memory review signal.
 - Repeated signals coalesce because the review rereads authoritative state.

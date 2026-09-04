@@ -3,6 +3,46 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const nativeGoalResumeKeys = ["ctrl+u", ..."/goal", "space", ..."resume"];
+
+export function canResumeNativeGoal(agent) {
+  // Herdr `blocked` means an approval or question UI, not a parked native Goal.
+  return agent?.agent_status === "idle" || agent?.agent_status === "done";
+}
+
+export async function submitNativeGoalResume(request, paneId, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => {
+    const milliseconds = deadline - Date.now();
+    if (milliseconds <= 0) throw new Error(`native Goal in ${paneId} did not resume`);
+    return milliseconds;
+  };
+  await request("agent.send_keys", {
+    target: paneId,
+    keys: nativeGoalResumeKeys,
+  }, remaining());
+  // Clear any command text retained after an uncertain earlier write. Herdr
+  // writes logical keys directly to the TUI; keep Enter in a later write so
+  // Codex has parsed the slash command before it is submitted.
+  const parseDelayMs = 100;
+  const beforeParseDelay = remaining();
+  if (beforeParseDelay <= parseDelayMs) {
+    await wait(beforeParseDelay);
+    remaining();
+  }
+  await wait(parseDelayMs);
+  await request("agent.send_keys", {
+    target: paneId,
+    keys: ["enter"],
+  }, remaining());
+
+  for (;;) {
+    const remainingMs = remaining();
+    const result = await request("agent.get", { target: paneId }, remainingMs);
+    if (result.agent?.agent_status === "working") return result.agent;
+    await wait(Math.min(50, remaining()));
+  }
+}
 
 function defaultSocketPath(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
@@ -89,6 +129,10 @@ export class HerdrClient {
       text,
       ...(wait ? { wait } : {}),
     }, timeoutMs);
+  }
+
+  async resumeNativeGoal(paneId, timeoutMs = 5_000) {
+    return submitNativeGoalResume(this.request.bind(this), paneId, timeoutMs);
   }
 
   async splitPane({ paneId, direction = "right", cwd, focus = false }) {

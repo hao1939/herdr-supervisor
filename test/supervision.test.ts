@@ -270,11 +270,11 @@ test("a finished worker turn is not presented as a finished goal", () => {
 
 test("a persisted human question is the next action shown after restart", () => {
   const current = binding({
-    progress: "Human input is required: may this worker use shared capacity?",
+    progress: "Human input is required: may this worker publish the external result?",
     lastDecision: {
       decision: "ask_human",
       at: "2026-08-28T10:00:00.000Z",
-      action: "May this worker use shared capacity?",
+      action: "May this worker publish the external result?",
     },
   });
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
@@ -287,7 +287,7 @@ test("a missing pane does not hide an outstanding human question", () => {
     lastDecision: {
       decision: "ask_human",
       at: "2026-08-28T10:00:00.000Z",
-      action: "May this worker use shared capacity?",
+      action: "May this worker publish the external result?",
     },
   });
   const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
@@ -308,7 +308,7 @@ test("a human question does not promise recovery for an unsupported missing sess
     lastDecision: {
       decision: "ask_human",
       at: "2026-08-28T10:00:00.000Z",
-      action: "May this worker use shared capacity?",
+      action: "May this worker publish the external result?",
     },
   });
   const output = formatWorker(liveWorker(current, { agents: [], panes: [] }));
@@ -364,12 +364,12 @@ test("a settled future wait shows its condition and review time", () => {
   const current = binding({
     progress: "Local proof is complete.",
     wait: {
-      condition: "the capacity owner to release the shared pipeline slot",
+      condition: "the peer to publish the shared fixture",
       reviewAt: "2026-08-29T09:53:30.000Z",
     },
   });
   const output = formatWorker(liveWorker(current, snapshot(agent({ agent_status: "idle" }))));
-  assert.match(output, /Next: wait for the capacity owner to release the shared pipeline slot/);
+  assert.match(output, /Next: wait for the peer to publish the shared fixture/);
   assert.match(output, /Review at: 2026-08-29T09:53:30.000Z/);
   assert.doesNotMatch(output, /review current evidence/);
 });
@@ -390,7 +390,7 @@ test("changed worker identity takes priority over an earlier human question", ()
     lastDecision: {
       decision: "ask_human",
       at: "2026-08-28T10:00:00.000Z",
-      action: "May this worker use shared capacity?",
+      action: "May this worker publish the external result?",
     },
   });
   const replacement = agent({
@@ -420,7 +420,7 @@ test("review notice explains the goal and signal in plain language", () => {
       goalId: "g_waiter",
       paneId: "w1:p7",
       wait: {
-        condition: "Fix cancellation to release the shared test slot",
+        condition: "Fix cancellation to publish the shared fixture",
         reviewAt: "2026-08-29T01:00:00Z",
       },
     }],
@@ -433,7 +433,7 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Current wait\n  the server retry boundary\n  Review at: 2026-08-29T00:00:00Z/);
   assert.match(message, /Current evidence\n- The server supplied retry boundary/);
   assert.match(message, /Goals waiting on this goal/);
-  assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to release the shared test slot/);
+  assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to publish the shared fixture/);
   assert.match(message, /supervisor_reconsider for exactly those panes/);
   assert.match(message, /Do not wake them merely because this goal recorded another decision/);
   assert.match(message, /Observe this exact worker/);
@@ -511,7 +511,7 @@ test("goal formation precedes comparison with existing work", () => {
   assert.match(prompt, /objective, continuity horizon, expected artifacts, and acceptance evidence are substantially the same/);
   assert.match(prompt, /shared subject, source, tool, or ability to absorb the work is not enough/);
   assert.match(prompt, /constraints govern that goal only/);
-  assert.match(prompt, /never treat its local one-worker, one-topic, or scope rule as a global admission rule/);
+  assert.match(prompt, /constraints govern that goal only; they do not restrict starting a distinct outcome/);
   assert.match(prompt, /Reuse the exact existing goal for an equivalent outcome/);
   assert.match(prompt, /start a new goal for a distinct outcome/);
   assert.match(prompt, /asks only for a proposal, discuss it without mutation/);

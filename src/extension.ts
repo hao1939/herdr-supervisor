@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import { HerdrClient } from "./herdr-client.ts";
+import { canResumeNativeGoal, HerdrClient } from "./herdr-client.ts";
 import {
   discardInstalledGoal,
   loadSupervisorGoals,
@@ -96,7 +96,7 @@ type ContractFields = {
   constraints: string[];
 };
 
-// This is deterministic retry protection, not semantic goal admission.
+// This is deterministic retry protection, not semantic goal matching.
 function sameContractFields(left: ContractFields, right: ContractFields) {
   const sameItems = (first: string[], second: string[]) =>
     first.length === second.length && first.every((item, index) => item.trim() === second[index].trim());
@@ -1270,47 +1270,70 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       if (reviewTurn.isBusy()) {
         return text(`Finish preparing or reviewing ${reviewTurn.paneId} before updating a goal contract.`, true);
       }
+      const root = defaultGoalsRoot();
       try {
         const binding = await bindingForPane(params.pane_id);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-        const result = await refineSupervisorGoal(binding.goalId, {
-          objective: params.goal.trim(),
-          context: (params.context || []).map((item) => item.trim()).filter(Boolean),
-          acceptance: params.acceptance.map((item) => item.trim()).filter(Boolean),
-          constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
-          summary: params.summary.trim(),
+        const update = await withGoalActionLock(root, binding.goalId, async () => {
+          const goals = await loadSupervisorGoals(root);
+          if (goals.errors.some((goal) => goal.goalId === binding.goalId)) {
+            throw new Error("canonical goal state is unreadable");
+          }
+          const current = goals.active.find((goal) => goal.goalId === binding.goalId);
+          if (!current) throw new Error("goal is no longer active");
+          if (
+            current.paneId !== binding.paneId
+            || current.terminalId !== binding.terminalId
+            || !sameAgentSession(current.agentSession, binding.agentSession)
+          ) {
+            throw new Error("canonical worker routing changed while waiting to update the goal");
+          }
+          const result = await refineSupervisorGoal(binding.goalId, {
+            objective: params.goal.trim(),
+            context: (params.context || []).map((item) => item.trim()).filter(Boolean),
+            acceptance: params.acceptance.map((item) => item.trim()).filter(Boolean),
+            constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
+            summary: params.summary.trim(),
+          }, root);
+          const updated = await loadSupervisorGoals(root);
+          if (updated.errors.some((goal) => goal.goalId === binding.goalId)) {
+            throw new Error("updated canonical goal state is unreadable");
+          }
+          const canonical = updated.active.find((goal) => goal.goalId === binding.goalId);
+          if (!canonical) throw new Error("updated goal is no longer active");
+          const refinedBinding: ActiveGoal = { ...canonical, ...runtimeFor(canonical) };
+          let deliveryWarning = "";
+          if (mode() === "live") {
+            try {
+              const snapshot = await client.snapshot();
+              const agent = findAgent(snapshot, refinedBinding.paneId);
+              const mismatch = identityMismatch(
+                refinedBinding,
+                agent,
+                findPane(snapshot, refinedBinding.paneId),
+              );
+              if (mismatch) {
+                deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
+              } else if (typeof agent.name !== "string" || !agent.name.trim()) {
+                deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
+              } else {
+                deliveryWarning += await applyWorkerLabel(refinedBinding);
+                await client.promptAgent(refinedBinding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
+              }
+            } catch (error) {
+              deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
+            }
+          }
+          return { result, refinedBinding, deliveryWarning };
         });
         await reloadGoals();
-        const refinedBinding = await bindingForPane(params.pane_id) || result.binding;
-        scheduleReview(refinedBinding);
-        let deliveryWarning = "";
-        if (mode() === "live") {
-          try {
-            const snapshot = await client.snapshot();
-            const agent = findAgent(snapshot, binding.paneId);
-            const mismatch = identityMismatch(
-              refinedBinding,
-              agent,
-              findPane(snapshot, binding.paneId),
-            );
-            if (mismatch) {
-              deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
-            } else if (typeof agent.name !== "string" || !agent.name.trim()) {
-              deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
-            } else {
-              deliveryWarning += await applyWorkerLabel(refinedBinding);
-              await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
-            }
-          } catch (error) {
-            deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
-          }
-        }
+        scheduleReview(update.refinedBinding);
         await armReviewTimer();
-        const auditWarning = result.auditError ? ` Audit warning: ${result.auditError.message}.` : "";
-        return text(`Updated goal ${binding.goalId} for the same worker ${binding.paneId}; no new goal or worker was created.${deliveryWarning}${auditWarning}`);
+        const auditWarning = update.result.auditError ? ` Audit warning: ${update.result.auditError.message}.` : "";
+        return text(`Updated goal ${binding.goalId} for the same worker ${binding.paneId}; no new goal or worker was created.${update.deliveryWarning}${auditWarning}`);
       } catch (error) {
         const reloadWarning = await reconcileCacheAfterWriteFailure();
-        return text(`Could not update the supervised goal: ${error.message}.${reloadWarning}`, true);
+        return text(`Could not confirm the supervised goal update: ${error.message}.${reloadWarning}`, true);
       }
     },
   });
@@ -1602,7 +1625,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         );
         if (!latestPeer || latestPeerProblem || latestPeerAgent?.agent_status !== "working") {
           const peerState = latestPeerProblem || `worker is ${latestPeerAgent?.agent_status || "not running"}`;
-          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
+          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. An inactive peer cannot satisfy this condition; choose useful work that can proceed or name the real external blocker.`, true);
         }
         effectiveWaitingOnPane = latestPeer.paneId;
       }
@@ -1687,126 +1710,177 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         let liveAgent = findAgent(liveSnapshot, params.pane_id);
         let livePane = findPane(liveSnapshot, params.pane_id);
         let relocated = false;
-        if (!liveAgent) {
-          const previousPaneId = binding.paneId;
-          try {
-            binding = await recoverWorkerRouting(binding, liveSnapshot);
-          } catch (error) {
-            if (isRecoveryPreflightError(error)) {
-              return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.`, true);
-            }
-            reviewTurn.close(params.pane_id);
-            scheduleReview(binding);
-            let warning = "";
-            try { await armReviewTimer(); }
-            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
-            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied, but no worker instruction was sent.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
-          }
-          relocated = binding.paneId !== previousPaneId;
-          if (relocated) {
-            reviewTurn.retarget(params.pane_id, binding.paneId);
-            relocatedBinding = binding;
-          }
-          liveSnapshot = await client.snapshot();
-          const latestBinding = await adoptExactSession(binding, liveSnapshot);
-          if (latestBinding && latestBinding.paneId !== binding.paneId) {
-            reviewTurn.retarget(binding.paneId, latestBinding.paneId);
-            binding = latestBinding;
-            relocated = true;
-            relocatedBinding = binding;
-          } else if (latestBinding) {
-            binding = latestBinding;
-          }
-          if (relocated) {
-            try {
-              await connectObserver();
-            } catch (error) {
-              reportBackgroundFailure("Could not watch the relocated worker", error);
-            }
-            displayWarning = await applyWorkerLabel(binding);
-          }
-          liveAgent = findAgent(liveSnapshot, binding.paneId);
-          livePane = findPane(liveSnapshot, binding.paneId);
-        }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
-        const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
-        const canResumeNativeGoal = Boolean(
-          liveAgent
-          && binding.agentSession.agent === "codex"
-          && ["idle", "done"].includes(liveAgent.agent_status),
-        );
-        if (liveMismatch && !canResumeNow) {
-          if (relocatedBinding) throw new Error(liveMismatch);
+        const canRecoverLive = !liveAgent && canRecoverAgentSession(binding.agentSession);
+        if (liveMismatch && !canRecoverLive) {
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
         let continuedBinding = binding;
         let resumed = false;
+        let restartedProcess = false;
+        let attemptedNativeResume = false;
+        let recoveryAttempted = false;
+        let actionLockWarning = "";
         const instruction = params.message.trim();
-        if (canResumeNow) {
-          const request = recoveryRequest(binding, liveSnapshot);
-          if (relocated) request.name = workerNameForGoal(binding.goalId);
-          // An interrupted native Codex Goal is paused by design. Resume that
-          // lifecycle explicitly before queuing the supervisor's fresh
-          // steering; otherwise Codex waits at an interactive "Resume goal?"
-          // gate and the apparently recovered worker never moves.
-          request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
-          reviewTurn.close(binding.paneId);
-          let resumedAgent;
-          try {
-            resumedAgent = await client.startAndWaitAgent(request, 31_000);
-          } catch (error) {
-            scheduleReview(binding);
+        let delivery;
+        try {
+          await withGoalActionLock(defaultGoalsRoot(), binding.goalId, async () => {
+            const goals = await loadSupervisorGoals(defaultGoalsRoot());
+            if (goals.errors.some((goal) => goal.goalId === binding.goalId)) {
+              throw new Error("canonical goal state is unreadable");
+            }
+            const lockedBinding = goals.active.find((goal) => goal.goalId === binding.goalId);
+            if (!lockedBinding) throw new Error("goal is no longer active");
+            if (
+              lockedBinding.paneId !== binding.paneId
+              || lockedBinding.terminalId !== binding.terminalId
+              || !sameAgentSession(lockedBinding.agentSession, binding.agentSession)
+            ) {
+              throw new Error("canonical worker routing changed while waiting to continue");
+            }
+            binding = { ...lockedBinding, ...runtimeFor(lockedBinding) };
+            continuedBinding = binding;
+            let lockedSnapshot = await client.snapshot();
+            let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            if (lockedAgent) {
+              const lockedPane = findPane(lockedSnapshot, binding.paneId);
+              const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
+              if (lockedMismatch) throw new Error(lockedMismatch);
+            }
+            if (!lockedAgent) {
+              recoveryAttempted = true;
+              const previousPaneId = binding.paneId;
+              binding = await recoverWorkerRouting(binding, lockedSnapshot);
+              relocated = binding.paneId !== previousPaneId;
+              if (relocated) {
+                reviewTurn.retarget(params.pane_id, binding.paneId);
+                relocatedBinding = binding;
+              }
+              lockedSnapshot = await client.snapshot();
+              const latestBinding = await adoptExactSession(binding, lockedSnapshot);
+              if (latestBinding && latestBinding.paneId !== binding.paneId) {
+                reviewTurn.retarget(binding.paneId, latestBinding.paneId);
+                binding = latestBinding;
+                relocated = true;
+                relocatedBinding = binding;
+              } else if (latestBinding) {
+                binding = latestBinding;
+              }
+              continuedBinding = binding;
+              if (relocated) {
+                try {
+                  await connectObserver();
+                } catch (error) {
+                  reportBackgroundFailure("Could not watch the relocated worker", error);
+                }
+                displayWarning = await applyWorkerLabel(binding);
+              }
+              lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            }
+            const lockedPane = findPane(lockedSnapshot, binding.paneId);
+            const canRecoverNow = !lockedAgent && lockedPane?.terminal_id === binding.terminalId;
+            const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
+            if (lockedMismatch && !canRecoverNow) throw new Error(lockedMismatch);
+            const runtime = runtimeFor(binding);
+            if (lockedAgent && reviewTurn.isActive() && runtime.pendingObservationHasMessages !== undefined) {
+              const observedSequence = runtime.lastReviewStateChangeSeq;
+              const latestSequence = Number(lockedAgent.state_change_seq || 0);
+              if (latestSequence !== observedSequence) {
+                throw new Error("worker changed after it was observed; review current evidence before deciding again");
+              }
+            }
+
+            if (canRecoverNow) {
+              const request = recoveryRequest(binding, lockedSnapshot);
+              if (relocated) request.name = workerNameForGoal(binding.goalId);
+              // An interrupted native Codex Goal is paused by design. Resume
+              // that lifecycle before sending the fresh steering instruction.
+              request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
+              attemptedNativeResume = true;
+              reviewTurn.close(binding.paneId);
+              lockedAgent = await client.startAndWaitAgent(request, 31_000);
+              const resumedMismatch = identityMismatch(binding, lockedAgent, lockedAgent);
+              if (resumedMismatch) {
+                throw new Error(`resulting worker identity did not match: ${resumedMismatch}`);
+              }
+              continuedBinding = await refreshObservedLocation(binding, lockedAgent);
+              resumed = true;
+              restartedProcess = true;
+            } else if (binding.agentSession.agent === "codex" && canResumeNativeGoal(lockedAgent)) {
+              attemptedNativeResume = true;
+              await client.resumeNativeGoal(binding.paneId, 5000);
+              resumed = true;
+              let resumedSnapshot;
+              try {
+                resumedSnapshot = await client.snapshot();
+              } catch (error) {
+                throw new Error(`updated worker state could not be observed: ${error.message}`);
+              }
+              lockedAgent = findAgent(resumedSnapshot, binding.paneId);
+              const resumedMismatch = identityMismatch(
+                binding,
+                lockedAgent,
+                findPane(resumedSnapshot, binding.paneId),
+              );
+              if (resumedMismatch) {
+                throw new Error(`resulting worker identity did not match: ${resumedMismatch}`);
+              }
+              if (lockedAgent.agent_status !== "working") {
+                throw new Error("native Goal settled again before the follow-up instruction could be sent");
+              }
+              continuedBinding = await refreshObservedLocation(binding, lockedAgent);
+            }
+            delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+          });
+        } catch (error) {
+          let currentBinding: ActiveGoal | undefined;
+          let reloadWarning = "";
+          if (!delivery) {
+            try {
+              const goals = await reloadGoals();
+              const canonical = goals.active.find((goal) => goal.goalId === binding.goalId);
+              if (canonical) currentBinding = { ...canonical, ...runtimeFor(canonical) };
+            } catch (reloadError) {
+              goalCache = undefined;
+              reloadWarning = ` Supervisor state could not be refreshed: ${reloadError.message}.`;
+            }
+          }
+          if (delivery) {
+            actionLockWarning = `\nAction lock warning: ${error.message}`;
+          } else if (isRecoveryPreflightError(error)) {
+            return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.${reloadWarning}`, true);
+          } else if (recoveryAttempted) {
+            reviewTurn.close(binding.paneId);
+            if (currentBinding) scheduleReview(currentBinding);
             let warning = "";
             try { await armReviewTimer(); }
             catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
-            return text(`Could not confirm the exact-session resume for ${binding.paneId}: ${error.message}. The resume may have started, but no follow-up instruction was sent.${warning}\n\nDo not resume it again in this turn. The bounded review will reread current worker state and continue safely.`, true);
-          }
-          const resumedMismatch = identityMismatch(binding, resumedAgent, resumedAgent);
-          if (resumedMismatch) {
+            const uncertainty = attemptedNativeResume ? " The resume may have started." : "";
+            const retry = attemptedNativeResume
+              ? "Do not resume it again in this turn."
+              : "Do not retry in this turn.";
+            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied.${uncertainty} No worker instruction was sent.${reloadWarning}${warning}\n\n${retry} The bounded review will reread current state and continue safely.`, true);
+          } else {
             reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
-            return text(`The exact-session resume ran, but the resulting worker identity did not match: ${resumedMismatch}. No further message was sent.\n\nEnd this supervisor turn now; do not retry without fresh evidence.`, true);
+            if (currentBinding) scheduleReview(currentBinding);
+            let timerWarning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { timerWarning = ` Review timer warning: ${timerError.message}.`; }
+            const prefix = resumed
+              ? `The native Goal resumed in ${binding.paneId}, but`
+              : attemptedNativeResume
+                ? `Could not confirm that the native Goal resumed in ${binding.paneId}:`
+                : `Could not safely steer ${binding.paneId}:`;
+            const retry = attemptedNativeResume
+              ? "Do not resume it again in this turn."
+              : "Do not send the instruction again in this turn.";
+            const uncertainty = attemptedNativeResume && !resumed
+              ? " The resume may have started."
+              : "";
+            return text(`${prefix} ${error.message}.${uncertainty} No follow-up instruction was sent.${reloadWarning}${timerWarning}\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
-          continuedBinding = await refreshObservedLocation(binding, resumedAgent);
-          resumed = true;
-        } else if (canResumeNativeGoal) {
-          try {
-            await client.promptAgent(binding.paneId, "/goal resume", {
-              until: ["working"],
-              timeout_ms: 5000,
-            });
-          } catch (error) {
-            reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
-            return text(`Could not confirm that the native Goal resumed in ${binding.paneId}: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
-          }
-          reviewTurn.close(binding.paneId);
-          let resumedSnapshot;
-          try {
-            resumedSnapshot = await client.snapshot();
-          } catch (error) {
-            scheduleReview(binding);
-            return text(`The native Goal resumed in ${binding.paneId}, but its updated worker state could not be observed: ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
-          }
-          const resumedAgent = findAgent(resumedSnapshot, binding.paneId);
-          const resumedMismatch = identityMismatch(
-            binding,
-            resumedAgent,
-            findPane(resumedSnapshot, binding.paneId),
-          );
-          if (resumedMismatch) {
-            reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
-            return text(`The native Goal resumed, but the resulting worker identity did not match: ${resumedMismatch}. No follow-up instruction was sent.\n\nEnd this supervisor turn now and wait for fresh evidence.`, true);
-          }
-          if (resumedAgent.agent_status !== "working") {
-            scheduleReview(binding);
-            return text(`The native Goal resumed in ${binding.paneId}, but it settled again before the follow-up instruction could be sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
-          }
-          continuedBinding = await refreshObservedLocation(binding, resumedAgent);
-          resumed = true;
         }
-        const delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+        reviewTurn.close(binding.paneId);
         relocatedBinding = undefined;
         if (delivery.deliveryError) {
           // A transport error cannot prove that Herdr did not accept the
@@ -1819,7 +1893,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             params.evidence || continuedBinding.evidence,
             reviewAt,
           );
-          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}${actionLockWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
@@ -1835,16 +1909,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
             ? `${relocated
-              ? canResumeNow
+              ? restartedProcess
                 ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
                 : `Relocated the exact ${binding.agentSession.agent} session and resumed its native Goal`
-              : canResumeNow
+              : restartedProcess
                 ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
                 : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
             : relocated
               ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
               : `Steered ${params.pane_id}: ${params.message.trim()}`;
-          return text(`${resultText}${warning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
+          return text(`${resultText}${warning}${actionLockWarning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);

@@ -13,8 +13,8 @@ const workerExecutionBoundary = [
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "A pending pull request, pipeline run, or peer condition is one workstream inside the goal, not the end of it. While it is pending, continue any safe useful work in the same goal — another change, a test, preparation, or verifying your own earlier work.",
-  "When you have genuinely exhausted the safe work you can do now, report the exact remaining condition once and yield. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
+  "Pending review, validation, or peer state is one workstream, not the goal. Start each ready, nonduplicate validation and keep other useful work moving. Preserve any concrete provider failure verbatim.",
+  "When no safe work remains, report the resume condition and let the native Goal block/stall. This parks execution; the durable goal stays active. Do not poll or reread until a fresh event/check; then reread authority once, even if unchanged.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
 ].join(" ");
@@ -41,7 +41,7 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
     "Keep supervision metadata secondary; it identifies origin, not completion proof. Never publish a local path-backed session locator.",
-    `For each new ADO build owned by this goal, add and verify ${JSON.stringify(`herdr-goal=${binding.goalId}`)} once. Never tag another goal's build or register a watch.`,
+    `For each owned ADO build, set and verify exactly one ${JSON.stringify(`herdr-goal=${binding.goalId}`)} tag by returned ID. Metadata is not a tag. Never tag another goal's build or register a watch.`,
   ].join("\n");
 }
 
@@ -67,7 +67,7 @@ export function refinedGoalPrompt(binding: GoalTrace, workerName: string) {
     `The human refined the canonical contract for your active Codex Goal at ${JSON.stringify(resolve(goalPaths(goalId).contract))}.`,
     "Re-read the complete goal.json now and continue under its latest objective, context, completion criteria, and constraints.",
     workerExecutionBoundary,
-    "Keep the native Goal active until the revised contract is fully proved. If you had already completed it, start the same native Goal again from this canonical contract.",
+    "Complete the native Goal only when the revised contract is proved. Native blocked/stalled only parks an exhausted wait; it does not finish the durable goal. If you had already completed it, start the same native Goal again from this canonical contract.",
     pullRequestTraceability(binding, workerName),
     "Write progress and final results in plain language.",
   ].join(" ");
@@ -170,17 +170,17 @@ const supervisorPolicy = [
     "Use a fresh-start test for human refinements: if losing conversation history and the current checkpoint would change what future cycles must do or how the outcome is judged, persist the complete refinement in goal.json with supervisor_update_goal. A reconsideration or steering checkpoint is not durable authority.",
     "Treat one-time adoption, migration, backlog transfer, and evidence reconciliation as current execution unless they change the lasting outcome. Preserve large predecessor evidence by stable reference and integrity proof rather than replaying it without a concrete need; when portability truly requires an unfinished handoff, keep one short context reference and remove it after the handoff is sealed.",
     "Express required CI, live validation, or independent review as ordinary acceptance criteria for the outcome. Do not create a second goal merely to represent a review phase; create a review goal only when review itself is the human's distinct durable outcome.",
-    "Keep live IDs, credentials, waits, throttling, and other execution state in checkpoint evidence, not the contract.",
+    "Keep live IDs, credentials, waits, provider responses, and other execution state in checkpoint evidence, not the contract.",
     "Treat hosts, containers, identities, services, and authority boundaries as distinct. Require isolated worktrees when workers may share a Git repository.",
     "Before accepting an access blocker, require the failed operation, execution location, effective identity or authority, target, and observed error. A login at another boundary is not proof of access.",
   ],
   [
-    "Goal formation and admission",
+    "Forming and comparing goals",
     "When the human asks to design or start durable work, first form a candidate goal from their intended outcome and the conversation. Lead with a concrete interpretation and sensible recommended defaults; do not let a status dump or an existing goal define the request before you understand it.",
     "Ask at most one focused question when its answer would materially change the objective, continuity horizon, expected artifacts, acceptance evidence, authority, or risk. Show the useful candidate and your recommendation before asking. Reasonable defaults may fill ordinary detail, but they cannot silently add a materially different kind of work, deliverable, external effect, or authority. Research and synthesis, building and experimentation, and external operation are materially different work modes. When the request supports one but you recommend another, keep the candidate within the stated mode, present the broader mode as your one question, and do not authorize or start that broader work before the human answers.",
     "A finite deliverable and a standing loop are materially different continuity horizons. When the request reasonably supports either and does not make the stopping condition clear, recommend one horizon and ask before starting instead of silently choosing one.",
     "Only after the candidate is coherent, use supervisor_status to compare it with active and unstarted goals. Two goals fit only when their objective, continuity horizon, expected artifacts, and acceptance evidence are substantially the same. A shared subject, source, tool, or ability to absorb the work is not enough.",
-    "A goal's constraints govern that goal only; never treat its local one-worker, one-topic, or scope rule as a global admission rule for a distinct outcome.",
+    "A goal's constraints govern that goal only; they do not restrict starting a distinct outcome.",
     "Starting a distinct goal does not authorize changing a related goal to permit coexistence or add coordination duties. Put the new outcome's duties in its own contract. Update another goal only when the human has changed that goal; if the new outcome truly requires new work from that other goal's worker, make that expansion the material question.",
     "Reuse the exact existing goal for an equivalent outcome, durably update it for a true refinement of that same outcome, and start a new goal for a distinct outcome. If the human asks only for a proposal, discuss it without mutation.",
     "If the human already authorized execution with language such as work on it or start it, that authority survives any necessary clarification. Once the candidate is sufficiently clear, act without asking for start permission again.",
@@ -212,7 +212,7 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
-    "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
+    "Run independent workers and validations concurrently. Start every ready, nonduplicate validation immediately and keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. React to a concrete provider failure or conflicting operation without delaying unrelated work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; provider metadata notifications and bounded review will resume the same native Goal.",

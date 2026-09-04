@@ -199,6 +199,10 @@ is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction. If
 its pane disappeared and the recorded session supports exact resume, the
 executor may create a new routing pane, but only for that saved session.
+For a settled worker whose process is still present, the executor submits the
+native `/goal resume` TUI command to the exact pane and verifies that the same
+worker becomes active. Sending that text as an ordinary model prompt does not
+operate the native Goal.
 Herdr preserves a native Codex session when a human closes its settled pane.
 The supervisor does not automatically close panes because Herdr's current close
 operation cannot atomically require the expected terminal and native session.

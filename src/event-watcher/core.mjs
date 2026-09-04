@@ -384,21 +384,21 @@ export class ExternalEventWatcher {
     const observed = new Set(observations.map((item) => keyFor(item.source, item.subject)));
     const next = structuredClone(this.state);
     let changed = false;
-    let capacityFreed = false;
+    let checkpointSpaceFreed = false;
     for (const [key, resource] of Object.entries(next.resources)) {
       if (!Object.hasOwn(this.sources, resource.source)
         || !active.has(resource.goalId)
         || inactiveObserved.has(key)) {
         delete next.resources[key];
         changed = true;
-        capacityFreed = true;
+        checkpointSpaceFreed = true;
       }
     }
     for (const key of scan.absent) {
       if (!next.resources[key]) continue;
       delete next.resources[key];
       changed = true;
-      capacityFreed = true;
+      checkpointSpaceFreed = true;
     }
     const known = [];
     const discovered = [];
@@ -441,20 +441,20 @@ export class ExternalEventWatcher {
     }
     signal?.throwIfAborted();
     await this.deliverPending(observed);
-    if (capacityFreed) this.reported.delete("capacity");
+    if (checkpointSpaceFreed) this.reported.delete("checkpoint-limit");
     if (!deferred.length) {
       if (Object.keys(this.state.resources).length < this.maxResources) {
-        this.reported.delete("capacity");
+        this.reported.delete("checkpoint-limit");
       }
       return;
     }
     const examples = deferred.slice(0, 5)
       .map((item) => `${item.source} ${item.subject}`)
       .join(", ");
-    await this.report("capacity", {
-      kind: "capacity",
+    await this.report("checkpoint-limit", {
+      kind: "checkpoint-limit",
       affectedGoalIds: [...new Set(deferred.map((item) => item.goalId))].slice(0, 20),
-      retry: "Existing resources remain monitored; deferred resources are reconsidered when bounded capacity becomes available.",
+      retry: "Existing resources remain monitored; deferred resources are reconsidered when checkpoint space becomes available.",
       message: `event watcher checkpoint reached its ${this.maxResources}-resource limit; preserved existing monitoring and deferred ${deferred.length} newly discovered resources until a goal completes, a remembered resource is authoritatively absent, or its provider scope is removed: ${examples}`,
     });
   }

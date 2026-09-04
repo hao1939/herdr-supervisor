@@ -251,7 +251,7 @@ Agent response knowledge
 |---|---|---|---|
 | `linked-resource-change` | Exact current goal worker | A linked provider resource has a new meaningful revision | `knowledge/linked-resource-change.md` |
 | `linked-resource-stale` | Exact current goal worker | One or more linked resources for the goal remain on the same meaningful revision through the stale threshold | `knowledge/linked-resource-stale.md` |
-| `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint capacity pressure | `knowledge/watcher-diagnostic.md` |
+| `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint resource limit | `knowledge/watcher-diagnostic.md` |
 
 Stale resources due in one scan are grouped by durable goal. Each delivery
 carries at most 20 resources; overflow remains pending until a later successful
@@ -373,6 +373,14 @@ the shared process-local source backoff. It knows no provider-specific workflow.
 verifies one exact current native session, resumes a settled Codex Goal when
 needed, and sends the bounded observation. The notification is a wake hint,
 not provider authority or completion proof.
+
+Resume is a native Codex TUI operation, not a model prompt. Delivery sends
+`/goal resume` as logical keys to the exact pane, clearing any command text
+left by an uncertain prior write. It submits Enter separately and verifies that
+the same worker reports `working` before sending the event message. Herdr's
+`blocked` status means an approval or question UI and is not this resume case.
+Delivery fails closed if the transition cannot be confirmed; it does not create
+a replacement worker or a delivery queue.
 
 ### Diagnostics
 

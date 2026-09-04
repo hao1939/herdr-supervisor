@@ -537,7 +537,7 @@ test("shutdown aborts an in-flight provider scan without reporting a provider fa
   assert.deepEqual(diagnostics, []);
 });
 
-test("completed goal metadata does not consume watcher capacity", async (t) => {
+test("completed goal metadata does not consume checkpoint space", async (t) => {
   const directory = await temporary(t, "event-watch-completed-goal-");
   const delivered = [];
   const watcher = new ExternalEventWatcher({
@@ -1054,12 +1054,12 @@ test("the checkpoint stays bounded without evicting remembered resources", async
   const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
   assert.equal(resources.length, 2);
   assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["old", "pending"]);
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "checkpoint-limit"]);
   assert.match(diagnostics[1].message, /preserved existing monitoring/);
 });
 
-test("authoritative absence frees checkpoint capacity without losing pending delivery", async (t) => {
-  const directory = await temporary(t, "event-watch-pending-capacity-");
+test("authoritative absence frees checkpoint space without losing pending delivery", async (t) => {
+  const directory = await temporary(t, "event-watch-pending-space-");
   const statePath = join(directory, "state.json");
   let failing = true;
   let observations = [
@@ -1094,7 +1094,7 @@ test("authoritative absence frees checkpoint capacity without losing pending del
 });
 
 test("checkpoint saturation is visible when pending delivery cannot recover", async (t) => {
-  const directory = await temporary(t, "event-watch-capacity-diagnostic-");
+  const directory = await temporary(t, "event-watch-checkpoint-limit-");
   let observations = [
     { subject: "one", goalId: "g_same", revision: "one", payload: {} },
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
@@ -1122,14 +1122,14 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
   ];
   await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "checkpoint-limit"]);
   assert.match(diagnostics[1].message, /source new/);
   assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_same"]);
-  assert.match(diagnostics[1].retry, /capacity becomes available/);
+  assert.match(diagnostics[1].retry, /checkpoint space becomes available/);
 });
 
-test("capacity turnover allows a later distinct deferral diagnostic", async (t) => {
-  const directory = await temporary(t, "event-watch-capacity-turnover-");
+test("checkpoint turnover allows a later distinct deferral diagnostic", async (t) => {
+  const directory = await temporary(t, "event-watch-checkpoint-turnover-");
   let result = discovery([
     { subject: "one", goalId: "g_same", revision: "one", payload: {} },
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
@@ -1160,7 +1160,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
   ]);
   await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["capacity", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["checkpoint-limit", "checkpoint-limit"]);
   assert.match(diagnostics[0].message, /deferred-one/);
   assert.match(diagnostics[1].message, /deferred-two/);
 });
@@ -2010,7 +2010,10 @@ test("Herdr delivery resolves a goal to its current exact native session", async
         agent_status: resumed ? "working" : "done",
       }] } };
     }
-    if (params.text === "/goal resume") resumed = true;
+    if (method === "agent.send_keys" && params.keys?.includes("enter")) resumed = true;
+    if (method === "agent.get") {
+      return { agent: { agent_status: resumed ? "working" : "done" } };
+    }
     return {};
   };
   const deliver = herdrGoalDelivery({ goalsRoot: root, request });
@@ -2027,17 +2030,19 @@ test("Herdr delivery resolves a goal to its current exact native session", async
     },
   }]);
   const prompts = calls.filter(([method]) => method === "agent.prompt").map(([, params]) => params);
-  assert.equal(prompts.length, 2);
+  const keyCalls = calls.filter(([method]) => method === "agent.send_keys").map(([, params]) => params);
+  assert.deepEqual(keyCalls, [{ target: "w1:p9", keys: ["ctrl+u", ..."/goal", "space", ..."resume"] }, {
+    target: "w1:p9", keys: ["enter"],
+  }]);
+  assert.equal(prompts.length, 1);
   assert.equal(prompts[0].target, "w1:p9");
-  assert.equal(prompts[0].text, "/goal resume");
-  assert.equal(prompts[1].target, "w1:p9");
-  assert.match(prompts[1].text, /org\/project\/repo\/42/);
-  assert.match(prompts[1].text, /Observed at: 2026-09-03T00:00:00.000Z/);
-  assert.match(prompts[1].text, /Revision: revision-42/);
-  assert.match(prompts[1].text, /"mergeStatus": "conflicts"/);
-  assert.match(prompts[1].text, /"id": 71/);
-  assert.match(prompts[1].text, /"id": "policy-1"/);
-  assert.match(prompts[1].text, /Do not treat the notification itself as provider authority/);
+  assert.match(prompts[0].text, /org\/project\/repo\/42/);
+  assert.match(prompts[0].text, /Observed at: 2026-09-03T00:00:00.000Z/);
+  assert.match(prompts[0].text, /Revision: revision-42/);
+  assert.match(prompts[0].text, /"mergeStatus": "conflicts"/);
+  assert.match(prompts[0].text, /"id": 71/);
+  assert.match(prompts[0].text, /"id": "policy-1"/);
+  assert.match(prompts[0].text, /Do not treat the notification itself as provider authority/);
 });
 
 test("Herdr delivery bounds oversized observed facts without hiding the resource", async (t) => {
