@@ -1,7 +1,8 @@
 import { open, mkdir, readFile, readdir, rename, rmdir, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { atomicReplaceFile } from "./atomic-file.ts";
 import { sameAgentSession } from "./identity.ts";
 
 export const GOAL_SCHEMA = "herdr.goal/v1";
@@ -297,31 +298,6 @@ function jsonContent(value, maxBytes, label) {
   return content;
 }
 
-async function atomicWrite(path, value) {
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let file;
-  try {
-    file = await open(temporary, "wx", 0o600);
-    await file.writeFile(value);
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporary, path);
-    const directory = await open(dirname(path), "r");
-    try {
-      // The file sync protects its contents. Syncing the containing directory
-      // protects the rename that makes those contents current after a crash.
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
-}
-
 export async function initializeGoalStore(root = defaultGoalsRoot()) {
   await mkdir(root, { recursive: true, mode: 0o700 });
   let file;
@@ -352,7 +328,7 @@ export async function installGoal(goalId, contract, root = defaultGoalsRoot()) {
   if (!(await missing(paths.contract))) throw new Error(`goal ${goalId} is already installed`);
   await initializeGoalStore(root);
   await mkdir(paths.directory, { recursive: true, mode: 0o700 });
-  await atomicWrite(paths.contract, jsonContent(contract, MAX_CONTRACT_BYTES, "goal contract"));
+  await atomicReplaceFile(paths.contract, jsonContent(contract, MAX_CONTRACT_BYTES, "goal contract"));
   return contract;
 }
 
@@ -399,7 +375,7 @@ export async function updateGoalContract(goalId, change, root = defaultGoalsRoot
     const current = await loadGoalContract(goalId, root);
     const next = await change(structuredClone(current));
     validateGoalContract(next);
-    await atomicWrite(goalPaths(goalId, root).contract, jsonContent(next, MAX_CONTRACT_BYTES, "goal contract"));
+    await atomicReplaceFile(goalPaths(goalId, root).contract, jsonContent(next, MAX_CONTRACT_BYTES, "goal contract"));
     return next;
   });
 }
@@ -414,7 +390,7 @@ export async function startGoal(goalId, worker, root = defaultGoalsRoot(), optio
     at: options.at,
     worker,
   });
-  await atomicWrite(paths.current, jsonContent(state, MAX_STATE_BYTES, "goal state"));
+  await atomicReplaceFile(paths.current, jsonContent(state, MAX_STATE_BYTES, "goal state"));
   return state;
 }
 
@@ -483,7 +459,7 @@ export async function updateGoalState(
     next.revision = current.revision + 1;
     next.updatedAt = now();
     validateGoalState(next);
-    await atomicWrite(goalPaths(goalId, root).current, jsonContent(next, MAX_STATE_BYTES, "goal state"));
+    await atomicReplaceFile(goalPaths(goalId, root).current, jsonContent(next, MAX_STATE_BYTES, "goal state"));
     return next;
   });
 }

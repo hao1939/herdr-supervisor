@@ -519,7 +519,7 @@ test("shutdown aborts an in-flight provider scan without reporting a provider fa
         async scan(_known, { signal }) {
           assert.equal(signal, controller.signal);
           started();
-          await new Promise((resolve, reject) => {
+          await new Promise((_resolve, reject) => {
             signal.addEventListener("abort", () => reject(signal.reason), { once: true });
           });
         },
@@ -1270,7 +1270,7 @@ test("built-in sources pass daemon shutdown to provider requests", async () => {
     const requested = new Promise((resolve) => { started = resolve; });
     const source = create(async (_url, { signal }) => {
       started();
-      await new Promise((resolve, reject) => {
+      await new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), { once: true });
       });
     });
@@ -1831,7 +1831,7 @@ test("ADO authorization passes daemon shutdown to Azure CLI", async () => {
     signal: controller.signal,
     exec: async (_file, _arguments, options) => {
       receivedSignal = options.signal;
-      await new Promise((resolve, reject) => {
+      await new Promise((_resolve, reject) => {
         options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
       });
     },

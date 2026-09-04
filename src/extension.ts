@@ -1324,7 +1324,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       goal_id: Optional(Type.String({ minLength: 1, description: "Exact saved, active, or completed goal ID. Use null for the all-goal view." })),
     }),
     executionMode: "parallel",
-    async execute(_id, params, _signal, _onUpdate, ctx) {
+    async execute(_id, params, _signal, _onUpdate, _ctx) {
       const fenceError = reviewTurn.guard();
       if (fenceError) return text(fenceError, true);
       try {

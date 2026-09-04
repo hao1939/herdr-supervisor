@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
-import { goalPaths, loadGoalContract, readAudit, updateGoalState } from "../src/goal-store.ts";
+import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
 import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
