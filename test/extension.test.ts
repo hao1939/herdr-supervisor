@@ -1594,7 +1594,6 @@ test("a brief settled transition stays inside the worker native Goal", async (t)
   subscriptionEvent({ data: { pane_id: worker.paneId } });
   await pi.events.get("agent_settled")();
   assert.equal(pi.messages.length, 0, "an unrelated drain must not consume the raw transition early");
-  await new Promise((resolve) => setTimeout(resolve, 15));
   status = "working";
   sequence = 4;
   subscriptionEvent({ data: { pane_id: worker.paneId } });
