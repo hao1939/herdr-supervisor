@@ -1304,24 +1304,24 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           const refinedBinding: ActiveGoal = { ...canonical, ...runtimeFor(canonical) };
           let deliveryWarning = "";
           if (mode() === "live") {
-            const snapshot = await client.snapshot();
-            const agent = findAgent(snapshot, refinedBinding.paneId);
-            const mismatch = identityMismatch(
-              refinedBinding,
-              agent,
-              findPane(snapshot, refinedBinding.paneId),
-            );
-            if (mismatch) {
-              deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
-            } else if (typeof agent.name !== "string" || !agent.name.trim()) {
-              deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
-            } else {
-              deliveryWarning += await applyWorkerLabel(refinedBinding);
-              try {
+            try {
+              const snapshot = await client.snapshot();
+              const agent = findAgent(snapshot, refinedBinding.paneId);
+              const mismatch = identityMismatch(
+                refinedBinding,
+                agent,
+                findPane(snapshot, refinedBinding.paneId),
+              );
+              if (mismatch) {
+                deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
+              } else if (typeof agent.name !== "string" || !agent.name.trim()) {
+                deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
+              } else {
+                deliveryWarning += await applyWorkerLabel(refinedBinding);
                 await client.promptAgent(refinedBinding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
-              } catch (error) {
-                deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
               }
+            } catch (error) {
+              deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
             }
           }
           return { result, refinedBinding, deliveryWarning };

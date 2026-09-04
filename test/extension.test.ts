@@ -1086,7 +1086,7 @@ test("goal refinement serializes durable mutation and worker delivery", async (t
   pi.events.get("session_shutdown")();
 });
 
-test("goal refinement remains successful when worker delivery fails", async (t) => {
+test("goal refinement remains successful when delivery observation or prompt fails", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -1094,10 +1094,12 @@ test("goal refinement remains successful when worker delivery fails", async (t) 
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
-  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
-    agent_status: "working",
-    name: "refined-worker",
-  }));
+  let snapshotCalls = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => {
+    snapshotCalls += 1;
+    if (snapshotCalls === 1) throw new Error("worker snapshot failed");
+    return snapshot({ agent_status: "working", name: "refined-worker" });
+  });
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
     throw new Error("worker prompt transport failed");
   });
@@ -1105,7 +1107,19 @@ test("goal refinement remains successful when worker delivery fails", async (t) 
 
   const pi = fakePi();
   herdrSupervisor(pi);
-  const result = await pi.tools.get("supervisor_update_goal").execute("refine-failed-delivery", {
+  const snapshotFailure = await pi.tools.get("supervisor_update_goal").execute("refine-failed-snapshot", {
+    pane_id: worker.paneId,
+    goal: "Keep the durable refinement when observation fails.",
+    context: [],
+    acceptance: ["The durable contract records the refinement."],
+    constraints: [],
+    summary: "Preserved the durable update despite observation failure.",
+  });
+  assert.equal(snapshotFailure.isError, false, snapshotFailure.content[0].text);
+  assert.match(snapshotFailure.content[0].text, /durable contract was updated, but worker delivery could not be confirmed/);
+  assert.equal((await loadGoalContract("g_test", root)).objective, "Keep the durable refinement when observation fails.");
+
+  const promptFailure = await pi.tools.get("supervisor_update_goal").execute("refine-failed-prompt", {
     pane_id: worker.paneId,
     goal: "Keep the durable refinement when notification fails.",
     context: [],
@@ -1114,8 +1128,8 @@ test("goal refinement remains successful when worker delivery fails", async (t) 
     summary: "Preserved the durable update despite notification failure.",
   });
 
-  assert.equal(result.isError, false, result.content[0].text);
-  assert.match(result.content[0].text, /durable contract was updated, but worker delivery could not be confirmed/);
+  assert.equal(promptFailure.isError, false, promptFailure.content[0].text);
+  assert.match(promptFailure.content[0].text, /durable contract was updated, but worker delivery could not be confirmed/);
   assert.equal((await loadGoalContract("g_test", root)).objective, "Keep the durable refinement when notification fails.");
   pi.events.get("session_shutdown")();
 });
