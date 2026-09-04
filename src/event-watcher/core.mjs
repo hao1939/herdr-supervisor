@@ -11,6 +11,7 @@ const MAX_SCAN_WARNINGS = 10;
 const DEFAULT_MAX_RESOURCES = 1024;
 const MAX_EVENTS_PER_DELIVERY = 20;
 const SOURCE_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+const PENDING_EVENT_KINDS = new Set(["change", "stale"]);
 
 function requiredText(value, name) {
   if (typeof value !== "string" || !value.trim() || value.length > MAX_TEXT) {
@@ -74,11 +75,25 @@ function validateState(value, maxResources) {
     if (!Number.isFinite(Date.parse(resource.observedAt))) {
       throw new Error("resource observedAt must be an ISO timestamp");
     }
+    if (resource.staleNotified !== undefined && resource.staleNotified !== true) {
+      throw new Error("resource stale notification marker is invalid");
+    }
     if (resource.pending !== undefined) {
       const pending = resource.pending;
       if (!pending || typeof pending !== "object" || Array.isArray(pending)
         || pending.goalId !== resource.goalId || pending.revision !== resource.revision) {
         throw new Error("event watcher pending delivery is invalid");
+      }
+      const event = pending.event || "change";
+      if (!PENDING_EVENT_KINDS.has(event)) throw new Error("event watcher pending event kind is invalid");
+      if (event === "stale") {
+        requiredText(pending.triggeredAt, "stale event triggeredAt");
+        if (!Number.isFinite(Date.parse(pending.triggeredAt))) {
+          throw new Error("stale event triggeredAt must be an ISO timestamp");
+        }
+        if (!Number.isSafeInteger(pending.staleAfterMs) || pending.staleAfterMs <= 0) {
+          throw new Error("stale event threshold must be a positive integer");
+        }
       }
       boundedPayload(pending.payload);
     }
@@ -135,6 +150,7 @@ function storeObservation(state, item, maxResources) {
     revision: item.revision,
     observedAt: item.observedAt,
     pending: {
+      event: "change",
       goalId: item.goalId,
       revision: item.revision,
       payload: item.payload,
@@ -155,10 +171,14 @@ export class ExternalEventWatcher {
     diagnose = (diagnostic) => console.error(diagnostic.message),
     now = () => new Date(),
     maxResources = DEFAULT_MAX_RESOURCES,
+    staleAfterMs = 0,
   }) {
     if (!statePath || !sources || typeof deliver !== "function"
       || (activeGoals !== undefined && typeof activeGoals !== "function")) {
       throw new Error("statePath, sources, and deliver are required; activeGoals must be a function");
+    }
+    if (!Number.isSafeInteger(staleAfterMs) || staleAfterMs < 0) {
+      throw new Error("staleAfterMs must be a non-negative integer");
     }
     this.statePath = statePath;
     this.sources = sources;
@@ -167,6 +187,7 @@ export class ExternalEventWatcher {
     this.diagnose = diagnose;
     this.now = now;
     this.maxResources = maxResources;
+    this.staleAfterMs = staleAfterMs;
     this.ready = load(statePath, maxResources).then((state) => { this.state = state; });
     this.runs = Promise.resolve();
     this.reported = new Set();
@@ -288,48 +309,58 @@ export class ExternalEventWatcher {
   async deliverPending(observed) {
     const delivered = [];
     const groups = new Map();
-    const pendingGoals = new Set();
+    const pendingDeliveries = new Set();
     for (const [key, resource] of Object.entries(this.state.resources)) {
       if (!resource.pending) continue;
-      pendingGoals.add(resource.pending.goalId);
+      const event = resource.pending.event || "change";
+      const deliveryKey = `delivery:${resource.pending.goalId}:${event}`;
+      pendingDeliveries.add(deliveryKey);
       if (!observed.has(key)) continue;
-      const items = groups.get(resource.pending.goalId) || [];
-      items.push({ key, resource, pending: structuredClone(resource.pending) });
-      groups.set(resource.pending.goalId, items);
+      const group = groups.get(deliveryKey) || { goalId: resource.pending.goalId, event, items: [] };
+      group.items.push({ key, resource, pending: structuredClone(resource.pending) });
+      groups.set(deliveryKey, group);
     }
     for (const key of this.reported) {
-      if (key.startsWith("delivery:") && !pendingGoals.has(key.slice("delivery:".length))) this.reported.delete(key);
+      if (key.startsWith("delivery:") && !pendingDeliveries.has(key)) this.reported.delete(key);
     }
-    for (const [goalId, items] of groups) {
+    for (const [deliveryKey, { goalId, event, items }] of groups) {
       const batch = items.slice(0, MAX_EVENTS_PER_DELIVERY);
       try {
         await this.deliver(goalId, batch.map(({ resource, pending }) => ({
+          event,
           source: resource.source,
           subject: resource.subject,
           revision: pending.revision,
           payload: pending.payload,
-          observedAt: resource.observedAt,
+          observedAt: event === "stale" ? pending.triggeredAt : resource.observedAt,
+          ...(event === "stale" ? {
+            unchangedSince: resource.observedAt,
+            staleForMs: Date.parse(pending.triggeredAt) - Date.parse(resource.observedAt),
+            staleAfterMs: pending.staleAfterMs,
+          } : {}),
         })));
         for (const { key, pending } of batch) {
-          delivered.push([key, pending.goalId, pending.revision]);
+          delivered.push([key, pending.goalId, pending.revision, event]);
         }
-        this.reported.delete(`delivery:${goalId}`);
+        this.reported.delete(deliveryKey);
       } catch (error) {
         const subjects = batch.map(({ resource }) => `${resource.source} ${resource.subject}`).join(", ");
-        await this.report(`delivery:${goalId}`, {
+        await this.report(deliveryKey, {
           kind: "delivery",
           goalId,
           affectedGoalIds: [goalId],
-          retry: "The latest observed revision remains pending and will be retried after a successful current provider read.",
+          retry: "The latest resource event remains pending and will be retried after a successful current provider read.",
           message: `could not wake ${goalId} for ${subjects}: ${error instanceof Error ? error.message : error}`,
         });
       }
     }
     if (!delivered.length) return;
     const next = structuredClone(this.state);
-    for (const [key, goalId, revision] of delivered) {
+    for (const [key, goalId, revision, event] of delivered) {
       const current = next.resources[key];
-      if (current?.pending?.goalId === goalId && current.pending.revision === revision) {
+      if (current?.pending?.goalId === goalId && current.pending.revision === revision
+        && (current.pending.event || "change") === event) {
+        if (event === "stale") current.staleNotified = true;
         delete current.pending;
       }
     }
@@ -399,6 +430,28 @@ export class ExternalEventWatcher {
       const result = storeObservation(next, item, this.maxResources);
       if (!result.stored) deferred.push(item);
       if (result.changed) changed = true;
+    }
+    const staleAt = this.now();
+    for (const item of observations) {
+      const resource = next.resources[keyFor(item.source, item.subject)];
+      if (!resource || resource.goalId !== item.goalId || resource.revision !== item.revision) continue;
+      const unchangedForMs = Math.max(0, staleAt.getTime() - Date.parse(resource.observedAt));
+      if (resource.pending && (resource.pending.event || "change") === "stale"
+        && (this.staleAfterMs === 0 || unchangedForMs < this.staleAfterMs)) {
+        delete resource.pending;
+        changed = true;
+      }
+      if (this.staleAfterMs === 0 || unchangedForMs < this.staleAfterMs
+        || resource.pending || resource.staleNotified) continue;
+      resource.pending = {
+        event: "stale",
+        goalId: resource.goalId,
+        revision: resource.revision,
+        payload: item.payload,
+        triggeredAt: staleAt.toISOString(),
+        staleAfterMs: this.staleAfterMs,
+      };
+      changed = true;
     }
     if (changed) {
       validateState(next, this.maxResources);

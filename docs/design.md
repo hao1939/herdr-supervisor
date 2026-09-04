@@ -6,8 +6,8 @@
 
 Herdr Supervisor helps one person keep several goal-owning workers moving. It
 stays lightweight: the supervisor judges progress, workers do the work, and an
-optional external watcher wakes workers when a pull request or build changes.
-It does not build another task system.
+optional external watcher wakes workers when a pull request or build changes or
+remains unchanged too long. It does not build another task system.
 
 Herdr hosts the processes and events, and Codex supplies each worker's native
 Goal loop. Those are implementation choices, not extra product roles.
@@ -33,7 +33,7 @@ The whole model is:
 2. One worker owns that goal and keeps pursuing it.
 3. The supervisor watches evidence and helps the same worker move forward.
 4. An optional external watcher notifies the worker when a linked resource
-   changes.
+   changes or crosses the configured unchanged-resource threshold.
 5. A failure enters the same observation and decision loop with diagnostic
    facts and operating guidance.
 
@@ -420,11 +420,12 @@ validation, or an independent review, that requirement belongs in the goal's
 ordinary acceptance criteria and its result is evidence tied to the exact
 candidate revision. The worker owns making the change ready and resolving
 findings; the external event watcher may wake the current worker when a PR or
-build changes. The worker rereads provider authority, and its ordinary Herdr
-event wakes the supervisor. There is no second review lifecycle, reviewer state
-machine, attempt budget, or goal schema. A separate review goal exists only
-when review itself is the human's distinct durable outcome—not merely because
-one implementation reached a review step.
+build changes or stays unchanged through its configured threshold. The worker
+rereads provider authority, and its ordinary Herdr event wakes the supervisor.
+There is no second review lifecycle, reviewer state machine, attempt budget, or
+goal schema. A separate review goal exists only when review itself is the
+human's distinct durable outcome—not merely because one implementation reached
+a review step.
 
 Pull-request descriptions use plain language and put the meaningful change
 first: what was wrong, what changes for the user, the scope, current proof, and
@@ -493,7 +494,8 @@ One shared watcher replaces per-goal registration. Its public contract is only:
 
 1. **Link:** trusted metadata links a provider resource to one goal.
 2. **Observe:** a provider adapter reports a bounded current revision.
-3. **Notify:** a changed revision wakes that goal's exact current worker.
+3. **Notify:** a changed revision or one configured unchanged-revision
+   threshold wakes that goal's exact current worker.
 
 There is no register, renew, unregister, predicate, or provider workflow in a
 goal. The watcher keeps a bounded revision checkpoint so unchanged reads stay
@@ -504,10 +506,12 @@ A short per-goal action boundary prevents a notification from crossing goal
 acceptance or an explicit stop. These are safety details, not additional
 product concepts.
 
-The watcher detects change; it does not interpret it. It computes a compact
-revision from authoritative provider fields. An unchanged revision costs no
-model turn. A changed revision wakes the worker directly, and its normal Herdr
-state change enters the existing supervisor review loop.
+The watcher detects change and elapsed unchanged time; it does not interpret
+either. Adapters compute compact revisions from authoritative provider fields.
+A changed revision wakes the worker directly. An unchanged revision stays quiet
+until the configured threshold and then wakes that worker once; further scans
+stay quiet until the revision changes. Either wake enters the existing
+supervisor review loop through normal worker state.
 
 Deciding what a review comment, failed check, or merged branch means for the
 goal belongs to the worker, not the supervisor or watcher.
@@ -541,10 +545,11 @@ When incidents teach a reusable response, update the guide or prompt before
 adding watcher conditionals.
 
 The existing linked-resource path demonstrates this contract by injecting the
-colocated worker response guide beside every changed-resource fact. Startup also
-prints the effective non-secret scopes, checkpoint, cadence, and delivery rule,
-so an agent can verify the path from configuration through receipt without
-reading source code.
+matching colocated response guide beside every changed-resource or
+stale-resource fact. Startup also prints the effective non-secret scopes,
+checkpoint, scan cadence, stale threshold, and delivery rule, so an agent can
+verify the path from configuration through receipt without reading source
+code.
 
 Every agent notification uses one versioned plain-text envelope:
 
@@ -565,6 +570,11 @@ are stable contract fields. The two sections have different owners. Event
 facts are watcher-owned data; agent response knowledge is recipient-owned
 guidance. Adding an adapter does not add a new message shape. Change the
 contract version only for an incompatible envelope change.
+
+The operational guide's event catalog is the authoritative list of predefined
+event kinds, recipients, triggers, and response-knowledge files. An event kind
+is not complete until it appears there and its emitted envelope and embedded
+guide are covered by tests.
 
 Improvement follows that ownership in a fixed order:
 
@@ -657,9 +667,17 @@ accepts `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is
 available in the runtime environment. Without usable credentials, discovery
 fails with a clear error and the watcher never guesses.
 
+The process-wide unchanged-resource threshold defaults to 24 hours. The
+supervisor may restart the watcher with `HERDR_WATCH_STALE_AFTER_MS=0` to
+disable stale notifications or another non-negative millisecond value to tune
+them. It should adjust this threshold rather than slow the provider scan and
+delay real changes. Startup prints both effective values. There is no runtime
+control API or per-goal timer.
+
 ## Events, diagnostics, and knowledge
 
-An ordinary external change, warning, and failure use the same separation:
+An ordinary external change, stale observation, warning, and failure use the
+same separation:
 
 ```text
 event fact -> relevant context + response knowledge -> model decision -> existing action

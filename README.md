@@ -7,7 +7,7 @@ another task system.
 2. One worker owns that goal and keeps pursuing it.
 3. The supervisor watches progress and helps the same worker when needed.
 4. An optional external watcher wakes the worker when a pull request or build
-   changes.
+   changes or stays unchanged too long.
 
 The model decides what current evidence means. Small deterministic code records
 goals, observes events, validates identity, and applies the chosen action.
@@ -102,6 +102,7 @@ state at any time.
 | `HERDR_WATCH_ADO_REPOSITORIES` | — | Up to ten comma-separated `organization/project/repository` scopes; observes annotated ADO PRs |
 | `HERDR_WATCH_ADO_CREATOR_ID` | — | Optional Azure DevOps identity UUID; narrows ADO PR discovery to PRs created by that identity before checking supervision metadata |
 | `HERDR_WATCH_INTERVAL_MS` | `60000` | Interval between bounded provider scans |
+| `HERDR_WATCH_STALE_AFTER_MS` | `86400000` | Time an unchanged linked resource waits before one goal-batched stale notification; `0` disables it |
 | `HERDR_WATCH_STATE_HOME` | user state directory | Directory for the bounded revision checkpoint |
 
 Codex runs sandboxed with its normal approval prompts by default. Set
@@ -205,10 +206,12 @@ For GitHub and Azure DevOps, one shared external event watcher (`event-watchd`)
 observes configured provider scopes without model turns. Workers attach their
 durable goal ID when they create a PR or build; they never register or renew a
 watch. A changed revision resolves that goal's current exact worker and sends a
-short wake hint.
+short wake hint. One unchanged revision may also send a single goal-batched
+stale hint after the configured threshold.
 The worker rereads provider authority, continues useful work, and its normal
-Herdr event wakes the supervisor. Unchanged reads stay quiet, and the bounded
-goal review remains the safety net after a missed signal or provider failure.
+Herdr event wakes the supervisor. Further unchanged reads stay quiet, and the
+bounded goal review remains the safety net after a missed signal or provider
+failure.
 One short per-goal execution lock prevents a notification from crossing an
 accept or stop decision; it contains no workflow state.
 

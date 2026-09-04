@@ -196,9 +196,17 @@ test("watcher startup explains its complete observation and delivery path", () =
   assert.match(message, /github-pr: owner\/repo/);
   assert.match(message, /ado-build: org\/project\/42/);
   assert.doesNotMatch(message, /ado-pr:/);
+  assert.match(message, /Stale notification: disabled/);
   assert.match(message, /linked resource -> durable goal ID -> exact current worker/);
   assert.match(message, /bounded diagnostic -> one Pi supervisor/);
   assert.match(message, /startup only; verify provider access, metadata, and one changed-resource delivery/);
+
+  assert.match(watcherStartupMessage({
+    scopes: { "github-pr": ["owner/repo"] },
+    intervalMs: 60_000,
+    staleAfterMs: 86_400_000,
+    statePath: "/state/external-events.json",
+  }), /Stale notification: after 1 day unchanged/);
 });
 
 test("watcher help explains setup, linking, and end-to-end proof", () => {
@@ -208,6 +216,7 @@ test("watcher help explains setup, linking, and end-to-end proof", () => {
   assert.match(message, /HERDR_WATCH_ADO_REPOSITORIES=organization\/project\/repository/);
   assert.match(message, /HERDR_WATCH_ADO_CREATOR_ID=identity-uuid/);
   assert.match(message, /HERDR_WATCH_ADO_DEFINITIONS=organization\/project\/definition-id/);
+  assert.match(message, /HERDR_WATCH_STALE_AFTER_MS=milliseconds/);
   assert.match(message, /Goal ID: <durable-goal-id>/);
   assert.match(message, /herdr-goal=<durable-goal-id>/);
   assert.match(message, /Verify provider access, exact metadata/);
@@ -232,6 +241,36 @@ test("worker event message explains facts, delivery, response, and expected outp
   assert.match(message, /"conclusion": "failure"/);
   assert.match(message, /rereading the provider's current state/);
   assert.match(message, /Report what materially changed, what you did/);
+});
+
+test("stale resource message explains elapsed time and keeps the decision with the worker", () => {
+  const message = workerEventMessage("g_owner", [{
+    event: "stale",
+    source: "ado-pr",
+    subject: "org/project/repo/42",
+    observedAt: "2026-09-04T00:00:00.000Z",
+    unchangedSince: "2026-09-03T00:00:00.000Z",
+    staleForMs: 86_400_000,
+    staleAfterMs: 86_400_000,
+    revision: "revision-1",
+    payload: { draft: true, mergeStatus: "conflicts" },
+  }]);
+
+  assert.match(message, /^\[event-watchd\/v1\]\nEvent: linked-resource-stale\nRecipient role: goal-worker/);
+  assert.match(message, /Unchanged since: 2026-09-03T00:00:00.000Z/);
+  assert.match(message, /Unchanged for: 1 day/);
+  assert.match(message, /Stale threshold: 1 day/);
+  assert.match(message, /Why you received this: trusted provider metadata links these resources/);
+  assert.match(message, /Check for review feedback, conflicts, failed or missing checks/);
+  assert.match(message, /keep independent work moving/);
+});
+
+test("event watcher guide catalogs every agent event and its response knowledge", async () => {
+  const guide = await readFile(new URL("../src/event-watcher/README.md", import.meta.url), "utf8");
+
+  assert.match(guide, /`linked-resource-change`[^\n]+`knowledge\/linked-resource-change\.md`/);
+  assert.match(guide, /`linked-resource-stale`[^\n]+`knowledge\/linked-resource-stale\.md`/);
+  assert.match(guide, /`watcher-diagnostic`[^\n]+`knowledge\/watcher-diagnostic\.md`/);
 });
 
 test("supervisor diagnostic uses the same versioned fact-and-knowledge contract", () => {
@@ -296,6 +335,22 @@ test("watcher daemon rejects intervals above the Node timer limit", async () => 
   );
 });
 
+test("watcher daemon rejects an invalid stale threshold", async () => {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    GITHUB_TOKEN: "test-token",
+    HERDR_WATCH_GITHUB_REPOSITORIES: "owner/repo",
+    HERDR_WATCH_STALE_AFTER_MS: "often",
+  };
+  delete environment.HERDR_WATCH_ADO_DEFINITIONS;
+  delete environment.HERDR_WATCH_ADO_REPOSITORIES;
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ["src/event-watcher/daemon.mjs"], { env: environment }),
+    /HERDR_WATCH_STALE_AFTER_MS must be a non-negative integer/,
+  );
+});
+
 test("first discovery and every later revision wake the goal without renewal", async (t) => {
   const directory = await temporary(t, "event-watch-discovery-");
   let revision = "one";
@@ -321,6 +376,100 @@ test("first discovery and every later revision wake the goal without renewal", a
   assert.equal(Object.keys(state.resources).length, 1);
   assert.equal((Object.values(state.resources)[0] as any).revision, "two");
   assert.equal((Object.values(state.resources)[0] as any).pending, undefined);
+});
+
+test("unchanged resources produce one durable stale notification batched by goal", async (t) => {
+  const directory = await temporary(t, "event-watch-stale-resource-");
+  let now = new Date("2026-09-03T00:00:00.000Z");
+  let firstRevision = "one";
+  const delivered = [];
+  const watcher = new ExternalEventWatcher({
+    statePath: join(directory, "state.json"),
+    sources: {
+      source: { scan: async () => discovery([
+        { subject: "resource-1", goalId: "g_owner", revision: firstRevision, payload: { id: 1 } },
+        { subject: "resource-2", goalId: "g_owner", revision: "one", payload: { id: 2 } },
+      ]) },
+    },
+    deliver: async (goalId, events) => delivered.push({ goalId, events }),
+    now: () => now,
+    staleAfterMs: 60_000,
+  });
+
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:00:59.999Z");
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:01:00.000Z");
+  await watcher.runOnce();
+  await watcher.runOnce();
+
+  assert.equal(delivered.length, 2);
+  assert.deepEqual(delivered.map((item) => [
+    item.goalId,
+    item.events[0].event,
+    item.events.map((event) => event.subject),
+  ]), [
+    ["g_owner", "change", ["resource-1", "resource-2"]],
+    ["g_owner", "stale", ["resource-1", "resource-2"]],
+  ]);
+  assert.ok(delivered[1].events.every((event) =>
+    event.unchangedSince === "2026-09-03T00:00:00.000Z"
+      && event.staleForMs === 60_000
+      && event.staleAfterMs === 60_000));
+
+  firstRevision = "two";
+  await watcher.runOnce();
+  now = new Date("2026-09-03T00:02:00.000Z");
+  await watcher.runOnce();
+
+  assert.deepEqual(delivered.slice(2).map((item) => [item.events[0].event, item.events[0].subject]), [
+    ["change", "resource-1"],
+    ["stale", "resource-1"],
+  ]);
+  const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
+  assert.ok(resources.every((resource) => resource.staleNotified === true));
+  assert.ok(resources.every((resource) => resource.pending === undefined));
+});
+
+test("a failed stale notification survives restart without becoming a repeated reminder", async (t) => {
+  const directory = await temporary(t, "event-watch-stale-restart-");
+  const statePath = join(directory, "state.json");
+  let now = new Date("2026-09-03T00:00:00.000Z");
+  const source = { scan: async () => discovery([
+    { subject: "resource", goalId: "g_owner", revision: "one", payload: { state: "waiting" } },
+  ]) };
+  let attempts = 0;
+  const first = new ExternalEventWatcher({
+    statePath,
+    sources: { source },
+    deliver: async (_goalId, events) => {
+      attempts += 1;
+      if (events[0].event === "stale") throw new Error("worker unavailable");
+    },
+    diagnose: () => {},
+    now: () => now,
+    staleAfterMs: 60_000,
+  });
+  await first.runOnce();
+  now = new Date("2026-09-03T00:01:00.000Z");
+  await first.runOnce();
+  assert.equal(attempts, 2);
+
+  const recovered = [];
+  const second = new ExternalEventWatcher({
+    statePath,
+    sources: { source },
+    deliver: async (_goalId, events) => recovered.push(events[0].event),
+    now: () => now,
+    staleAfterMs: 60_000,
+  });
+  await second.runOnce();
+  await second.runOnce();
+
+  assert.deepEqual(recovered, ["stale"]);
+  const resource = Object.values(JSON.parse(await readFile(statePath, "utf8")).resources)[0] as any;
+  assert.equal(resource.staleNotified, true);
+  assert.equal(resource.pending, undefined);
 });
 
 test("provider scans receive the remembered revision and delivery state", async (t) => {

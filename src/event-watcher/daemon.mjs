@@ -43,6 +43,10 @@ const intervalMs = Number(process.env.HERDR_WATCH_INTERVAL_MS || 60_000);
 if (!Number.isFinite(intervalMs) || intervalMs < 10_000 || intervalMs > MAX_TIMER_DELAY_MS) {
   throw new Error(`HERDR_WATCH_INTERVAL_MS must be between 10000 and ${MAX_TIMER_DELAY_MS}`);
 }
+const staleAfterMs = Number(process.env.HERDR_WATCH_STALE_AFTER_MS || 24 * 60 * 60_000);
+if (!Number.isSafeInteger(staleAfterMs) || staleAfterMs < 0) {
+  throw new Error("HERDR_WATCH_STALE_AFTER_MS must be a non-negative integer");
+}
 const controller = new AbortController();
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => controller.abort());
@@ -59,6 +63,7 @@ try {
       "ado-build": adoDefinitions,
     },
     intervalMs,
+    staleAfterMs,
     statePath,
   }));
   const watcher = new ExternalEventWatcher({
@@ -67,6 +72,7 @@ try {
     deliver: herdrGoalDelivery(),
     activeGoals: canonicalActiveGoals,
     diagnose: herdrSupervisorDiagnostic(),
+    staleAfterMs,
   });
   while (!controller.signal.aborted) {
     try {
