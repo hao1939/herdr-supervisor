@@ -44,6 +44,11 @@ export type LastDecision = {
   action: string;
 };
 
+export type SteerReceipt = {
+  instruction: string;
+  stateChangeSeq: number;
+};
+
 export type ObservationCursor = {
   kind: string;
   [field: string]: unknown;
@@ -60,6 +65,7 @@ export type GoalBinding = WorkerIdentity & {
   progress?: string;
   reviewAt?: string;
   lastDecision?: LastDecision;
+  steerReceipt?: SteerReceipt;
   wait?: GoalWait;
   observationCursor?: ObservationCursor;
   updatedAt: string;

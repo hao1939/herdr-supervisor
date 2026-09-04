@@ -325,6 +325,12 @@ per-goal action lock from their final identity read through native resume and
 follow-up delivery. Two internal wake paths therefore cannot interleave TUI
 commands or prompts for one goal.
 
+Immediately before steering can resume or prompt a worker, the supervisor
+records a bounded receipt with the instruction and observed worker sequence.
+The completed checkpoint replaces that receipt's meaning; if checkpointing is
+interrupted, a restarted supervisor requires a newer worker sequence before it
+can deliver another instruction.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.

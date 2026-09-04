@@ -44,6 +44,7 @@ export function bindingFromRecord(record): GoalBinding {
     progress: record.state.progress,
     reviewAt: record.state.reviewAt,
     lastDecision: record.state.lastDecision,
+    steerReceipt: record.state.steerReceipt ? structuredClone(record.state.steerReceipt) : undefined,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
     updatedAt: record.state.updatedAt,
@@ -217,6 +218,7 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);
     current.lastDecision = { decision, at, action: input.action };
+    if (!input.preserveSteerReceipt) delete current.steerReceipt;
     if (input.reviewAt) current.reviewAt = input.reviewAt;
     else delete current.reviewAt;
     if (input.wait) current.wait = structuredClone(input.wait);
@@ -242,4 +244,21 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     auditError = error;
   }
   return { state, auditError };
+}
+
+export async function recordSteerReceipt(binding, instruction, stateChangeSeq, root?) {
+  const state = await updateGoalState(binding.goalId, (current) => {
+    current.steerReceipt = { instruction, stateChangeSeq };
+    return current;
+  }, root);
+  return bindingFromRecord({
+    goalId: binding.goalId,
+    contract: {
+      objective: binding.goal,
+      context: binding.context,
+      acceptance: binding.acceptance,
+      constraints: binding.constraints,
+    },
+    state,
+  });
 }

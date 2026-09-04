@@ -74,6 +74,25 @@ test("the portable contract rejects runtime and audit fields", () => {
   assert.throws(() => validateGoalContract({ ...contract(), journal: [] }), /unsupported field journal/);
 });
 
+test("goal state validates bounded steering receipts", () => {
+  const state = {
+    version: 1,
+    goalId: "g_test",
+    revision: 1,
+    createdAt: "2026-08-28T10:00:00.000Z",
+    updatedAt: "2026-08-28T10:00:00.000Z",
+    worker,
+    evidence: [],
+    steerReceipt: { instruction: "Run the focused proof.", stateChangeSeq: 2 },
+  };
+
+  assert.equal(validateGoalState(state), state);
+  assert.throws(
+    () => validateGoalState({ ...state, steerReceipt: { ...state.steerReceipt, stateChangeSeq: -1 } }),
+    /non-negative integer/,
+  );
+});
+
 test("the first installed goal makes the store self-explaining", async () => {
   const root = await goalsRoot();
   await installGoal("g_test", contract(), root);

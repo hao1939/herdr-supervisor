@@ -6,7 +6,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { Compile } from "typebox/compile";
 import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
-import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
+import {
+  installSupervisorGoal,
+  loadSupervisorGoals,
+  recordDecision,
+  recordSteerReceipt,
+  registerSupervisedGoal,
+} from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
@@ -2490,6 +2496,61 @@ test("steering refuses a worker that changed while waiting for its action lock",
   pi.events.get("session_shutdown")();
 });
 
+test("steering refuses a relocated worker that changed while waiting for its action lock", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let release;
+  let enter;
+  const entered = new Promise((resolve) => { enter = resolve; });
+  const held = withGoalActionLock(root, "g_test", async () => {
+    enter();
+    await new Promise((resolve) => { release = resolve; });
+  });
+  await entered;
+  let moved = false;
+  const movedAgent = {
+    ...snapshot({ state_change_seq: 3 }).agents[0],
+    pane_id: "w1:p9",
+    terminal_id: "term_moved",
+  };
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => moved
+    ? { agents: [movedAgent], panes: [movedAgent] }
+    : snapshot({ state_change_seq: 2 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker was active when observed.", truncated: false },
+  }));
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  moved = true;
+  release();
+  await held;
+
+  const result = await steering;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /worker changed after it was observed/);
+  assert.equal(prompts, 0);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, worker.paneId);
+  pi.events.get("session_shutdown")();
+});
+
 test("native Goal steering rechecks canonical activity after waiting for its action lock", async (t) => {
   const root = await fixture();
   const [binding] = (await loadSupervisorGoals(root)).active;
@@ -3708,6 +3769,40 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
   assert.equal(repeated.isError, true);
   assert.match(repeated.content[0].text, /already applied/);
   pi.events.get("session_shutdown")();
+});
+
+test("a durable steering receipt prevents duplicate delivery after restart", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  await recordSteerReceipt(binding, "Run the focused proof.", 2, root);
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let prompts = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ state_change_seq: 2 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "No new worker evidence is available.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const restartedPi = fakePi();
+  herdrSupervisor(restartedPi);
+  await restartedPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => restartedPi.messages.length === 1);
+  await restartedPi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const repeated = await restartedPi.tools.get("supervisor_steer").execute("steer-again", {
+    pane_id: worker.paneId,
+    message: "Run the focused proof.",
+  });
+
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /previous instruction may already have been delivered/);
+  assert.equal(prompts, 0);
+  restartedPi.events.get("session_shutdown")();
 });
 
 test("continuing after restart refreshes an empty pane terminal and resumes the exact session", async (t) => {

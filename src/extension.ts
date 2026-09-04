@@ -8,6 +8,7 @@ import {
   loadSupervisorGoals,
   installSupervisorGoal,
   recordDecision,
+  recordSteerReceipt,
   refineSupervisorGoal,
   refreshWorkerLocation,
   registerSupervisedGoal,
@@ -294,6 +295,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       progress: state.progress,
       reviewAt: state.reviewAt,
       lastDecision: state.lastDecision,
+      steerReceipt: state.steerReceipt ? structuredClone(state.steerReceipt) : undefined,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
     });
@@ -316,6 +318,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     progress,
     evidence,
     reviewAt,
+    preserveSteerReceipt = false,
   ) {
     const result = await recordDecision(binding, "steer", {
       progress,
@@ -323,6 +326,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
+      preserveSteerReceipt,
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
@@ -343,6 +347,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         progress,
         evidence,
         reviewAt,
+        true,
       );
       return { saved: true, warning };
     } catch (error) {
@@ -1719,16 +1724,28 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
+            if (binding.steerReceipt?.stateChangeSeq === observedSequence) {
+              throw new Error("a previous instruction may already have been delivered; fresh worker evidence is required");
+            }
             if (lockedAgent) {
               const lockedPane = findPane(lockedSnapshot, binding.paneId);
               const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
               if (lockedMismatch) throw new Error(lockedMismatch);
               if (reviewTurn.isActive()) {
-                const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
                 const latestSequence = Number(lockedAgent.state_change_seq || 0);
                 if (latestSequence !== observedSequence) {
                   throw new Error("worker changed after it was observed; review current evidence before deciding again");
                 }
+              }
+            }
+            if (!lockedAgent && liveAgent && reviewTurn.isActive()) {
+              const movedAgent = exactSessionAgent(lockedSnapshot, binding.agentSession);
+              if (
+                movedAgent
+                && Number(movedAgent.state_change_seq || 0) !== observedSequence
+              ) {
+                throw new Error("the worker changed after it was observed");
               }
             }
             if (!lockedAgent) {
@@ -1766,6 +1783,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
             if (lockedMismatch && !canRecoverNow) throw new Error(lockedMismatch);
 
+            continuedBinding = {
+              ...await recordSteerReceipt(
+                continuedBinding,
+                instruction,
+                observedSequence,
+                defaultGoalsRoot(),
+              ),
+              ...runtimeFor(continuedBinding),
+            };
+            cacheBinding(continuedBinding);
             if (canRecoverNow) {
               const request = recoveryRequest(binding, lockedSnapshot);
               if (relocated) request.name = workerNameForGoal(binding.goalId);
