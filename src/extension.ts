@@ -8,6 +8,7 @@ import {
   loadSupervisorGoals,
   installSupervisorGoal,
   recordDecision,
+  recordSteerDelivery,
   refineSupervisorGoal,
   refreshWorkerLocation,
   registerSupervisedGoal,
@@ -205,7 +206,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (!runtime) {
       runtime = {
         nextReviewAt: binding.wait?.reviewAt || binding.reviewAt,
-        lastReviewStateChangeSeq: 0,
+        lastReviewStateChangeSeq: undefined,
         awaitingHuman: binding.lastDecision?.decision === "ask_human",
         missingDecisionRetries: 0,
       };
@@ -294,6 +295,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       progress: state.progress,
       reviewAt: state.reviewAt,
       lastDecision: state.lastDecision,
+      pendingSteer: state.pendingSteer ? structuredClone(state.pendingSteer) : undefined,
       wait: state.wait ? structuredClone(state.wait) : undefined,
       observationCursor: state.observationCursor,
     });
@@ -316,6 +318,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     progress,
     evidence,
     reviewAt,
+    delivery,
+    stateChangeSeq,
   ) {
     const result = await recordDecision(binding, "steer", {
       progress,
@@ -323,33 +327,29 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       evidence,
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
+      pendingSteer: {
+        action: instruction,
+        delivery,
+        stateChangeSeq,
+      },
     });
     cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
     return result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
   }
 
-  async function saveUncertainSteer(
-    binding,
-    instruction,
-    progress,
-    evidence,
-    reviewAt,
-  ) {
+  async function updateSteerDelivery(binding, instruction, stateChangeSeq, delivery) {
     try {
-      const warning = await saveSteerCheckpoint(
+      const state = await recordSteerDelivery(
         binding,
         instruction,
-        progress,
-        evidence,
-        reviewAt,
+        stateChangeSeq,
+        delivery,
       );
-      return { saved: true, warning };
+      cacheCheckpoint(binding, state);
+      return "";
     } catch (error) {
-      return {
-        saved: false,
-        warning: `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`,
-      };
+      return `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`;
     }
   }
 
@@ -1698,6 +1698,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         let attemptedNativeResume = false;
         let recoveryAttempted = false;
         let actionLockWarning = "";
+        let deliveryCheckpointWarning = "";
         const instruction = params.message.trim();
         let delivery;
         try {
@@ -1719,12 +1720,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
-            if (
-              lockedAgent
-              && Number(lockedAgent.state_change_seq || 0) !== runtimeFor(binding).lastReviewStateChangeSeq
-            ) {
-              throw new Error("the worker changed after it was observed");
-            }
             if (!lockedAgent) {
               recoveryAttempted = true;
               const previousPaneId = binding.paneId;
@@ -1754,6 +1749,24 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
                 displayWarning = await applyWorkerLabel(binding);
               }
               lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            }
+            const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
+            if (
+              lockedAgent
+              && observedSequence !== undefined
+              && Number(lockedAgent.state_change_seq || 0) !== observedSequence
+            ) {
+              throw new Error("the worker changed after it was observed");
+            }
+            if (
+              binding.pendingSteer
+              && (binding.pendingSteer.delivery === "pending" || binding.pendingSteer.delivery === "uncertain")
+              && (
+                !lockedAgent
+                || Number(lockedAgent.state_change_seq || 0) <= binding.pendingSteer.stateChangeSeq
+              )
+            ) {
+              throw new Error("the previous instruction delivery is still uncertain");
             }
             const lockedPane = findPane(lockedSnapshot, binding.paneId);
             const canRecoverNow = !lockedAgent && lockedPane?.terminal_id === binding.terminalId;
@@ -1800,7 +1813,23 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               }
               continuedBinding = await refreshObservedLocation(binding, lockedAgent);
             }
+            const deliverySequence = Number(lockedAgent?.state_change_seq || observedSequence || 0);
+            deliveryCheckpointWarning = await saveSteerCheckpoint(
+              continuedBinding,
+              instruction,
+              `The worker was steered to continue: ${params.message.trim()}`,
+              params.evidence || continuedBinding.evidence,
+              reviewAt,
+              "pending",
+              deliverySequence,
+            );
             delivery = await deliverWorkerInstruction(continuedBinding, instruction);
+            deliveryCheckpointWarning += await updateSteerDelivery(
+              continuedBinding,
+              instruction,
+              deliverySequence,
+              delivery.deliveryError ? "uncertain" : "confirmed",
+            );
           });
         } catch (error) {
           if (delivery) {
@@ -1844,44 +1873,22 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           // A transport error cannot prove that Herdr did not accept the
           // prompt. Fail closed against duplicate delivery.
           scheduleReview(continuedBinding);
-          const checkpoint = await saveUncertainSteer(
-            continuedBinding,
-            instruction,
-            "Instruction delivery is uncertain; fresh worker evidence is required before another decision.",
-            params.evidence || continuedBinding.evidence,
-            reviewAt,
-          );
-          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}${actionLockWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${deliveryCheckpointWarning}${actionLockWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
-        // The worker action has happened. Close the turn before bookkeeping so
-        // a checkpoint failure cannot cause the model to send it twice.
         reviewTurn.close(params.pane_id);
-        try {
-          const warning = await saveSteerCheckpoint(
-            continuedBinding,
-            instruction,
-            `The worker was steered to continue: ${params.message.trim()}`,
-            params.evidence || continuedBinding.evidence,
-            reviewAt,
-          );
-          scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
-          const resultText = resumed
-            ? `${relocated
-              ? restartedProcess
-                ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
-                : `Relocated the exact ${binding.agentSession.agent} session and resumed its native Goal`
-              : restartedProcess
-                ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
-                : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
-            : relocated
-              ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
-              : `Steered ${params.pane_id}: ${params.message.trim()}`;
-          return text(`${resultText}${warning}${actionLockWarning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
-        } catch (error) {
-          const reloadWarning = await reconcileCacheAfterWriteFailure();
-          scheduleReview(continuedBinding);
-          return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
-        }
+        scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
+        const resultText = resumed
+          ? `${relocated
+            ? restartedProcess
+              ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
+              : `Relocated the exact ${binding.agentSession.agent} session and resumed its native Goal`
+            : restartedProcess
+              ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
+              : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
+          : relocated
+            ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
+            : `Steered ${params.pane_id}: ${params.message.trim()}`;
+        return text(`${resultText}${deliveryCheckpointWarning}${actionLockWarning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
       } catch (error) {
         if (relocatedBinding) {
           reviewTurn.close(relocatedBinding.paneId);

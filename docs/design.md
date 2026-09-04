@@ -323,7 +323,10 @@ blocked/stalled label and must not receive `/goal resume`.
 Supervisor steering and external event delivery share the same process-safe
 per-goal action lock from their final identity read through native resume and
 follow-up delivery. Two internal wake paths therefore cannot interleave TUI
-commands or prompts for one goal.
+commands or prompts for one goal. Steering records a bounded pending delivery
+receipt in the goal checkpoint immediately before prompting, then confirms it
+afterward. If confirmation fails, restart remains fail-closed until fresh worker
+state proves the instruction produced another turn.
 
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing

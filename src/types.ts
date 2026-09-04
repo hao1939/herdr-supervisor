@@ -44,6 +44,12 @@ export type LastDecision = {
   action: string;
 };
 
+export type PendingSteer = {
+  action: string;
+  delivery: "pending" | "confirmed" | "uncertain";
+  stateChangeSeq: number;
+};
+
 export type ObservationCursor = {
   kind: string;
   [field: string]: unknown;
@@ -60,6 +66,7 @@ export type GoalBinding = WorkerIdentity & {
   progress?: string;
   reviewAt?: string;
   lastDecision?: LastDecision;
+  pendingSteer?: PendingSteer;
   wait?: GoalWait;
   observationCursor?: ObservationCursor;
   updatedAt: string;
@@ -69,7 +76,7 @@ export type GoalBinding = WorkerIdentity & {
 export type GoalRuntime = {
   nextReviewAt?: string;
   lastNoticeKey?: string;
-  lastReviewStateChangeSeq: number;
+  lastReviewStateChangeSeq?: number;
   awaitingHuman: boolean;
   missingDecisionRetries: number;
   pendingCursor?: ObservationCursor;

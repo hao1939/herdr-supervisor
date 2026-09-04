@@ -44,6 +44,7 @@ export function bindingFromRecord(record): GoalBinding {
     progress: record.state.progress,
     reviewAt: record.state.reviewAt,
     lastDecision: record.state.lastDecision,
+    pendingSteer: record.state.pendingSteer ? structuredClone(record.state.pendingSteer) : undefined,
     wait: record.state.wait ? structuredClone(record.state.wait) : undefined,
     observationCursor: record.state.observationCursor,
     updatedAt: record.state.updatedAt,
@@ -217,6 +218,7 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     if (input.evidence) current.evidence = [...input.evidence];
     if (input.observationCursor) current.observationCursor = structuredClone(input.observationCursor);
     current.lastDecision = { decision, at, action: input.action };
+    if (input.pendingSteer) current.pendingSteer = structuredClone(input.pendingSteer);
     if (input.reviewAt) current.reviewAt = input.reviewAt;
     else delete current.reviewAt;
     if (input.wait) current.wait = structuredClone(input.wait);
@@ -242,4 +244,25 @@ export async function recordDecision(binding, decision, input, root?, now = () =
     auditError = error;
   }
   return { state, auditError };
+}
+
+export async function recordSteerDelivery(
+  binding,
+  action,
+  stateChangeSeq,
+  delivery,
+  root?,
+) {
+  return updateGoalState(binding.goalId, (current) => {
+    const pending = current.pendingSteer;
+    if (
+      pending?.action !== action
+      || pending.stateChangeSeq !== stateChangeSeq
+      || pending.delivery !== "pending"
+    ) {
+      throw new Error("the pending steer delivery receipt changed");
+    }
+    pending.delivery = delivery;
+    return current;
+  }, root);
 }

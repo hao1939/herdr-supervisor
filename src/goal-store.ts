@@ -96,6 +96,7 @@ const stateFields = new Set([
   "progress",
   "reviewAt",
   "lastDecision",
+  "pendingSteer",
   "wait",
   "terminal",
   "observationCursor",
@@ -103,6 +104,7 @@ const stateFields = new Set([
 const workerFields = new Set(["paneId", "terminalId", "agentSession"]);
 const agentSessionFields = new Set(["source", "agent", "kind", "value"]);
 const decisionFields = new Set(["decision", "at", "action"]);
+const pendingSteerFields = new Set(["action", "delivery", "stateChangeSeq"]);
 const waitFields = new Set(["condition", "reviewAt", "goalId"]);
 const terminalFields = new Set(["state", "at", "summary"]);
 const goalIdPattern = /^g_[a-zA-Z0-9_-]+$/;
@@ -243,6 +245,21 @@ export function validateGoalState(state) {
     requiredString(state.lastDecision.action, "lastDecision.action");
     if (!Number.isFinite(Date.parse(state.lastDecision.at))) {
       throw new Error("lastDecision.at must be an ISO timestamp");
+    }
+  }
+  if (state.pendingSteer !== undefined) {
+    if (!state.pendingSteer || typeof state.pendingSteer !== "object" || Array.isArray(state.pendingSteer)) {
+      throw new Error("pendingSteer must be an object");
+    }
+    onlyFields(state.pendingSteer, pendingSteerFields, "pendingSteer");
+    requiredString(state.pendingSteer.action, "pendingSteer.action");
+    if (!["pending", "confirmed", "uncertain"].includes(state.pendingSteer.delivery)) {
+      throw new Error("unsupported steer delivery state");
+    }
+    if (
+      !Number.isInteger(state.pendingSteer.stateChangeSeq) || state.pendingSteer.stateChangeSeq < 0
+    ) {
+      throw new Error("steer delivery stateChangeSeq must be a nonnegative integer");
     }
   }
   if (state.wait !== undefined) {

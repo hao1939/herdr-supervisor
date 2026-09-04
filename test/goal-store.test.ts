@@ -243,12 +243,19 @@ test("state updates atomically replace the current view and advance its revision
       at: "2026-08-28T10:05:00.000Z",
       action: "Asked the worker to verify live behavior.",
     };
+    current.pendingSteer = {
+      action: "Asked the worker to verify live behavior.",
+      delivery: "confirmed",
+      stateChangeSeq: 12,
+    };
     current.observationCursor = { kind: "codex-jsonl", offset: 120 };
     return current;
   }, root, () => "2026-08-28T10:05:00.000Z");
 
   assert.equal(updated.revision, 2);
   assert.equal(updated.reviewAt, "2026-08-28T10:10:00.000Z");
+  assert.equal(updated.pendingSteer.delivery, "confirmed");
+  assert.equal(updated.pendingSteer.stateChangeSeq, 12);
   assert.equal((await loadGoalState("g_test", root)).progress, "The focused proof passes; live behavior remains.");
   assert.equal(JSON.parse(await readFile(goalPaths("g_test", root).current, "utf8")).revision, 2);
 });

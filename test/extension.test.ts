@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -2456,7 +2456,7 @@ test("steering refuses a worker that changed while waiting for its action lock",
   });
   await entered;
   let agentStatus = "idle";
-  let sequence = 2;
+  let sequence = 0;
   const prompts = [];
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
     agent_status: agentStatus,
@@ -2479,7 +2479,61 @@ test("steering refuses a worker that changed while waiting for its action lock",
     message: "Continue the same goal.",
   });
   await new Promise((resolve) => setImmediate(resolve));
-  sequence = 3;
+  sequence = 1;
+  release();
+  await held;
+
+  const result = await steering;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /worker changed after it was observed/);
+  assert.deepEqual(prompts, []);
+  pi.events.get("session_shutdown")();
+});
+
+test("steering refuses a relocated worker that changed while waiting for its action lock", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let release;
+  let enter;
+  const entered = new Promise((resolve) => { enter = resolve; });
+  const held = withGoalActionLock(root, "g_test", async () => {
+    enter();
+    await new Promise((resolve) => { release = resolve; });
+  });
+  await entered;
+  let relocated = false;
+  const movedAgent = {
+    ...snapshot({ agent_status: "working", state_change_seq: 3 }).agents[0],
+    pane_id: "w1:p9",
+    terminal_id: "term_moved",
+  };
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => relocated
+    ? {
+        agents: [movedAgent],
+        panes: [{ pane_id: movedAgent.pane_id, terminal_id: movedAgent.terminal_id }],
+      }
+    : snapshot({ agent_status: "working", state_change_seq: 2 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker was active when observed.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  relocated = true;
   release();
   await held;
 
@@ -3668,20 +3722,20 @@ test("only the current automated review remains in model context", () => {
 
 test("a successful steer is not repeated when checkpointing fails", async (t) => {
   const root = await fixture();
+  const directory = goalPaths("g_test", root).directory;
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
-  t.after(() => {
+  t.after(async () => {
+    await chmod(directory, 0o700);
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
   let prompts = 0;
-  const current = goalPaths("g_test", root).current;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot());
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Work needs one more proof.", truncated: false } }));
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
     prompts += 1;
-    await unlink(current);
-    await mkdir(current);
+    await chmod(directory, 0o500);
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -3697,17 +3751,34 @@ test("a successful steer is not repeated when checkpointing fails", async (t) =>
   });
   assert.equal(prompts, 1);
   assert.equal(result.isError, false);
-  assert.match(result.content[0].text, /Continued w1:p2, but could not save the checkpoint/);
-  assert.match(result.content[0].text, /Do not send the instruction again/);
+  assert.match(result.content[0].text, /Checkpoint warning/);
+  await chmod(directory, 0o700);
+  const [pending] = (await loadSupervisorGoals(root)).active;
+  assert.equal(pending.pendingSteer.delivery, "pending");
+  await recordDecision(pending, "leave", {
+    progress: "The worker remains active.",
+    action: "Leave the active worker alone.",
+    evidence: pending.evidence,
+  }, root);
+  const [left] = (await loadSupervisorGoals(root)).active;
+  assert.equal(left.pendingSteer.delivery, "pending");
+  pi.events.get("session_shutdown")();
 
-  const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
+  const restartedPi = fakePi();
+  herdrSupervisor(restartedPi);
+  await restartedPi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => restartedPi.messages.length === 1);
+  await restartedPi.tools.get("supervisor_observe").execute("observe-after-restart", {
+    pane_id: worker.paneId,
+  });
+  const repeated = await restartedPi.tools.get("supervisor_steer").execute("steer-after-restart", {
     pane_id: worker.paneId,
     message: "Run the focused proof.",
   });
   assert.equal(prompts, 1);
   assert.equal(repeated.isError, true);
-  assert.match(repeated.content[0].text, /already applied/);
-  pi.events.get("session_shutdown")();
+  assert.match(repeated.content[0].text, /previous instruction delivery is still uncertain/);
+  restartedPi.events.get("session_shutdown")();
 });
 
 test("continuing after restart refreshes an empty pane terminal and resumes the exact session", async (t) => {
