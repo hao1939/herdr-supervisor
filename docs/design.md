@@ -307,6 +307,13 @@ missing pane may be replaced as a routing location only when the recorded
 session supports exact resume and code verifies that saved identity. A changed
 or unsupported session fails closed.
 
+Container restoration preserves every native session but automatically resumes
+a native Goal only when the canonical goal store still binds that exact Herdr
+pane and Codex session to one active goal. A terminal, unknown, ambiguous, or
+unreadable binding stays at Codex's ordinary paused-goal gate. This keeps
+interrupted work moving without reactivating accepted or explicitly stopped
+outcomes, and adds no restore state outside the existing goal record.
+
 Model input and Codex TUI commands are different transport surfaces. Sending
 `/goal resume` through `agent.prompt` only asks the model to read that text; it
 does not operate the native Goal. For an exact settled pane, the executor sends
@@ -821,6 +828,9 @@ flowchart TD
 - A missed event is covered by the nearest review deadline.
 - An interrupted supervisor reloads every unfinished goal from its contract and
   checkpoint and compares it with fresh Herdr state.
+- Container restoration preserves terminal and unknown Codex sessions without
+  resuming their native Goals; only an exact active canonical worker receives
+  automatic native-Goal continuation.
 - A saved contract with no checkpoint remains visible as unstarted work in the
   system health check. It cannot be silently treated as healthy or routed to a
   worker review that does not exist.

@@ -8,8 +8,12 @@ has_project_trust=0
 has_resume_cwd=0
 after_resume=0
 resume_arguments=0
+resume_session=""
 for argument in "$@"; do
   if [ "$after_resume" -eq 1 ]; then
+    if [ "$resume_arguments" -eq 0 ]; then
+      resume_session=$argument
+    fi
     resume_arguments=$((resume_arguments + 1))
   fi
   if [ "$argument" = "resume" ]; then
@@ -38,13 +42,35 @@ for argument in "$@"; do
   previous="$argument"
 done
 
-# Herdr restores a stopped worker with `codex resume <session>`. Codex
-# deliberately pauses a native Goal after an interruption and otherwise opens
-# an interactive "Resume paused goal?" gate. In this unattended worker image,
-# the system owns that lifecycle decision, so make the normal exact-session
-# restore resume its Goal too. A caller-supplied prompt remains authoritative.
+# Herdr restores a stopped worker process with `codex resume <session>`, but
+# only canonical active supervision owns authority to resume its native Goal.
+# Terminal and unknown sessions stay preserved at Codex's normal paused-goal
+# gate. A caller-supplied prompt remains authoritative.
 if [ "$after_resume" -eq 1 ] && [ "$resume_arguments" -eq 1 ]; then
-  set -- "$@" "/goal resume"
+  if node --input-type=module -e '
+    try {
+      const { loadSupervisorGoals } = await import(process.argv[1]);
+      const { sameAgentSession } = await import(process.argv[2]);
+      const goals = await loadSupervisorGoals();
+      const session = {
+        source: "herdr:codex",
+        agent: "codex",
+        kind: "id",
+        value: process.argv[3],
+      };
+      const matches = goals.active.filter(({ paneId, agentSession }) => (
+        paneId === process.env.HERDR_PANE_ID
+        && sameAgentSession(agentSession, session)
+      ));
+      if (goals.errors.length || matches.length !== 1) process.exitCode = 1;
+    } catch {
+      process.exitCode = 1;
+    }
+  ' 'file:///opt/herdr-supervisor/src/goal-registry.ts' \
+    'file:///opt/herdr-supervisor/src/identity.ts' "$resume_session"
+  then
+    set -- "$@" "/goal resume"
+  fi
 fi
 
 # Codex otherwise asks which directory to use when Herdr restores a session
