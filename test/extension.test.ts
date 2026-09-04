@@ -521,8 +521,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Submit each ready, nonduplicate validation/);
   assert.match(deliveredPrompts[0].prompt, /let the provider accept or queue it/);
   assert.match(deliveredPrompts[0].prompt, /preserve any rejection verbatim/);
-  assert.match(deliveredPrompts[0].prompt, /After submitting each owned ADO build.*by returned ID/);
-  assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
+  assert.match(deliveredPrompts[0].prompt, /For each owned ADO build.*exactly one.*by returned ID/);
+  assert.match(deliveredPrompts[0].prompt, /Metadata is not a tag/);
   assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer state/);
   assert.match(deliveredPrompts[0].prompt, /Keep other useful work moving/);
   assert.match(deliveredPrompts[0].prompt, /no safe work remains.*block\/stall/s);

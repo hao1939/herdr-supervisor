@@ -41,7 +41,7 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
     "Keep supervision metadata secondary; it identifies origin, not completion proof. Never publish a local path-backed session locator.",
-    `After submitting each owned ADO build, add and verify tag ${JSON.stringify(`herdr-goal=${binding.goalId}`)} by returned ID. Pipeline metadata is not this tag. Never tag another goal's build or register a watch.`,
+    `For each owned ADO build, set and verify exactly one ${JSON.stringify(`herdr-goal=${binding.goalId}`)} tag by returned ID. Metadata is not a tag. Never tag another goal's build or register a watch.`,
   ].join("\n");
 }
 
