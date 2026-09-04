@@ -147,6 +147,9 @@ and Compose overrides outside this repository.
 ## Local use (without container)
 
 If you have Herdr and Pi installed locally, you can load the extension directly.
+This is a development convenience rather than the supported deployment path.
+CI checks this Node-level path on macOS once a week, while every pull request
+must pass the Linux container tests that match the released image.
 
 **Prerequisites:** Node.js >= 26, Herdr running, Pi installed.
 

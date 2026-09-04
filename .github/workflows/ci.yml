@@ -14,39 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        node-version: ["26"]
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ matrix.node-version }}
-      - run: npm ci
-      - run: npm audit --audit-level=high
-      - run: npm run check
-      - run: npm test
-
-  shellcheck:
+  quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - run: shellcheck container/container-entrypoint.sh container/bin/codex container/bin/pi
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci --no-audit
+      - run: npm run check
+      - run: npm test
+      - run: npm audit --audit-level=high
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
           context: .
           push: false
           load: true
           tags: herdr-supervisor:ci
+          cache-from: type=gha,scope=herdr-supervisor-ci
+          cache-to: type=gha,mode=max,scope=herdr-supervisor-ci
       - name: Smoke test container
         run: |
           # Verify the entrypoint installs the extension symlink
