@@ -1730,17 +1730,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
-        const shouldResumeNativeGoal = Boolean(
-          liveAgent
-          && binding.agentSession.agent === "codex"
-          && canResumeNativeGoal(liveAgent),
-        );
         if (liveMismatch && !canResumeNow) {
           if (relocatedBinding) throw new Error(liveMismatch);
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
         let continuedBinding = binding;
         let resumed = false;
+        let attemptedNativeResume = false;
         const instruction = params.message.trim();
         let delivery;
         if (canResumeNow) {
@@ -1770,7 +1766,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-        } else if (shouldResumeNativeGoal) {
+        } else {
           try {
             await withGoalActionLock(defaultGoalsRoot(), binding.goalId, async () => {
               const goals = await loadSupervisorGoals(defaultGoalsRoot());
@@ -1796,28 +1792,29 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               );
               if (lockedMismatch) throw new Error(lockedMismatch);
               if (canResumeNativeGoal(lockedAgent)) {
+                attemptedNativeResume = true;
                 await client.resumeNativeGoal(binding.paneId, 5000);
                 resumed = true;
+                let resumedSnapshot;
+                try {
+                  resumedSnapshot = await client.snapshot();
+                } catch (error) {
+                  throw new Error(`updated worker state could not be observed: ${error.message}`);
+                }
+                const resumedAgent = findAgent(resumedSnapshot, binding.paneId);
+                const resumedMismatch = identityMismatch(
+                  binding,
+                  resumedAgent,
+                  findPane(resumedSnapshot, binding.paneId),
+                );
+                if (resumedMismatch) {
+                  throw new Error(`resulting worker identity did not match: ${resumedMismatch}`);
+                }
+                if (resumedAgent.agent_status !== "working") {
+                  throw new Error("native Goal settled again before the follow-up instruction could be sent");
+                }
+                continuedBinding = await refreshObservedLocation(binding, resumedAgent);
               }
-              let resumedSnapshot;
-              try {
-                resumedSnapshot = await client.snapshot();
-              } catch (error) {
-                throw new Error(`updated worker state could not be observed: ${error.message}`);
-              }
-              const resumedAgent = findAgent(resumedSnapshot, binding.paneId);
-              const resumedMismatch = identityMismatch(
-                binding,
-                resumedAgent,
-                findPane(resumedSnapshot, binding.paneId),
-              );
-              if (resumedMismatch) {
-                throw new Error(`resulting worker identity did not match: ${resumedMismatch}`);
-              }
-              if (resumedAgent.agent_status !== "working") {
-                throw new Error("native Goal settled again before the follow-up instruction could be sent");
-              }
-              continuedBinding = await refreshObservedLocation(binding, resumedAgent);
               delivery = await deliverWorkerInstruction(continuedBinding, instruction);
             });
           } catch (error) {
@@ -1825,8 +1822,13 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             scheduleReview(binding);
             const prefix = resumed
               ? `The native Goal resumed in ${binding.paneId}, but`
-              : `Could not confirm that the native Goal resumed in ${binding.paneId}:`;
-            return text(`${prefix} ${error.message}. No follow-up instruction was sent.\n\nDo not resume it again in this turn. End this supervisor turn now and wait for fresh worker evidence.`, true);
+              : attemptedNativeResume
+                ? `Could not confirm that the native Goal resumed in ${binding.paneId}:`
+                : `Could not safely steer ${binding.paneId}:`;
+            const retry = attemptedNativeResume
+              ? "Do not resume it again in this turn."
+              : "Do not send the instruction again in this turn.";
+            return text(`${prefix} ${error.message}. No follow-up instruction was sent.\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
           reviewTurn.close(binding.paneId);
         }
