@@ -86,6 +86,14 @@ across watcher processes.
 | `HERDR_WATCH_ADO_REPOSITORIES` | `organization/project/repository` | ADO PR head, state, merge status, reviewers, discussions, and policies |
 | `HERDR_WATCH_ADO_DEFINITIONS` | `organization/project/definition-id` | ADO build source revision, state, result, and finish time |
 
+ADO PR discovery intentionally inspects only the first 100 active pulls in each
+configured repository per scan. This keeps polling cost bounded. Pull requests
+already linked to supervised goals are refreshed directly by exact identity,
+even when they are outside that discovery window. A full 100-item discovery
+page also emits a non-fatal warning to the supervisor so it can narrow the
+scope, repair the adapter, or coordinate existing work without stopping useful
+observations.
+
 From a source checkout, an agent can pass the scope directly when it starts the
 process. Credentials already present in that runtime are inherited:
 
@@ -334,9 +342,10 @@ not provider authority or completion proof.
 
 ### Diagnostics
 
-Source and delivery failures are bounded observations for the supervisor. The
-supervisor uses the ordinary goal loop to judge their impact. Diagnostics do
-not create goals or recovery workflows.
+Source warnings, source failures, and delivery failures are bounded
+observations for the supervisor. Warnings do not discard valid scan results.
+The supervisor uses the ordinary goal loop to judge their impact. Diagnostics
+do not create goals or recovery workflows.
 
 ## Source adapter contract
 
@@ -346,6 +355,7 @@ The daemon gives each configured source a stable source name and calls:
 scan(knownResources, { signal }) => ({
   observations: [{ subject, goalId, revision, payload }],
   absent: [subject],
+  warnings: [{ code, message }], // optional, non-fatal supervisor diagnostic
 })
 ```
 
@@ -363,12 +373,17 @@ exit until request timeouts expire.
   the adapter.
 - `absent` contains known subjects that were deleted, left configured scope, or
   no longer carry valid goal metadata.
+- `warnings` contains bounded conditions that need supervisor attention but do
+  not invalidate the returned observations. `code` is a stable identity used
+  to coalesce repeats until the condition clears; `message` states the observed
+  fact and its impact without prescribing a workflow.
 
 Scans must be safe to repeat and abort promptly when `signal` is aborted. A
-partial or truncated provider response must fail instead of producing a false
-revision. Credentials and secrets never enter observations or watcher state.
-Untrusted public metadata must not be allowed to select a worker; scope and
-metadata trust are adapter responsibilities.
+partial or truncated authoritative resource response must fail instead of
+producing a false revision. A deliberately bounded discovery window may return
+valid results with a warning. Credentials and secrets never enter observations
+or watcher state. Untrusted public metadata must not be allowed to select a
+worker; scope and metadata trust are adapter responsibilities.
 
 ## Adding a built-in source
 

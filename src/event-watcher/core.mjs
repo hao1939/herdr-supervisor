@@ -7,6 +7,7 @@ const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
 const MAX_TEXT = 2_000;
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_SCAN_RESULTS = 500;
+const MAX_SCAN_WARNINGS = 10;
 const DEFAULT_MAX_RESOURCES = 1024;
 const MAX_EVENTS_PER_DELIVERY = 20;
 const SOURCE_RETRY_DELAYS_MS = [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
@@ -202,7 +203,8 @@ export class ExternalEventWatcher {
         const result = await adapter.scan(known, { signal });
         signal?.throwIfAborted();
         if (!result || typeof result !== "object" || Array.isArray(result)
-          || !Array.isArray(result.observations) || !Array.isArray(result.absent)) {
+          || !Array.isArray(result.observations) || !Array.isArray(result.absent)
+          || (result.warnings !== undefined && !Array.isArray(result.warnings))) {
           throw new Error(`${source} scan returned an invalid result`);
         }
         const values = result.observations;
@@ -232,6 +234,33 @@ export class ExternalEventWatcher {
             throw new Error(`${source} returned ${subject} as both observed and absent`);
           }
           missing.add(subject);
+        }
+        const warnings = result.warnings || [];
+        if (warnings.length > MAX_SCAN_WARNINGS) {
+          throw new Error(`${source} scan must return at most ${MAX_SCAN_WARNINGS} warnings`);
+        }
+        const warningKeys = new Set();
+        for (const warning of warnings) {
+          if (!warning || typeof warning !== "object" || Array.isArray(warning)) {
+            throw new Error(`${source} returned an invalid warning`);
+          }
+          const code = requiredText(warning.code, "warning code");
+          const key = `warning:${source}:${code}`;
+          if (warningKeys.has(key)) throw new Error(`${source} returned duplicate warning ${code}`);
+          warningKeys.add(key);
+          await this.report(key, {
+            kind: "source-warning",
+            source,
+            affectedGoalIds: [...new Set([
+              ...known.map((resource) => resource.goalId),
+              ...normalized.map((item) => item.goalId),
+            ])].slice(0, 20),
+            retry: "The watcher will continue its bounded scans while the supervisor considers this condition.",
+            message: requiredText(warning.message, "warning message"),
+          });
+        }
+        for (const key of this.reported) {
+          if (key.startsWith(`warning:${source}:`) && !warningKeys.has(key)) this.reported.delete(key);
         }
         found.push(...normalized);
         absent.push(...[...missing].map((subject) => keyFor(source, subject)));

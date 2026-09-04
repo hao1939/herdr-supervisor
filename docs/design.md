@@ -597,10 +597,11 @@ custom Herdr event, local bus, spool, queue, or workflow engine.
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable
 goal from trusted provider metadata and returns `{ subject, goalId, revision,
-payload }`; it never resolves or contacts a worker. Shared delivery maps that
-goal ID through canonical state to the exact current native session. The
-colocated guide documents both agent operation and the coding convention for
-adding a built-in source.
+payload }`; it may also return a bounded warning when useful results remain
+valid but discovery needs supervisor attention. It never resolves or contacts
+a worker. Shared delivery maps that goal ID through canonical state to the
+exact current native session. The colocated guide documents both agent
+operation and the coding convention for adding a built-in source.
 
 `event-watchd` is infrastructure supplied to agents, not a boundary imposed on
 them. An agent with ordinary process and repository access may inspect it,
@@ -656,16 +657,16 @@ clear error and the watcher never guesses.
 
 ## Events, diagnostics, and knowledge
 
-An ordinary external change and a failure use the same separation:
+An ordinary external change, warning, and failure use the same separation:
 
 ```text
 event fact -> relevant context + response knowledge -> model decision -> existing action
 ```
 
-For a failure, the component reports what operation failed, where it failed,
-which goals may be affected, the observed error, and what automatic retry
-remains. Stable operating guidance explains the available capabilities and
-authority boundaries. The model decides what those facts mean.
+For a warning or failure, the component reports the condition, where it was
+observed, which goals may be affected, and what automatic behavior remains.
+Stable operating guidance explains the available capabilities and authority
+boundaries. The model decides what those facts mean.
 
 Knowledge has two authorities. Goal-specific facts and policy belong in the
 portable goal context. Stable operating rules belong in version-controlled
