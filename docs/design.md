@@ -414,6 +414,11 @@ recovery; an invalid goal or checkpoint fails closed.
 `.supervisor/` holds local supervisor checkpoints. It is neither portable goal
 authority nor live runtime truth.
 
+Every operation that needs current goal records reads the small goal store
+again. The process does not cache contracts or checkpoints, so an external
+copy, completed goal, or concurrent durable update is visible on the next
+ordinary read without an invalidation or recovery path.
+
 In-memory runtime data holds only disposable scheduling details such as the
 next review time, coalesced signal, and one-turn observation fence. Durable
 bindings and transient runtime state stay separate in code and storage.

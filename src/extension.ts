@@ -28,9 +28,7 @@ import {
 import type {
   ActiveGoal,
   GoalBinding,
-  GoalLoadError,
   GoalRuntime,
-  InstalledGoal,
   ReviewSignal,
 } from "./types.ts";
 export { pullRequestTraceability } from "./prompts.ts";
@@ -88,7 +86,6 @@ const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const WORKER_EVENT_SETTLE_MS = 250;
 type SupervisorMode = "observe" | "dry-run" | "live";
-type CompletedGoal = Awaited<ReturnType<typeof loadSupervisorGoals>>["completed"][number];
 type ContractFields = {
   objective: string;
   context: string[];
@@ -193,12 +190,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   let workerEventSequence = 0;
   const pendingHumanFollowUps = new Set<string>();
   const reviewTurn = new ReviewTurnFence();
-  let goalCache: undefined | {
-    active: Map<string, GoalBinding>;
-    unstarted: InstalledGoal[];
-    completed: CompletedGoal[];
-    errors: GoalLoadError[];
-  };
 
   function runtimeFor(binding: GoalBinding): GoalRuntime {
     let runtime = runtimeGoals.get(binding.goalId);
@@ -214,28 +205,15 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     return runtime;
   }
 
-  async function reloadGoals() {
+  async function activeBindings() {
     const goals = await readGoals();
-    goalCache = {
-      active: new Map(goals.active.map((binding) => [binding.goalId, binding])),
-      unstarted: goals.unstarted,
-      completed: goals.completed,
-      errors: goals.errors,
-    };
     const activeIds = new Set(goals.active.map((binding) => binding.goalId));
     for (const goalId of runtimeGoals.keys()) {
       if (!activeIds.has(goalId)) runtimeGoals.delete(goalId);
     }
-    return goals;
-  }
-
-  async function activeBindings() {
-    if (!goalCache) await reloadGoals();
     return {
-      active: [...goalCache!.active.values()].map((binding): ActiveGoal => ({ ...binding, ...runtimeFor(binding) })),
-      unstarted: goalCache!.unstarted,
-      completed: goalCache!.completed,
-      errors: goalCache!.errors,
+      ...goals,
+      active: goals.active.map((binding): ActiveGoal => ({ ...binding, ...runtimeFor(binding) })),
     };
   }
 
@@ -276,29 +254,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     runtime.nextReviewAt = new Date(Date.now() + delay).toISOString();
   }
 
-  function cacheBinding(binding) {
-    goalCache?.active.set(binding.goalId, binding);
-  }
-
-  function cacheCheckpoint(binding, state) {
-    if (state.terminal) {
-      goalCache?.active.delete(binding.goalId);
-      goalCache = undefined;
-      runtimeGoals.delete(binding.goalId);
-      return;
-    }
-    cacheBinding({
-      ...binding,
-      updatedAt: state.updatedAt,
-      evidence: [...state.evidence],
-      progress: state.progress,
-      reviewAt: state.reviewAt,
-      lastDecision: state.lastDecision,
-      wait: state.wait ? structuredClone(state.wait) : undefined,
-      observationCursor: state.observationCursor,
-    });
-  }
-
   async function deliverWorkerInstruction(binding, instruction) {
     let deliveryError;
     try {
@@ -324,7 +279,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       observationCursor: runtimeFor(binding).pendingCursor,
       reviewAt,
     });
-    cacheCheckpoint(binding, result.state);
     runtimeFor(binding).pendingCursor = undefined;
     return result.auditError ? `\nAudit warning: ${result.auditError.message}` : "";
   }
@@ -348,7 +302,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       return {
         saved: false,
-        warning: `\nCheckpoint warning: ${error.message}.${await reconcileCacheAfterWriteFailure()}`,
+        warning: `\nCheckpoint warning: ${error.message}.`,
       };
     }
   }
@@ -362,20 +316,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       return binding;
     }
     const refreshed = await refreshWorkerLocation(binding, captureIdentity(agent));
-    return rememberWorkerLocation(binding, refreshed);
-  }
-
-  async function rememberWorkerLocation(previous, refreshed) {
-    cacheBinding(refreshed);
-    if (previous.paneId !== refreshed.paneId) {
-      try { await reloadGoals(); }
-      catch (error) {
-        goalCache = undefined;
-        reportBackgroundFailure("Could not refresh relocated worker cache", error);
-      }
-    }
-    const current = goalCache?.active.get(refreshed.goalId) || refreshed;
-    return { ...current, ...runtimeFor(current) };
+    return { ...refreshed, ...runtimeFor(refreshed) };
   }
 
   async function adoptExactSession(binding, snapshot) {
@@ -415,7 +356,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           terminalId: currentPane.terminal_id,
           agentSession: session,
         });
-        cacheBinding(refreshed);
         return refreshed;
       }
       const supervisorPaneId = process.env.HERDR_PANE_ID;
@@ -446,20 +386,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         terminalId: pane.terminal_id,
         agentSession: session,
       });
-      return rememberWorkerLocation(binding, relocated);
+      return { ...relocated, ...runtimeFor(relocated) };
     } catch (error) {
       if (!recoveryMayHaveMutated) throw markRecoveryPreflightError(error);
       throw error;
-    }
-  }
-
-  async function reconcileCacheAfterWriteFailure() {
-    try {
-      await reloadGoals();
-      return "";
-    } catch (error) {
-      goalCache = undefined;
-      return ` Supervisor state also could not be reloaded: ${error.message}`;
     }
   }
 
@@ -959,7 +889,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       context,
       constraints,
     });
-    cacheBinding(binding);
     scheduleReview(binding);
     let warning = "";
     try {
@@ -1000,7 +929,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     if (!isAbsolute(cwd)) {
       throw new Error("The worker working_directory must be an absolute path.");
     }
-    if (requestedGoalId) await reloadGoals();
     const goals = await activeBindings();
 
     let installed;
@@ -1027,7 +955,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       installed = goals.unstarted.find((record) => sameContractFields(record.contract, candidate));
       if (!installed) {
         installed = await installSupervisorGoal(candidate);
-        goalCache?.unstarted.push(installed);
       }
     }
 
@@ -1124,8 +1051,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     const agent = findAgent(snapshot, paneId);
     if (!agent) throw new Error(`no observable agent in ${paneId}`);
     const binding = await startInstalledGoal(goalId, captureIdentity(agent));
-    cacheBinding(binding);
-    if (goalCache) goalCache.unstarted = goalCache.unstarted.filter((record) => record.goalId !== goalId);
     scheduleReview(binding);
     let warning = "";
     try {
@@ -1222,7 +1147,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           }
         }
         const result = await discardInstalledGoal(goalId);
-        goalCache = undefined;
         let refreshError;
         try {
           await refreshStatus(ctx);
@@ -1237,7 +1161,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           : "";
         return text(`Discarded unstarted goal ${goalId}: ${result.contract.objective}.${cleanupWarning}${refreshWarning}`);
       } catch (error) {
-        goalCache = undefined;
         return text(`Could not discard ${goalId}: ${error.message}`, true);
       }
     },
@@ -1326,14 +1249,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           }
           return { result, refinedBinding, deliveryWarning };
         });
-        await reloadGoals();
         scheduleReview(update.refinedBinding);
         await armReviewTimer();
         const auditWarning = update.result.auditError ? ` Audit warning: ${update.result.auditError.message}.` : "";
         return text(`Updated goal ${binding.goalId} for the same worker ${binding.paneId}; no new goal or worker was created.${update.deliveryWarning}${auditWarning}`);
       } catch (error) {
-        const reloadWarning = await reconcileCacheAfterWriteFailure();
-        return text(`Could not confirm the supervised goal update: ${error.message}.${reloadWarning}`, true);
+        return text(`Could not confirm the supervised goal update: ${error.message}.`, true);
       }
     },
   });
@@ -1647,7 +1568,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           evidence: params.evidence || binding.evidence,
           observationCursor: runtimeFor(binding).pendingCursor,
         });
-        cacheCheckpoint(binding, result.state);
         const runtime = runtimeFor(binding);
         runtime.pendingCursor = undefined;
         if (result.auditError) warning += `\nAudit warning: ${result.auditError.message}`;
@@ -1837,11 +1757,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           let reloadWarning = "";
           if (!delivery) {
             try {
-              const goals = await reloadGoals();
+              const goals = await activeBindings();
               const canonical = goals.active.find((goal) => goal.goalId === binding.goalId);
-              if (canonical) currentBinding = { ...canonical, ...runtimeFor(canonical) };
+              if (canonical) currentBinding = canonical;
             } catch (reloadError) {
-              goalCache = undefined;
               reloadWarning = ` Supervisor state could not be refreshed: ${reloadError.message}.`;
             }
           }
@@ -1920,9 +1839,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               : `Steered ${params.pane_id}: ${params.message.trim()}`;
           return text(`${resultText}${warning}${actionLockWarning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
-          const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);
-          return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.${reloadWarning}\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
+          return text(`Continued ${params.pane_id}, but could not save the checkpoint: ${error.message}.\n\nDo not send the instruction again. End this supervisor turn now and wait for fresh worker evidence.`);
         }
       } catch (error) {
         if (relocatedBinding) {
@@ -1974,7 +1892,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             reviewAt,
           },
         });
-        cacheCheckpoint(binding, result.state);
         runtimeFor(binding).pendingCursor = undefined;
         if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
       }
@@ -2037,12 +1954,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         if (decision.error) return decision.error;
         result = decision.result;
       } catch (error) {
-        const reloadWarning = await reconcileCacheAfterWriteFailure();
         scheduleReview(binding);
-        return text(`Cannot accept ${params.pane_id}: ${error.message}.${reloadWarning} Review the latest worker evidence before deciding again.`, true);
+        return text(`Cannot accept ${params.pane_id}: ${error.message}. Review the latest worker evidence before deciding again.`, true);
       }
       runtimeFor(binding).pendingCursor = undefined;
-      cacheCheckpoint(binding, result.state);
+      runtimeGoals.delete(binding.goalId);
       reviewTurn.close(params.pane_id);
       wakeTerminalDependents(
         binding,
@@ -2110,10 +2026,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
             })
           ));
-          cacheCheckpoint(binding, result.state);
+          runtimeGoals.delete(binding.goalId);
         } catch (error) {
-          const reloadWarning = await reconcileCacheAfterWriteFailure();
-          return ctx.ui.notify(`Could not save the request to stop supervising ${paneId}: ${error.message}.${reloadWarning}`, "error");
+          return ctx.ui.notify(`Could not save the request to stop supervising ${paneId}: ${error.message}.`, "error");
         }
         wakeTerminalDependents(
           binding,
@@ -2287,7 +2202,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.on("session_start", async (_event, ctx) => {
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
-    const storedGoals = await reloadGoals();
     const goals = await activeBindings();
     for (const binding of goals.active) {
       const runtime = runtimeFor(binding);
@@ -2311,7 +2225,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       armGlobalReviewTimer();
     }
     ctx.ui.setStatus("herdr-supervisor", goals.active.length ? `supervising ${goals.active.length}` : undefined);
-    void reconcileWorkerLabels(storedGoals).catch((error) => {
+    void reconcileWorkerLabels(goals).catch((error) => {
       reportBackgroundFailure("Could not refresh worker display names", error);
     });
   });
@@ -2343,7 +2257,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     pendingStarts.clear();
     pendingHumanFollowUps.clear();
     runtimeGoals.clear();
-    goalCache = undefined;
     agentTurnActive = false;
     activeGlobalReview = false;
     globalDecisionApplied = false;

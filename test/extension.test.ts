@@ -660,7 +660,7 @@ test("new-goal idempotency compares the complete contract instead of objective t
   pi.events.get("session_shutdown")();
 });
 
-test("an unstarted saved goal starts by exact ID without restating its contract", async (t) => {
+test("a saved goal added after an earlier read starts by exact ID without restating its contract", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-saved-start-"));
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   const previousPane = process.env.HERDR_PANE_ID;
@@ -705,7 +705,7 @@ test("an unstarted saved goal starts by exact ID without restating its contract"
 
   const pi = fakePi();
   herdrSupervisor(pi);
-  await pi.tools.get("supervisor_status").execute("prime-cache", {
+  await pi.tools.get("supervisor_status").execute("initial-status", {
     pane_id: null,
   }, undefined, undefined, { ui: { setStatus() {} } });
   await installSupervisorGoal({
@@ -4345,7 +4345,7 @@ test("post-relocation observation failure closes the turn and schedules recovery
   pi.events.get("session_shutdown")();
 });
 
-test("a failed post-relocation reload cannot strand a durable dependent wake", async (t) => {
+test("worker relocation preserves a durable dependent wake without a cached goal view", async (t) => {
   const root = await fixture();
   const waitingWorker = {
     paneId: "w1:p3",
@@ -4397,22 +4397,14 @@ test("a failed post-relocation reload cannot strand a durable dependent wake", a
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
-  let loads = 0;
   const pi = fakePi();
-  herdrSupervisor(pi, {
-    async loadGoals() {
-      loads += 1;
-      if (loads === 2) throw new Error("post-relocation reload failed");
-      return loadSupervisorGoals(root);
-    },
-  });
+  herdrSupervisor(pi);
 
   const continued = await pi.tools.get("supervisor_steer").execute("continue", {
     pane_id: worker.paneId,
     message: "Continue the exact goal.",
   });
   assert.equal(continued.isError, false, continued.content[0].text);
-  assert.ok(loads >= 3, "the next ordinary cache access must retry the failed reload");
   const storedWaiting = (await loadSupervisorGoals(root)).active.find((binding) => binding.goalId === "g_waiting");
   assert.equal(storedWaiting.wait.goalId, "g_test", "relocation must durably upgrade the peer identity");
 
