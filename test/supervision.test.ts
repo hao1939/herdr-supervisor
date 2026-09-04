@@ -434,9 +434,9 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /Current evidence\n- The server supplied retry boundary/);
   assert.match(message, /Goals waiting on this goal/);
   assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to publish the shared fixture/);
-  assert.match(message, /supervisor_reconsider for exactly those panes/);
-  assert.match(message, /Do not wake them merely because this goal recorded another decision/);
-  assert.match(message, /only this worker's evidence can prove this goal complete/);
+  assert.match(message, /Goal ID: g_test/);
+  assert.doesNotMatch(message, /supervisor_reconsider/);
+  assert.doesNotMatch(message, /prove this goal complete/);
   assert.doesNotMatch(message, /\nReview\n/);
 });
 

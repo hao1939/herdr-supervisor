@@ -97,7 +97,6 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
         "",
         "Goals waiting on this goal",
         ...dependents.map((dependent) => `- ${dependent.goalId} (${dependent.paneId}): ${dependent.wait?.condition}`),
-        "If this review proves that one of these conditions materially changed, call supervisor_reconsider for exactly those panes before the decision tool. Do not wake them merely because this goal recorded another decision.",
       ]
     : [];
 
@@ -105,7 +104,7 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
     `Worker review · ${binding.agentSession.agent} ${binding.paneId}`,
     `Review time: ${now.toISOString()} (UTC)`,
     "",
-    `This turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.`,
+    `Goal ID: ${binding.goalId || "(local)"}`,
     "",
     "Goal",
     `  ${binding.goal}`,
@@ -195,7 +194,7 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
-    "Run independent workers and validations concurrently. Start every ready, nonduplicate validation immediately and keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. React to a concrete provider failure or conflicting operation without delaying unrelated work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
+    "Run independent workers and validations concurrently. Submit every ready, nonduplicate validation to its provider without waiting for another run to finish; the provider schedules and queues it. Keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. Delay only the exact operation with a destructive or shared-resource conflict, and handle a concrete provider rejection without delaying unaffected work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "For a wait with several material parts, fresh evidence must cover every part claimed unchanged. If a peer or external part cannot be verified from current context, steer the worker to reread it instead of inferring unchanged state from silence or older evidence.",
