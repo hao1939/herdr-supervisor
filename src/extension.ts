@@ -1602,7 +1602,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         );
         if (!latestPeer || latestPeerProblem || latestPeerAgent?.agent_status !== "working") {
           const peerState = latestPeerProblem || `worker is ${latestPeerAgent?.agent_status || "not running"}`;
-          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. Shared capacity is not reserved by an inactive worker; choose useful work that can proceed or name the real external blocker.`, true);
+          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. An inactive peer cannot satisfy this condition; choose useful work that can proceed or name the real external blocker.`, true);
         }
         effectiveWaitingOnPane = latestPeer.paneId;
       }

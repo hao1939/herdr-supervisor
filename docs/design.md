@@ -723,11 +723,11 @@ the remedy belongs in knowledge rather than another mechanism.
 Workers run concurrently. The one supervisor session makes one semantic
 decision at a time.
 
-External providers own their admission and queues. A queued pipeline is useful
-execution progress, but it is neither completion proof nor a reason for the
-supervisor to reserve capacity or serialize other ready validation. Asking the
-portfolio to focus on existing work limits speculative new work; it does not
-turn independent readiness paths into one delivery lane.
+Dispatch every ready, nonduplicate validation immediately and let the external
+provider accept or queue it. A queued pipeline is useful execution progress,
+but it is not completion proof or a reason to serialize other ready
+validation. Asking the portfolio to focus on existing work limits speculative
+new work; it does not turn independent readiness paths into one delivery lane.
 
 - Each worker has at most one pending in-memory review signal.
 - Repeated signals coalesce because the review rereads authoritative state.

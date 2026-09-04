@@ -537,7 +537,7 @@ test("shutdown aborts an in-flight provider scan without reporting a provider fa
   assert.deepEqual(diagnostics, []);
 });
 
-test("completed goal metadata does not consume watcher capacity", async (t) => {
+test("completed goal metadata does not consume checkpoint space", async (t) => {
   const directory = await temporary(t, "event-watch-completed-goal-");
   const delivered = [];
   const watcher = new ExternalEventWatcher({
@@ -1054,12 +1054,12 @@ test("the checkpoint stays bounded without evicting remembered resources", async
   const resources = Object.values(JSON.parse(await readFile(join(directory, "state.json"), "utf8")).resources) as any[];
   assert.equal(resources.length, 2);
   assert.deepEqual(resources.map((resource) => resource.subject).sort(), ["old", "pending"]);
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "checkpoint-limit"]);
   assert.match(diagnostics[1].message, /preserved existing monitoring/);
 });
 
-test("authoritative absence frees checkpoint capacity without losing pending delivery", async (t) => {
-  const directory = await temporary(t, "event-watch-pending-capacity-");
+test("authoritative absence frees checkpoint space without losing pending delivery", async (t) => {
+  const directory = await temporary(t, "event-watch-pending-space-");
   const statePath = join(directory, "state.json");
   let failing = true;
   let observations = [
@@ -1094,7 +1094,7 @@ test("authoritative absence frees checkpoint capacity without losing pending del
 });
 
 test("checkpoint saturation is visible when pending delivery cannot recover", async (t) => {
-  const directory = await temporary(t, "event-watch-capacity-diagnostic-");
+  const directory = await temporary(t, "event-watch-checkpoint-limit-");
   let observations = [
     { subject: "one", goalId: "g_same", revision: "one", payload: {} },
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
@@ -1122,14 +1122,14 @@ test("checkpoint saturation is visible when pending delivery cannot recover", as
   ];
   await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["delivery", "checkpoint-limit"]);
   assert.match(diagnostics[1].message, /source new/);
   assert.deepEqual(diagnostics[1].affectedGoalIds, ["g_same"]);
-  assert.match(diagnostics[1].retry, /capacity becomes available/);
+  assert.match(diagnostics[1].retry, /checkpoint space becomes available/);
 });
 
-test("capacity turnover allows a later distinct deferral diagnostic", async (t) => {
-  const directory = await temporary(t, "event-watch-capacity-turnover-");
+test("checkpoint turnover allows a later distinct deferral diagnostic", async (t) => {
+  const directory = await temporary(t, "event-watch-checkpoint-turnover-");
   let result = discovery([
     { subject: "one", goalId: "g_same", revision: "one", payload: {} },
     { subject: "two", goalId: "g_same", revision: "one", payload: {} },
@@ -1160,7 +1160,7 @@ test("capacity turnover allows a later distinct deferral diagnostic", async (t) 
   ]);
   await watcher.runOnce();
 
-  assert.deepEqual(diagnostics.map((item) => item.kind), ["capacity", "capacity"]);
+  assert.deepEqual(diagnostics.map((item) => item.kind), ["checkpoint-limit", "checkpoint-limit"]);
   assert.match(diagnostics[0].message, /deferred-one/);
   assert.match(diagnostics[1].message, /deferred-two/);
 });

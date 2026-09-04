@@ -251,7 +251,7 @@ Agent response knowledge
 |---|---|---|---|
 | `linked-resource-change` | Exact current goal worker | A linked provider resource has a new meaningful revision | `knowledge/linked-resource-change.md` |
 | `linked-resource-stale` | Exact current goal worker | One or more linked resources for the goal remain on the same meaningful revision through the stale threshold | `knowledge/linked-resource-stale.md` |
-| `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint capacity pressure | `knowledge/watcher-diagnostic.md` |
+| `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint resource limit | `knowledge/watcher-diagnostic.md` |
 
 Stale resources due in one scan are grouped by durable goal. Each delivery
 carries at most 20 resources; overflow remains pending until a later successful

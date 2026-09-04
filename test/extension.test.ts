@@ -518,12 +518,12 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[0].prompt, /dispatch other ready validation/);
-  assert.match(deliveredPrompts[0].prompt, /providers own queuing/);
+  assert.match(deliveredPrompts[0].prompt, /Dispatch every ready, nonduplicate validation immediately/);
+  assert.match(deliveredPrompts[0].prompt, /let the provider queue it/);
   assert.match(deliveredPrompts[0].prompt, /Queue each owned ADO build.*by returned ID/);
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
   assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
-  assert.match(deliveredPrompts[0].prompt, /Continue safe independent work/);
+  assert.match(deliveredPrompts[0].prompt, /continue safe independent work/i);
   assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
   assert.match(deliveredPrompts[0].prompt, /Keep independent useful paths moving while a pull request, pipeline, or another path is pending/);
   assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
@@ -1640,7 +1640,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
-  assert.match(result.systemPrompt, /Provider queuing is valid execution progress/);
+  assert.match(result.systemPrompt, /Dispatch every ready, nonduplicate validation immediately/);
+  assert.match(result.systemPrompt, /A queued run is execution progress, not completion proof/);
   assert.match(result.systemPrompt, /stop speculative new work without serializing ready independent validation/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
@@ -2123,12 +2124,12 @@ test("restart preserves a pending human decision without asking again", async (t
   await firstPi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   await firstPi.tools.get("supervisor_ask_human").execute("ask", {
     pane_id: worker.paneId,
-    question: "May this worker use shared capacity?",
-    evidence: ["The worker exhausted local alternatives and needs the capacity owner's approval."],
+    question: "May this worker publish the external result?",
+    evidence: ["The worker exhausted local alternatives and needs the human's publication approval."],
   });
   const [waiting] = (await loadSupervisorGoals(root)).active;
   assert.deepEqual(waiting.evidence, [
-    "The worker exhausted local alternatives and needs the capacity owner's approval.",
+    "The worker exhausted local alternatives and needs the human's publication approval.",
   ]);
   assert.match(waiting.wait.condition, /human's answer/);
   assert.ok(Date.parse(waiting.wait.reviewAt) > Date.now());
@@ -2521,8 +2522,8 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
     agentSession: { source: "herdr:codex", agent: "codex", kind: "id", value: "session_peer" },
   };
   await registerSupervisedGoal(peerWorker, {
-    objective: "Check shared ADO capacity.",
-    acceptance: ["Capacity is classified."],
+    objective: "Prepare the shared staging fixture.",
+    acceptance: ["The fixture is ready."],
   }, root, { goalId: "g_peer" });
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_SUPERVISOR_GOALS = root;
@@ -2548,7 +2549,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
       { pane_id: peerWorker.paneId, terminal_id: peerWorker.terminalId },
     ],
   }));
-  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Local work is complete; a peer owns the shared capacity check.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "Local work is complete; a peer owns the shared fixture setup.", truncated: false } }));
   t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   t.mock.method(HerdrClient.prototype, "promptAgent", async () => { prompts += 1; });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
@@ -2562,16 +2563,16 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   const convoy = await pi.tools.get("supervisor_leave").execute("leave-convoy", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
-    waiting_for: "w1:p7 to release shared capacity",
+    waiting_for: "w1:p7 to prepare the shared fixture",
     waiting_on_pane: "w1:p7",
   });
   assert.equal(convoy.isError, true);
-  assert.match(convoy.content[0].text, /capacity is not reserved by an inactive worker/);
+  assert.match(convoy.content[0].text, /inactive peer cannot satisfy this condition/);
   peerStatus = "working";
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
-    waiting_for: "w1:p7 to report that shared ADO capacity is available",
+    waiting_for: "w1:p7 to report that the shared fixture is ready",
     waiting_on_pane: "w1:p7",
     review_at: new Date(Date.now() + 60_000).toISOString(),
   });
@@ -2582,7 +2583,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   const stored = (await loadSupervisorGoals(root)).active.find((binding) => binding.paneId === worker.paneId);
   assert.equal(stored.lastDecision.decision, "leave");
   assert.match(stored.progress, /Waiting for: w1:p7 to report/);
-  assert.equal(stored.wait.condition, "w1:p7 to report that shared ADO capacity is available");
+  assert.equal(stored.wait.condition, "w1:p7 to report that the shared fixture is ready");
   assert.equal(stored.wait.goalId, "g_peer");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
   pi.events.get("session_shutdown")();
@@ -2609,36 +2610,36 @@ test("a peer review wakes only the dependent wait selected by the model", async 
     agentSession: { source: "herdr:codex", agent: "codex", kind: "path", value: unrelatedSessionFile },
   };
   const waiting = await registerSupervisedGoal(waitingWorker, {
-    objective: "Run the next useful validation when capacity is free.",
+    objective: "Run the next useful validation after the shared fixture is ready.",
     acceptance: ["The validation passes."],
   }, root, { goalId: "g_waiting" });
   await recordDecision(waiting, "leave", {
     progress: "Local preparation is complete.",
-    action: "Wait for the peer's capacity decision.",
+    action: "Wait for the peer's fixture decision.",
     wait: {
-      condition: "w1:p7 to stop using shared capacity",
+      condition: "w1:p7 to publish the current fixture state",
       goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: 0 },
   }, root);
   const unrelatedWaiting = await registerSupervisedGoal(unrelatedWaitingWorker, {
-    objective: "Publish the peer's eventual capacity report.",
+    objective: "Publish the peer's eventual fixture report.",
     acceptance: ["The report is published."],
   }, root, { goalId: "g_other_waiter" });
   await recordDecision(unrelatedWaiting, "leave", {
     progress: "The report template is ready.",
     action: "Wait for the peer's final report.",
     wait: {
-      condition: "w1:p7 to publish its final capacity report",
+      condition: "w1:p7 to publish its final fixture report",
       goalId: "g_peer",
       reviewAt: new Date(Date.now() + 60_000).toISOString(),
     },
     observationCursor: { kind: "codex-jsonl", path: unrelatedSessionFile, offset: 0 },
   }, root);
   await registerSupervisedGoal(peerWorker, {
-    objective: "Check shared validation capacity.",
-    acceptance: ["Capacity is classified."],
+    objective: "Check the shared validation fixture.",
+    acceptance: ["The fixture is classified."],
   }, root, { goalId: "g_peer" });
 
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -2675,7 +2676,7 @@ test("a peer review wakes only the dependent wait selected by the model", async 
     panes: agents.map((agent) => ({ pane_id: agent.pane_id, terminal_id: agent.terminal_id })),
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
-    read: { text: "The peer recorded its current capacity decision.", truncated: false },
+    read: { text: "The peer recorded its current fixture decision.", truncated: false },
   }));
   t.mock.method(HerdrClient.prototype, "renamePane", async () => {});
   let subscriptionEvent;
@@ -2696,27 +2697,27 @@ test("a peer review wakes only the dependent wait selected by the model", async 
 
   await pi.tools.get("supervisor_reconsider").execute("reconsider-peer", {
     pane_ids: [peerWorker.paneId],
-    reason: "the peer has a fresh capacity decision",
+    reason: "the peer has a fresh fixture decision",
   });
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 1);
-  assert.match(pi.messages[0].content, /fresh capacity decision/);
+  assert.match(pi.messages[0].content, /fresh fixture decision/);
   assert.match(pi.messages[0].content, /Goals waiting on this goal/);
-  assert.match(pi.messages[0].content, /g_waiting \(w1:p2\): w1:p7 to stop using shared capacity/);
-  assert.match(pi.messages[0].content, /g_other_waiter \(w1:p3\): w1:p7 to publish its final capacity report/);
+  assert.match(pi.messages[0].content, /g_waiting \(w1:p2\): w1:p7 to publish the current fixture state/);
+  assert.match(pi.messages[0].content, /g_other_waiter \(w1:p3\): w1:p7 to publish its final fixture report/);
   await pi.tools.get("supervisor_observe").execute("observe-peer", { pane_id: peerWorker.paneId });
   await pi.tools.get("supervisor_reconsider").execute("route-peer-effect", {
     pane_ids: [waitingWorker.paneId],
-    reason: "the fresh capacity decision materially changed the shared-capacity wait but not the final-report wait",
+    reason: "the fresh fixture decision materially changed the current-state wait but not the final-report wait",
   });
   const leave = await pi.tools.get("supervisor_leave").execute("leave-peer", {
     pane_id: peerWorker.paneId,
-    progress: "The peer recorded its current capacity decision.",
+    progress: "The peer recorded its current fixture decision.",
   });
   assert.equal(leave.isError, false);
   await pi.events.get("agent_settled")();
   await waitFor(() => pi.messages.length === 2);
-  assert.match(pi.messages[1].content, /fresh capacity decision materially changed/);
+  assert.match(pi.messages[1].content, /fresh fixture decision materially changed/);
   assert.match(pi.messages[1].content, /w1:p2/);
   assert.doesNotMatch(pi.messages[1].content, /w1:p3/);
   pi.events.get("session_shutdown")();
@@ -3114,8 +3115,8 @@ test("restart preserves a peer wait and requires fresh evidence before replacing
   const reviewAt = new Date(Date.now() + 1200).toISOString();
   await recordDecision(binding, "leave", {
     progress: "A peer owns the next attempt.\nExternal watch target: github-pr owner/repository#16",
-    action: "Wait for the peer to release capacity; observe github-pr owner/repository#16 when supervision resumes.",
-    wait: { condition: "the peer releases capacity", reviewAt, goalId: "g_previous_peer" },
+    action: "Wait for the peer to publish the fixture; observe github-pr owner/repository#16 when supervision resumes.",
+    wait: { condition: "the peer publishes the fixture", reviewAt, goalId: "g_previous_peer" },
     observationCursor: { kind: "codex-jsonl", path: sessionFile, offset: Buffer.byteLength(line) },
     evidence: ["The server returned a retry deadline."],
   }, root);
