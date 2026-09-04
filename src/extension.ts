@@ -1792,7 +1792,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
                 findPane(lockedSnapshot, binding.paneId),
               );
               if (lockedMismatch) throw new Error(lockedMismatch);
-              if (canResumeNativeGoal(lockedAgent)) {
+              if (binding.agentSession.agent === "codex" && canResumeNativeGoal(lockedAgent)) {
                 attemptedNativeResume = true;
                 await client.resumeNativeGoal(binding.paneId, 5000);
                 resumed = true;

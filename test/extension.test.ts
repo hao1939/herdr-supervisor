@@ -2247,6 +2247,52 @@ test("an idle worker cannot be left working and may be steered in the same revie
   pi.events.get("session_shutdown")();
 });
 
+test("an idle non-Codex worker receives steering without a native Goal command", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-extension-"));
+  const otherWorker = {
+    paneId: worker.paneId,
+    terminalId: worker.terminalId,
+    agentSession: { source: "herdr:claude", agent: "claude", kind: "id", value: "session_test" },
+  };
+  await registerSupervisedGoal(otherWorker, {
+    objective: "Finish the exact goal.",
+    acceptance: ["The focused proof passes."],
+  }, root, { goalId: "g_test" });
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  const prompts = [];
+  let resumeCalls = 0;
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "idle",
+    agent_session: otherWorker.agentSession,
+  }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker is idle.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumeCalls += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: otherWorker.paneId });
+  const result = await pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: otherWorker.paneId,
+    message: "Continue the restored goal from current evidence.",
+  });
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.equal(resumeCalls, 0);
+  assert.deepEqual(prompts, ["Continue the restored goal from current evidence."]);
+  pi.events.get("session_shutdown")();
+});
+
 test("an accepted native Goal resume fails closed when its snapshot is unavailable", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
