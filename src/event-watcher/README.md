@@ -2,8 +2,9 @@
 
 `event-watchd` (the `daemon.mjs` process) observes external resources linked to
 supervised goals and notifies the exact current worker when their authoritative
-state changes. It removes provider waiting and polling from worker model turns.
-It is not a task system, event bus, workflow engine, or decision agent.
+state changes or remains unchanged beyond the configured stale threshold. It
+removes provider waiting and polling from worker model turns. It is not a task
+system, event bus, workflow engine, or decision agent.
 
 Its extension rule is:
 
@@ -14,20 +15,22 @@ what the responsible agent knows to do with those observations. The watcher
 never turns that guidance into provider-specific workflow code.
 
 ```text
-provider -> source adapter -> resource observation -> watcher core -> worker
-                            failure ------------------------------> supervisor
+provider -> source adapter -> changed or stale observation -> worker
+                            failure --------------------------> supervisor
 ```
 
 The path is deliberately one way. A source adapter reports facts addressed to
-a durable goal ID. The watcher validates, remembers, and delivers the changed
-observation. The worker rereads the provider and decides what the change means
-for its goal. Only watcher or delivery failures go to the supervisor.
+a durable goal ID. The watcher validates and remembers the observation, then
+delivers a changed revision immediately or one stale notice after a configured
+unchanged interval. The worker rereads the provider and decides what the facts
+mean for its goal. Only watcher warnings or failures go to the supervisor.
 
-This implementation currently has one fixed notification rule: a linked
-provider resource wakes its exact goal worker. Do not add a generic `target`
-field or runtime router to support another case. If live evidence justifies a
-system-level observer later, wire that observer statically to the supervisor's
-ordinary empowered session and keep its facts and response knowledge separate.
+This implementation has one fixed notification owner: a linked provider
+resource wakes its exact goal worker. Changed and stale observations are two
+event kinds on that same path. Do not add a generic `target` field or runtime
+router to support another case. If live evidence justifies a system-level
+observer later, wire that observer statically to the supervisor's ordinary
+empowered session and keep its facts and response knowledge separate.
 
 ## Using event-watchd
 
@@ -52,7 +55,8 @@ definitions. The agent should:
 
 1. help you identify the smallest trusted provider scopes;
 2. inspect existing watcher processes and avoid starting a duplicate;
-3. start the watcher with the exact scope variables below;
+3. choose the process-wide stale threshold and start the watcher with the exact
+   variables below;
 4. verify the process, provider access, metadata, and worker delivery;
 5. confirm the receiving agent has the small response knowledge needed for the
    event;
@@ -86,6 +90,7 @@ across watcher processes.
 | `HERDR_WATCH_ADO_REPOSITORIES` | `organization/project/repository` | ADO PR head, state, merge status, reviewers, discussions, and policies |
 | `HERDR_WATCH_ADO_CREATOR_ID` | Azure DevOps identity UUID | Optionally narrows every configured ADO repository to PRs created by one identity |
 | `HERDR_WATCH_ADO_DEFINITIONS` | `organization/project/definition-id` | ADO build source revision, state, result, and finish time |
+| `HERDR_WATCH_STALE_AFTER_MS` | Non-negative milliseconds | Emits one goal-batched stale event per unchanged revision after this interval; defaults to 24 hours and `0` disables it |
 
 ADO PR discovery intentionally inspects only the first 100 active pulls in each
 configured repository per scan. When `HERDR_WATCH_ADO_CREATOR_ID` is set, ADO
@@ -129,6 +134,7 @@ Watching trusted scopes
   - github-pr: acme/api
 
 Scan interval: 60000 ms
+Stale notification: after 86400000 ms unchanged
 Checkpoint: /home/agent/.local/state/herdr-supervisor/external-events.json
 Delivery: linked resource -> durable goal ID -> exact current worker
 Failures: bounded diagnostic -> one Pi supervisor
@@ -150,8 +156,11 @@ override is set and otherwise finds `az` on `PATH`. The stock image does not
 include Azure CLI, and a login on another host or container is not shared.
 
 `HERDR_WATCH_INTERVAL_MS` changes the scan interval (minimum 10 seconds;
-default 60 seconds). `HERDR_WATCH_STATE_HOME` changes the persistent checkpoint
-directory.
+default 60 seconds). `HERDR_WATCH_STALE_AFTER_MS` changes the process-wide
+unchanged-resource threshold (default 24 hours); `0` disables stale
+notifications without delaying real provider changes. Prefer changing the
+stale threshold over slowing scans. `HERDR_WATCH_STATE_HOME` changes the
+persistent checkpoint directory.
 
 ### Optional container auto-start
 
@@ -206,6 +215,10 @@ ineligible rather than guessing a worker.
    checkpoint is normally at
    `~/.local/state/herdr-supervisor/external-events.json`; it is diagnostic
    state, not a file to edit or a second source of truth.
+5. For stale-event proof, use a short temporary stale threshold, keep the
+   provider revision unchanged through that threshold, and confirm one
+   goal-batched `linked-resource-stale` message arrives. Restore the intended
+   threshold afterward and confirm another unchanged scan stays quiet.
 
 The receiving worker gets a self-explaining message with four parts: goal,
 resource identity and observation revision, bounded facts, and the complete
@@ -232,10 +245,25 @@ Agent response knowledge
   ...
 ```
 
+### Event catalog
+
+| Event | Recipient | Trigger | Response knowledge |
+|---|---|---|---|
+| `linked-resource-change` | Exact current goal worker | A linked provider resource has a new meaningful revision | `knowledge/linked-resource-change.md` |
+| `linked-resource-stale` | Exact current goal worker | One or more linked resources for the goal remain on the same meaningful revision through the stale threshold | `knowledge/linked-resource-stale.md` |
+| `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint capacity pressure | `knowledge/watcher-diagnostic.md` |
+
+Stale resources due in one scan are grouped by durable goal and delivered in
+one bounded message. Each resource is reported only once for an unchanged
+revision. The interval starts when the watcher first records that revision and
+survives process restart in its checkpoint. A meaningful provider change resets
+that resource; a later unchanged revision can become stale again. The watcher
+does not decide that the resource or goal is blocked.
+
 The worker does not need to locate watcher documentation before responding.
 The injected guide explains why it received the event, how to reread authority,
 and what progress report is expected. The full editable source is
-`knowledge/linked-resource-change.md` beside the watcher code.
+the matching file under `knowledge/` beside the watcher code.
 
 Source failures use one watcher-core policy for every adapter: become eligible
 for retry after one minute, then five minutes, fifteen minutes, and one hour
@@ -246,9 +274,10 @@ scanning immediately. Healthy adapters keep scanning while one source backs
 off. This state is process-local, so restart makes one immediate fresh attempt
 instead of adding a durable retry system.
 
-Failed delivery remains pending and retries after a later successful current
-observation of that resource; bounded refresh means this may be later than the
-next scan. Both failure kinds are sent as diagnostics to the one Pi supervisor.
+Failed change or stale delivery remains pending and retries after a later
+successful current observation of that resource; bounded refresh means this
+may be later than the next scan. Both failure kinds are sent as diagnostics to
+the one Pi supervisor.
 The receiving agent should inspect the affected existing goals and watcher
 process with its available tools, repair what current authority permits, and
 ask only for genuinely missing credentials or authority. This is an ordinary
@@ -333,9 +362,9 @@ complete boundary is the value returned from `scan`.
 ### Watcher core
 
 `ExternalEventWatcher` validates adapter output, filters inactive goals,
-deduplicates unchanged revisions, persists bounded pending delivery, batches
-changes by goal, and applies the shared process-local source backoff. It knows
-no provider-specific workflow.
+deduplicates revisions, derives one stale fact from elapsed unchanged time,
+persists bounded pending delivery, batches each event kind by goal, and applies
+the shared process-local source backoff. It knows no provider-specific workflow.
 
 ### Worker notification
 
@@ -417,7 +446,11 @@ requires goal context, notify the worker and let its model decide.
 - `daemon.mjs`: static built-in source composition and process lifecycle.
 - `herdr.mjs`: goal-addressed worker notification and supervisor diagnostics.
 - `messages.mjs`: readable startup receipts and fact-plus-knowledge notices.
-- `knowledge/`: plain-language response knowledge injected into event turns.
+- `knowledge/linked-resource-change.md`: worker guidance for changed revisions.
+- `knowledge/linked-resource-stale.md`: worker guidance for unchanged revisions
+  that cross the configured threshold.
+- `knowledge/watcher-diagnostic.md`: supervisor guidance for watcher failures
+  and warnings.
 - `supervision-metadata.mjs`: strict durable goal metadata parsing.
 - `refresh-window.mjs`: disposable bounded refresh rotation.
 - `github-pr.mjs`, `ado-pr.mjs`, `ado-build.mjs`: built-in source adapters.

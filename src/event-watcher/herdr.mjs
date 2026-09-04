@@ -28,7 +28,7 @@ export function herdrGoalDelivery({
 } = {}) {
   const root = goalsRoot || defaultGoalsRoot();
   return async (goalId, events) => withGoalActionLock(root, goalId, async () => {
-    if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource change");
+    if (!Array.isArray(events) || !events.length) throw new Error("event delivery requires at least one resource event");
     const goals = await loadSupervisorGoals(root);
     const binding = goals.active.find((goal) => goal.goalId === goalId);
     if (!binding) {

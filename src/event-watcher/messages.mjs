@@ -5,6 +5,10 @@ const linkedResourceKnowledge = readFileSync(
   new URL("./knowledge/linked-resource-change.md", import.meta.url),
   "utf8",
 ).trim();
+const staleResourceKnowledge = readFileSync(
+  new URL("./knowledge/linked-resource-stale.md", import.meta.url),
+  "utf8",
+).trim();
 const watcherDiagnosticKnowledge = readFileSync(
   new URL("./knowledge/watcher-diagnostic.md", import.meta.url),
   "utf8",
@@ -16,11 +20,24 @@ function indented(value, prefix = "  ") {
   return value.split("\n").map((line) => `${prefix}${line}`).join("\n");
 }
 
+function duration(milliseconds) {
+  for (const [size, unit] of [[86_400_000, "day"], [3_600_000, "hour"], [60_000, "minute"], [1_000, "second"]]) {
+    if (milliseconds >= size && milliseconds % size === 0) {
+      const count = milliseconds / size;
+      return `${count} ${unit}${count === 1 ? "" : "s"}`;
+    }
+  }
+  return `${milliseconds} ms`;
+}
+
 function observedResource(event, index) {
   const lines = [
     `Resource ${index + 1}`,
     `  Source: ${event.source}`,
     `  Subject: ${event.subject}`,
+    event.unchangedSince ? `  Unchanged since: ${event.unchangedSince}` : undefined,
+    Number.isFinite(event.staleForMs) ? `  Unchanged for: ${duration(event.staleForMs)}` : undefined,
+    Number.isFinite(event.staleAfterMs) ? `  Stale threshold: ${duration(event.staleAfterMs)}` : undefined,
     event.observedAt ? `  Observed at: ${event.observedAt}` : undefined,
     event.revision ? `  Revision: ${event.revision}` : undefined,
   ].filter(Boolean);
@@ -50,8 +67,13 @@ function eventMessage({ event, recipient, facts, knowledge }) {
 }
 
 export function workerEventMessage(goalId, events) {
+  const kinds = new Set(events.map((event) => event.event || "change"));
+  if (kinds.size !== 1 || !["change", "stale"].includes([...kinds][0])) {
+    throw new Error("worker event delivery must contain one supported event kind");
+  }
+  const kind = [...kinds][0];
   return eventMessage({
-    event: "linked-resource-change",
+    event: kind === "stale" ? "linked-resource-stale" : "linked-resource-change",
     recipient: "goal-worker",
     facts: [
       `Goal ID: ${goalId}`,
@@ -61,7 +83,7 @@ export function workerEventMessage(goalId, events) {
         observedResource(observed, index),
       ].filter(Boolean)),
     ].join("\n"),
-    knowledge: linkedResourceKnowledge,
+    knowledge: kind === "stale" ? staleResourceKnowledge : linkedResourceKnowledge,
   });
 }
 
@@ -92,7 +114,7 @@ export function supervisorDiagnosticMessage(diagnostic) {
   });
 }
 
-export function watcherStartupMessage({ scopes, intervalMs, statePath }) {
+export function watcherStartupMessage({ scopes, intervalMs, staleAfterMs = 0, statePath }) {
   const configured = Object.entries(scopes)
     .filter(([, values]) => values.length)
     .map(([source, values]) => `  - ${source}: ${values.join(", ")}`);
@@ -103,6 +125,7 @@ export function watcherStartupMessage({ scopes, intervalMs, statePath }) {
     ...configured,
     "",
     `Scan interval: ${intervalMs} ms`,
+    `Stale notification: ${staleAfterMs > 0 ? `after ${duration(staleAfterMs)} unchanged` : "disabled"}`,
     `Checkpoint: ${statePath}`,
     "Delivery: linked resource -> durable goal ID -> exact current worker",
     "Failures: bounded diagnostic -> one Pi supervisor",
@@ -119,6 +142,7 @@ export function watcherHelpMessage() {
     "  HERDR_WATCH_ADO_REPOSITORIES=organization/project/repository",
     "  HERDR_WATCH_ADO_CREATOR_ID=identity-uuid (optional ADO PR discovery filter)",
     "  HERDR_WATCH_ADO_DEFINITIONS=organization/project/definition-id",
+    "  HERDR_WATCH_STALE_AFTER_MS=milliseconds (0 disables stale notifications)",
     "",
     "Start from this checkout",
     "  HERDR_WATCH_GITHUB_REPOSITORIES=owner/repository npm run watch",
