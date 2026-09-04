@@ -1719,11 +1719,17 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
-            if (
-              lockedAgent
-              && Number(lockedAgent.state_change_seq || 0) !== runtimeFor(binding).lastReviewStateChangeSeq
-            ) {
-              throw new Error("the worker changed after it was observed");
+            if (lockedAgent) {
+              const lockedPane = findPane(lockedSnapshot, binding.paneId);
+              const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
+              if (lockedMismatch) throw new Error(lockedMismatch);
+              if (reviewTurn.isActive()) {
+                const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
+                const latestSequence = Number(lockedAgent.state_change_seq || 0);
+                if (latestSequence !== observedSequence) {
+                  throw new Error("worker changed after it was observed; review current evidence before deciding again");
+                }
+              }
             }
             if (!lockedAgent) {
               recoveryAttempted = true;
