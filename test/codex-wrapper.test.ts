@@ -96,7 +96,7 @@ test("restored stopped and unknown sessions stay parked", async () => {
   }), ["-c", 'tui.resume_cwd="session"', "resume", "unknown-session"]);
 });
 
-test("ambiguous active bindings stay parked", async () => {
+test("a native session bound to active goals in different panes stays parked", async () => {
   const script = await wrapper();
   const { root, binding } = await activeGoal();
   await installSupervisorGoal({
@@ -104,8 +104,8 @@ test("ambiguous active bindings stay parked", async () => {
     acceptance: ["The duplicate never receives a native Goal resume."],
   }, root, { goalId: "g_duplicate" });
   await startGoal("g_duplicate", {
-    paneId: binding.paneId,
-    terminalId: binding.terminalId,
+    paneId: "w1:p9",
+    terminalId: "term-9",
     agentSession: binding.agentSession,
   }, root);
 

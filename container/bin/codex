@@ -58,11 +58,14 @@ if [ "$after_resume" -eq 1 ] && [ "$resume_arguments" -eq 1 ]; then
         kind: "id",
         value: process.argv[3],
       };
-      const matches = goals.active.filter(({ paneId, agentSession }) => (
-        paneId === process.env.HERDR_PANE_ID
-        && sameAgentSession(agentSession, session)
+      const matches = goals.active.filter(({ agentSession }) => (
+        sameAgentSession(agentSession, session)
       ));
-      if (goals.errors.length || matches.length !== 1) process.exitCode = 1;
+      if (
+        goals.errors.length
+        || matches.length !== 1
+        || matches[0].paneId !== process.env.HERDR_PANE_ID
+      ) process.exitCode = 1;
     } catch {
       process.exitCode = 1;
     }

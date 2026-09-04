@@ -121,9 +121,9 @@ security boundary.
 Detaching from the Herdr client does not stop the server, supervisor, or workers.
 Reattach with `docker compose exec herdr herdr`. Compose restarts the service
 after an unexpected failure; an explicit operator stop remains stopped.
-Container restoration resumes the native Goal only for an exact pane and
-session that the canonical goal store still marks active. Completed, stopped,
-and unknown sessions remain available but parked.
+Container restoration resumes the native Goal only when exactly one active
+goal owns that native session and it names the restoring pane. Completed,
+stopped, unknown, and ambiguously bound sessions remain available but parked.
 
 ### Before recreating the container
 
