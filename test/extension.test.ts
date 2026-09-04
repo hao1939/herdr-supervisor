@@ -518,8 +518,12 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
+  assert.match(deliveredPrompts[0].prompt, /dispatch other ready validation/);
+  assert.match(deliveredPrompts[0].prompt, /providers own queuing/);
+  assert.match(deliveredPrompts[0].prompt, /Queue each owned ADO build.*by returned ID/);
+  assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
   assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
-  assert.match(deliveredPrompts[0].prompt, /While it is pending, continue any safe useful work/);
+  assert.match(deliveredPrompts[0].prompt, /Continue safe independent work/);
   assert.match(deliveredPrompts[0].prompt, /genuinely exhausted the safe work.*yield/s);
   assert.match(deliveredPrompts[0].prompt, /Keep independent useful paths moving while a pull request, pipeline, or another path is pending/);
   assert.match(deliveredPrompts[0].prompt, /review the exact final diff/);
@@ -1636,6 +1640,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
+  assert.match(result.systemPrompt, /Provider queuing is valid execution progress/);
+  assert.match(result.systemPrompt, /stop speculative new work without serializing ready independent validation/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
   assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);

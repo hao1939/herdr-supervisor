@@ -13,7 +13,7 @@ const workerExecutionBoundary = [
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "A pending pull request, pipeline run, or peer condition is one workstream inside the goal, not the end of it. While it is pending, continue any safe useful work in the same goal — another change, a test, preparation, or verifying your own earlier work.",
+  "A pending pull request, pipeline run, or peer condition is one workstream, not the goal. Continue safe independent work and dispatch other ready validation; providers own queuing.",
   "When you have genuinely exhausted the safe work you can do now, report the exact remaining condition once and yield. Do not sleep, poll, or repeatedly reread unchanged state; the supervisor will wake and resume this same session when the condition changes or its bounded safety check expires.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
@@ -41,7 +41,7 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
     "Keep supervision metadata secondary; it identifies origin, not completion proof. Never publish a local path-backed session locator.",
-    `For each new ADO build owned by this goal, add and verify ${JSON.stringify(`herdr-goal=${binding.goalId}`)} once. Never tag another goal's build or register a watch.`,
+    `Queue each owned ADO build, then add and verify tag ${JSON.stringify(`herdr-goal=${binding.goalId}`)} by returned ID. Pipeline metadata is not this tag. Never tag another goal's build or register a watch.`,
   ].join("\n");
 }
 
@@ -212,7 +212,7 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
-    "Run independent workers and pipelines concurrently unless current evidence proves a real throttle, quota, resource collision, or conflicting operation.",
+    "Run independent workers and pipelines concurrently. Provider queuing is valid execution progress, not completion proof and not a supervisor-managed capacity limit; delay only when current evidence proves a real throttle, quota, resource collision, or conflicting operation. When the human asks to focus on existing work, stop speculative new work without serializing ready independent validation.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; provider metadata notifications and bounded review will resume the same native Goal.",
