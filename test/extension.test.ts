@@ -518,13 +518,13 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[0].prompt, /Submit every ready, nonduplicate validation/);
-  assert.match(deliveredPrompts[0].prompt, /provider owns queueing/i);
-  assert.match(deliveredPrompts[0].prompt, /unless evidence proves provider throttling/);
+  assert.match(deliveredPrompts[0].prompt, /Submit each ready, nonduplicate validation/);
+  assert.match(deliveredPrompts[0].prompt, /let the provider accept or queue it/);
+  assert.match(deliveredPrompts[0].prompt, /preserve any rejection verbatim/);
   assert.match(deliveredPrompts[0].prompt, /After submitting each owned ADO build.*by returned ID/);
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
-  assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer condition/);
-  assert.match(deliveredPrompts[0].prompt, /continue independent work/i);
+  assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer state/);
+  assert.match(deliveredPrompts[0].prompt, /Keep other useful work moving/);
   assert.match(deliveredPrompts[0].prompt, /no safe work remains.*block\/stall/s);
   assert.match(deliveredPrompts[0].prompt, /parks execution; the durable goal stays active/);
   assert.match(deliveredPrompts[0].prompt, /Do not poll or reread until a fresh event\/check/);
@@ -1006,7 +1006,7 @@ test("a human refinement updates the durable goal and informs the same worker", 
   assert.match(prompts[0].prompt, /refined the canonical contract/);
   assert.match(prompts[0].prompt, /goal\.json/);
   assert.match(prompts[0].prompt, /Re-read the complete goal\.json/);
-  assert.match(prompts[0].prompt, /Pending review, pipeline, or peer condition/);
+  assert.match(prompts[0].prompt, /Pending review, pipeline, or peer state/);
   assert.match(prompts[0].prompt, /no safe work remains.*block\/stall/s);
   assert.match(prompts[0].prompt, /then reread authority once, even if unchanged/);
   assert.match(prompts[0].prompt, /review the exact final diff/);
@@ -1646,7 +1646,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
   assert.match(result.systemPrompt, /Dispatch every ready, nonduplicate validation immediately/);
   assert.match(result.systemPrompt, /A queued run is execution progress, not completion proof/);
-  assert.match(result.systemPrompt, /stop speculative new work without serializing ready independent validation/);
+  assert.match(result.systemPrompt, /React to an actual rejection or conflicting operation/);
+  assert.match(result.systemPrompt, /stop speculative new work while still validating every ready change/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
   assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);

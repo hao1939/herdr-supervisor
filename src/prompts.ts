@@ -13,7 +13,7 @@ const workerExecutionBoundary = [
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "Pending review, pipeline, or peer condition is one workstream, not the goal. Submit every ready, nonduplicate validation unless evidence proves provider throttling, quota, collision, or conflicting operations; continue independent work. The provider owns queueing.",
+  "Pending review, pipeline, or peer state is one workstream, not the goal. Submit each ready, nonduplicate validation; let the provider accept or queue it. Keep other useful work moving and preserve any rejection verbatim.",
   "When no safe work remains, report the resume condition and let the native Goal block/stall. This parks execution; the durable goal stays active. Do not poll or reread until a fresh event/check; then reread authority once, even if unchanged.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
@@ -212,7 +212,7 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
-    "Run independent workers and pipelines concurrently. Dispatch every ready, nonduplicate validation immediately and let the provider queue it. A queued run is execution progress, not completion proof. Delay only when current evidence proves a real provider throttle, quota, resource collision, or conflicting operation. When the human asks to focus on existing work, stop speculative new work without serializing ready independent validation.",
+    "Run independent workers and pipelines concurrently. Dispatch every ready, nonduplicate validation immediately and let the provider accept or queue it. A queued run is execution progress, not completion proof. React to an actual rejection or conflicting operation without delaying unrelated work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
     "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; provider metadata notifications and bounded review will resume the same native Goal.",
