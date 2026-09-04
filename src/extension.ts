@@ -1723,13 +1723,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               const lockedPane = findPane(lockedSnapshot, binding.paneId);
               const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
               if (lockedMismatch) throw new Error(lockedMismatch);
-              if (reviewTurn.isActive()) {
-                const observedSequence = runtimeFor(binding).lastReviewStateChangeSeq;
-                const latestSequence = Number(lockedAgent.state_change_seq || 0);
-                if (latestSequence !== observedSequence) {
-                  throw new Error("worker changed after it was observed; review current evidence before deciding again");
-                }
-              }
             }
             if (!lockedAgent) {
               recoveryAttempted = true;
@@ -1765,6 +1758,14 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             const canRecoverNow = !lockedAgent && lockedPane?.terminal_id === binding.terminalId;
             const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
             if (lockedMismatch && !canRecoverNow) throw new Error(lockedMismatch);
+            const runtime = runtimeFor(binding);
+            if (lockedAgent && reviewTurn.isActive() && runtime.pendingObservationHasMessages !== undefined) {
+              const observedSequence = runtime.lastReviewStateChangeSeq;
+              const latestSequence = Number(lockedAgent.state_change_seq || 0);
+              if (latestSequence !== observedSequence) {
+                throw new Error("worker changed after it was observed; review current evidence before deciding again");
+              }
+            }
 
             if (canRecoverNow) {
               const request = recoveryRequest(binding, lockedSnapshot);

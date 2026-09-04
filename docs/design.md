@@ -325,6 +325,13 @@ per-goal action lock from their final identity read through native resume and
 follow-up delivery. Two internal wake paths therefore cannot interleave TUI
 commands or prompts for one goal.
 
+Herdr 0.8 does not let `agent.send_keys` require an expected terminal and
+native session. The executor checks exact identity before and after native Goal
+resume and fails closed on a detected replacement, but it cannot make the two
+TUI writes atomic across pane replacement. That remaining runtime race needs a
+small identity-conditioned Herdr operation; the Supervisor does not imitate it
+with another lock, receipt store, or lifecycle.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.
