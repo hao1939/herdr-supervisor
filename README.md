@@ -310,6 +310,13 @@ Use a `plugin` scope for Herdr plugin-facing changes, for example
 - [Current design](docs/design.md)
 - [Research landscape](docs/research.md)
 
+## Feedback
+
+Herdr Supervisor is still learning from real long-running work. Use
+[GitHub Discussions](https://github.com/hao1939/herdr-supervisor/discussions) to
+share a goal that stalled, a confusing interaction, or a case where the design
+added work instead of helping. Concrete session evidence is especially useful.
+
 ## Design rule
 
 The runtime owns process and session truth. The supervisor owns judgment about

@@ -1,6 +1,10 @@
 # Research landscape
 
-**Reviewed:** 2026-08-28
+**Reviewed:** 2026-09-04
+
+This is a dated review of related work, not a claim that every linked project
+or discussion still has the same behavior. Recheck a source before using it to
+justify a new design decision.
 
 ## Question
 
@@ -11,7 +15,10 @@ ask a human when necessary, and keep working until each goal is accepted?
 ## Conclusion
 
 The supervisor pattern is common and increasingly mature, but no reviewed
-Herdr extension supplies the complete behavior as a small, generic component.
+Herdr extension supplied the complete behavior as a small, generic component
+at the review date. Herdr Supervisor now implements that experiment as a Pi
+extension and container companion. It is not a native Herdr plugin, a Kanban
+board, or a replacement runtime.
 
 The closest complete analogue is `aoaoe`, which supervises Agent of Empires
 sessions. Its policy ideas are useful, but its standalone implementation polls
@@ -22,9 +29,9 @@ copied.
 The strongest Herdr-native prior art is Pi Bellwether. It provides direct Herdr
 control, non-blocking watches, one-time Pi wakeups, exact watch lifecycles, and
 lightweight crash detection. It deliberately does not own durable workflow
-meaning. The installed Herdr 0.8.0 socket already exposes the smaller set of
-primitives needed by this PoC, and Bellwether is not installed locally, so the
-first implementation uses the direct contract without adding a dependency.
+meaning. Herdr's socket exposes the smaller set of primitives currently needed
+by this project, so the implementation uses that direct contract without adding
+a Bellwether dependency.
 
 ## Herdr itself
 
@@ -53,16 +60,23 @@ hooks are one-shot restoration commands, not supervised daemons.
 - [Issue #301: Simple Kanban Task Management](https://github.com/herdrdev/herdr/issues/301)
   was closed as not planned. The maintainer explicitly preferred enabling this
   kind of specialized feature through the plugin system rather than adding it
-  to Herdr core.
+  to Herdr core. Herdr Supervisor explores the same human problem through
+  durable goals and an external companion rather than a board inside Herdr.
 - [Issue #2871: pane lineage and prompt-flow observability](https://github.com/herdrdev/herdr/issues/2871)
-  documents interest in external orchestrator topologies. It also states a
-  useful boundary: expose facts, but do not put DAG or routing semantics in
-  Herdr.
-- [Issue #1778: external ownership state](https://github.com/herdrdev/herdr/issues/1778)
-  shows that integrations sometimes need a small amount of identity/ownership
-  state outside Herdr. Explicit worker registration avoids guessing lineage.
+  proposes exposing runtime facts without putting DAG or routing semantics in
+  Herdr. The issue was redirected to Ideas discussions; this boundary belongs
+  to the proposal and should not be presented as accepted Herdr direction.
+- [Discussion #3584: sender attribution for socket-originated agent input](https://github.com/herdrdev/herdr/discussions/3584)
+  identifies a boundary that directly matters here: a receiving agent cannot
+  reliably distinguish a socket prompt from human keyboard input. Herdr
+  Supervisor must not treat socket delivery itself as proof of human authority.
+- [Discussion #3427: agents orchestrating across machines](https://github.com/herdrdev/herdr/discussions/3427)
+  offers useful one-owner-per-runtime reasoning for future portability, but
+  multi-machine supervision remains outside this project's current scope.
 
-No Herdr core change is required for the first proof of concept.
+No Herdr core change is required for the currently supported behavior. Native
+sender attribution could improve future authority separation, but it is not a
+reason to invent identity inside the current goal model.
 
 ## Closest Herdr-native projects
 
@@ -89,10 +103,10 @@ What it does not provide:
 - a policy for steering, human escalation, recovery, or completion;
 - a durable multi-worker supervisor view.
 
-Decision: use its public behavior as prior art, but keep the PoC on Herdr's
-direct socket while that remains smaller. Reconsider Bellwether only if later
-stages need its output matching, crash probe, or watch lifecycle as a cohesive
-public capability.
+Decision: use its public behavior as prior art, but keep the implementation on
+Herdr's direct socket while that remains smaller. Reconsider Bellwether only if
+later stages need its output matching, crash probe, or watch lifecycle as a
+cohesive public capability.
 
 ### Shepherd
 
@@ -206,7 +220,7 @@ and same-session steering. Use Herdr events instead of its poller and parser.
   resumable state, and multi-agent collaboration. No reviewed official OpenAI
   document supplies an existing Herdr supervisor integration.
 
-## Lessons carried into the PoC
+## Lessons carried into Herdr Supervisor
 
 1. Herdr state is a wake signal, not completion proof.
 2. Register workers explicitly; do not infer ownership from pane layout or
@@ -220,3 +234,25 @@ and same-session steering. Use Herdr events instead of its poller and parser.
 7. Begin in observe-only and dry-run modes.
 8. Persist only goal bindings and recovery checkpoints. Do not persist another
    copy of Herdr status.
+
+## Questions for community feedback
+
+Public discussion is most useful when it tests a concrete design choice rather
+than merely announcing the repository. The current open questions are:
+
+1. Which real long-running goals still get lost, stall silently, or need too
+   much human prompting under this model?
+2. Does one worker owning one durable goal remain understandable when several
+   goals share a repository, cluster, or review queue?
+3. Are meaningful events plus a bounded safety review enough, or is a small
+   reusable observation primitive still missing?
+4. Is the current Pi extension and container companion the right packaging, or
+   would a native Herdr plugin improve installation without moving workflow
+   meaning into Herdr?
+5. Where must sender attribution exist before a management agent or watcher can
+   safely relay a request that depends on human authority?
+
+The best primary venue is a Herdr **Show and tell** discussion. A short follow-up
+on issue #301 is also relevant because that thread explicitly points specialized
+task tracking toward extensions. Do not add promotional links to loosely related
+layout, remote-runtime, or agent-catalog discussions.
