@@ -320,10 +320,10 @@ uncertain text write cannot append a second command. Herdr's `blocked` lifecycle
 state means an approval or question UI; it is distinct from the native Goal's
 blocked/stalled label and must not receive `/goal resume`.
 
-Supervisor steering and external event delivery share the same process-safe
-per-goal action lock from their final identity read through native resume and
-follow-up delivery. Two internal wake paths therefore cannot interleave TUI
-commands or prompts for one goal.
+Supervisor steering, durable refinement delivery, and external event delivery
+share the same process-safe per-goal action lock from their final identity read
+through any native resume and follow-up delivery. Internal action paths
+therefore cannot interleave TUI commands or prompts for one goal.
 
 Herdr 0.8 does not let `agent.send_keys` require an expected terminal and
 native session. The executor checks exact identity before and after native Goal

@@ -1023,6 +1023,103 @@ test("a human refinement updates the durable goal and informs the same worker", 
   pi.events.get("session_shutdown")();
 });
 
+test("goal refinement serializes durable mutation and worker delivery", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let promptStarted;
+  const started = new Promise((resolve) => { promptStarted = resolve; });
+  let releasePrompt;
+  const promptGate = new Promise((resolve) => { releasePrompt = resolve; });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "working",
+    name: "refined-worker",
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+    promptStarted();
+    await promptGate;
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  let releaseExistingAction;
+  const existingActionGate = new Promise((resolve) => { releaseExistingAction = resolve; });
+  let existingActionEntered;
+  const existingActionStarted = new Promise((resolve) => { existingActionEntered = resolve; });
+  const existingAction = withGoalActionLock(root, "g_test", async () => {
+    existingActionEntered();
+    await existingActionGate;
+  });
+  await existingActionStarted;
+  const updating = pi.tools.get("supervisor_update_goal").execute("refine-locked", {
+    pane_id: worker.paneId,
+    goal: "Refine the durable outcome without interleaved delivery.",
+    context: [],
+    acceptance: ["The refined outcome is verified."],
+    constraints: [],
+    summary: "Serialized refinement with other goal actions.",
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal((await loadGoalContract("g_test", root)).objective, "Finish the exact goal.");
+
+  releaseExistingAction();
+  await existingAction;
+  await started;
+
+  let competingActionEntered = false;
+  const competingAction = withGoalActionLock(root, "g_test", async () => {
+    competingActionEntered = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(competingActionEntered, false);
+
+  releasePrompt();
+  const result = await updating;
+  await competingAction;
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.equal(competingActionEntered, true);
+  pi.events.get("session_shutdown")();
+});
+
+test("goal refinement remains successful when worker delivery fails", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
+    agent_status: "working",
+    name: "refined-worker",
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {
+    throw new Error("worker prompt transport failed");
+  });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  const result = await pi.tools.get("supervisor_update_goal").execute("refine-failed-delivery", {
+    pane_id: worker.paneId,
+    goal: "Keep the durable refinement when notification fails.",
+    context: [],
+    acceptance: ["The durable contract records the refinement."],
+    constraints: [],
+    summary: "Preserved the durable update despite notification failure.",
+  });
+
+  assert.equal(result.isError, false, result.content[0].text);
+  assert.match(result.content[0].text, /durable contract was updated, but worker delivery could not be confirmed/);
+  assert.equal((await loadGoalContract("g_test", root)).objective, "Keep the durable refinement when notification fails.");
+  pi.events.get("session_shutdown")();
+});
+
 test("one transient human fact queues separate focused reviews without rewriting goals", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-reconsider-"));
   const secondWorker = {

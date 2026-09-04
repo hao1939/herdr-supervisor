@@ -1270,28 +1270,46 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       if (reviewTurn.isBusy()) {
         return text(`Finish preparing or reviewing ${reviewTurn.paneId} before updating a goal contract.`, true);
       }
+      const root = defaultGoalsRoot();
       try {
         const binding = await bindingForPane(params.pane_id);
         if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-        const result = await refineSupervisorGoal(binding.goalId, {
-          objective: params.goal.trim(),
-          context: (params.context || []).map((item) => item.trim()).filter(Boolean),
-          acceptance: params.acceptance.map((item) => item.trim()).filter(Boolean),
-          constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
-          summary: params.summary.trim(),
-        });
-        await reloadGoals();
-        const refinedBinding = await bindingForPane(params.pane_id) || result.binding;
-        scheduleReview(refinedBinding);
-        let deliveryWarning = "";
-        if (mode() === "live") {
-          try {
+        const update = await withGoalActionLock(root, binding.goalId, async () => {
+          const goals = await loadSupervisorGoals(root);
+          if (goals.errors.some((goal) => goal.goalId === binding.goalId)) {
+            throw new Error("canonical goal state is unreadable");
+          }
+          const current = goals.active.find((goal) => goal.goalId === binding.goalId);
+          if (!current) throw new Error("goal is no longer active");
+          if (
+            current.paneId !== binding.paneId
+            || current.terminalId !== binding.terminalId
+            || !sameAgentSession(current.agentSession, binding.agentSession)
+          ) {
+            throw new Error("canonical worker routing changed while waiting to update the goal");
+          }
+          const result = await refineSupervisorGoal(binding.goalId, {
+            objective: params.goal.trim(),
+            context: (params.context || []).map((item) => item.trim()).filter(Boolean),
+            acceptance: params.acceptance.map((item) => item.trim()).filter(Boolean),
+            constraints: (params.constraints || []).map((item) => item.trim()).filter(Boolean),
+            summary: params.summary.trim(),
+          }, root);
+          const updated = await loadSupervisorGoals(root);
+          if (updated.errors.some((goal) => goal.goalId === binding.goalId)) {
+            throw new Error("updated canonical goal state is unreadable");
+          }
+          const canonical = updated.active.find((goal) => goal.goalId === binding.goalId);
+          if (!canonical) throw new Error("updated goal is no longer active");
+          const refinedBinding: ActiveGoal = { ...canonical, ...runtimeFor(canonical) };
+          let deliveryWarning = "";
+          if (mode() === "live") {
             const snapshot = await client.snapshot();
-            const agent = findAgent(snapshot, binding.paneId);
+            const agent = findAgent(snapshot, refinedBinding.paneId);
             const mismatch = identityMismatch(
               refinedBinding,
               agent,
-              findPane(snapshot, binding.paneId),
+              findPane(snapshot, refinedBinding.paneId),
             );
             if (mismatch) {
               deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
@@ -1299,18 +1317,23 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
             } else {
               deliveryWarning += await applyWorkerLabel(refinedBinding);
-              await client.promptAgent(binding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
+              try {
+                await client.promptAgent(refinedBinding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
+              } catch (error) {
+                deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
+              }
             }
-          } catch (error) {
-            deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
           }
-        }
+          return { result, refinedBinding, deliveryWarning };
+        });
+        await reloadGoals();
+        scheduleReview(update.refinedBinding);
         await armReviewTimer();
-        const auditWarning = result.auditError ? ` Audit warning: ${result.auditError.message}.` : "";
-        return text(`Updated goal ${binding.goalId} for the same worker ${binding.paneId}; no new goal or worker was created.${deliveryWarning}${auditWarning}`);
+        const auditWarning = update.result.auditError ? ` Audit warning: ${update.result.auditError.message}.` : "";
+        return text(`Updated goal ${binding.goalId} for the same worker ${binding.paneId}; no new goal or worker was created.${update.deliveryWarning}${auditWarning}`);
       } catch (error) {
         const reloadWarning = await reconcileCacheAfterWriteFailure();
-        return text(`Could not update the supervised goal: ${error.message}.${reloadWarning}`, true);
+        return text(`Could not confirm the supervised goal update: ${error.message}.${reloadWarning}`, true);
       }
     },
   });
