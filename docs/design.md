@@ -432,6 +432,14 @@ first: what was wrong, what changes for the user, the scope, current proof, and
 remaining limitations. Supervision identity remains a small secondary block;
 metadata never competes with the explanation or substitutes for evidence.
 
+Creating or updating a resource owned by the goal is different from contacting
+another person. A pull-request comment or review, mention, notification, or
+message is external communication even when technically reversible. The word
+`handoff` never grants that authority: without explicit human authorization, a
+handoff is a local evidence packet for the supervisor or human. Supervisor
+guidance says `prepare` for that local result and uses `publish` or `send` only
+when the human authorized external delivery.
+
 ## Progress and waits
 
 A worker remains responsible for its native Goal. The supervisor does not

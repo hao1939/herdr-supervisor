@@ -105,6 +105,14 @@ test("the bundled goal-management skill keeps goal contracts concise", async () 
   assert.match(skill, /proof instead of copying or replaying it/);
 });
 
+test("the bundled goal-management skill does not infer external communication authority", async () => {
+  const skill = await readFile(skillPath, "utf8");
+
+  assert.match(skill, /Do not infer authority to contact another person from words such as `handoff`/);
+  assert.match(skill, /pull-request comment or review, mention, notification,\s+or message is external communication/);
+  assert.match(skill, /make a handoff a local\s+evidence packet for the supervisor or human/);
+});
+
 test("the bundled skill metadata provides an explicit example invocation", async () => {
   const metadata = await readFile(skillMetadataPath, "utf8");
 
