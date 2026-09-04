@@ -31,6 +31,12 @@ outcome, finite-versus-standing horizon, artifacts, proof, authority, or risk.
 If execution was already authorized, do not ask for permission again after the
 candidate becomes clear.
 
+Do not infer authority to contact another person from words such as `handoff`,
+`route`, or `owner`. A pull-request comment or review, mention, notification,
+or message is external communication even when technically reversible. Unless
+the human explicitly authorizes that communication, make a handoff a local
+evidence packet for the supervisor or human.
+
 ## Inspect and compare
 
 If supervisor status actions are available, use them. Otherwise locate the goal
