@@ -13,7 +13,7 @@ const workerExecutionBoundary = [
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "Pending review, pipeline, or peer condition is one workstream, not the goal. Queue all ready, nonduplicate validations unless evidence proves provider throttling, quota, collision, or conflicting operations; continue independent work. The provider owns queueing.",
+  "Pending review, pipeline, or peer condition is one workstream, not the goal. Submit every ready, nonduplicate validation unless evidence proves provider throttling, quota, collision, or conflicting operations; continue independent work. The provider owns queueing.",
   "When no safe work remains, report the resume condition and let the native Goal block/stall. This parks execution; the durable goal stays active. Do not poll or reread until a fresh event/check; then reread authority once, even if unchanged.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
@@ -41,7 +41,7 @@ export function pullRequestTraceability(binding: GoalTrace, workerName: string) 
     ...fields,
     "Replace the angle-bracketed Goal value with the current objective from goal.json; never leave the placeholder or reuse an earlier objective.",
     "Keep supervision metadata secondary; it identifies origin, not completion proof. Never publish a local path-backed session locator.",
-    `Queue each owned ADO build, then add and verify tag ${JSON.stringify(`herdr-goal=${binding.goalId}`)} by returned ID. Pipeline metadata is not this tag. Never tag another goal's build or register a watch.`,
+    `After submitting each owned ADO build, add and verify tag ${JSON.stringify(`herdr-goal=${binding.goalId}`)} by returned ID. Pipeline metadata is not this tag. Never tag another goal's build or register a watch.`,
   ].join("\n");
 }
 

@@ -3,6 +3,30 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const nativeGoalResumeKeys = [..."/goal", "space", ..."resume"];
+
+export async function submitNativeGoalResume(request, paneId, timeoutMs = 5_000) {
+  await request("agent.send_keys", {
+    target: paneId,
+    keys: nativeGoalResumeKeys,
+  }, timeoutMs);
+  // Herdr writes logical keys directly to the TUI. Keep Enter in a later write
+  // so Codex has parsed the slash command before it is submitted.
+  await wait(100);
+  await request("agent.send_keys", {
+    target: paneId,
+    keys: ["enter"],
+  }, timeoutMs);
+
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error(`native Goal in ${paneId} did not resume`);
+    const result = await request("agent.get", { target: paneId }, remaining);
+    if (result.agent?.agent_status === "working") return result.agent;
+    await wait(Math.min(50, remaining));
+  }
+}
 
 function defaultSocketPath(env = process.env) {
   return env.HERDR_SOCKET_PATH || join(homedir(), ".config", "herdr", "herdr.sock");
@@ -89,6 +113,10 @@ export class HerdrClient {
       text,
       ...(wait ? { wait } : {}),
     }, timeoutMs);
+  }
+
+  async resumeNativeGoal(paneId, timeoutMs = 5_000) {
+    return submitNativeGoalResume(this.request.bind(this), paneId, timeoutMs);
   }
 
   async splitPane({ paneId, direction = "right", cwd, focus = false }) {

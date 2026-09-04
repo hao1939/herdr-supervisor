@@ -518,10 +518,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
-  assert.match(deliveredPrompts[0].prompt, /Queue all ready, nonduplicate validations/);
+  assert.match(deliveredPrompts[0].prompt, /Submit every ready, nonduplicate validation/);
   assert.match(deliveredPrompts[0].prompt, /provider owns queueing/i);
   assert.match(deliveredPrompts[0].prompt, /unless evidence proves provider throttling/);
-  assert.match(deliveredPrompts[0].prompt, /Queue each owned ADO build.*by returned ID/);
+  assert.match(deliveredPrompts[0].prompt, /After submitting each owned ADO build.*by returned ID/);
   assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
   assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer condition/);
   assert.match(deliveredPrompts[0].prompt, /continue independent work/i);
@@ -1575,9 +1575,8 @@ test("human reconsideration is retained while its focused review is preparing", 
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    if (message === "/goal resume") resumed = true;
-  });
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumed = true; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async () => {});
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2199,9 +2198,9 @@ test("an idle worker cannot be left working and may be steered in the same revie
     state_change_seq: resumed ? 1 : 0,
   }));
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumed = true; });
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, text, wait) => {
     prompts.push({ paneId, text, wait });
-    if (text === "/goal resume") resumed = true;
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -2235,10 +2234,6 @@ test("an idle worker cannot be left working and may be steered in the same revie
   assert.equal(steer.isError, false);
   assert.deepEqual(prompts, [{
     paneId: worker.paneId,
-    text: "/goal resume",
-    wait: { until: ["working"], timeout_ms: 5000 },
-  }, {
-    paneId: worker.paneId,
     text: "Continue the restored goal from current evidence.",
     wait: undefined,
   }]);
@@ -2266,10 +2261,8 @@ test("an accepted native Goal resume fails closed when its snapshot is unavailab
     return snapshot({ agent_status: "idle", state_change_seq: 0 });
   });
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The restored worker is idle.", truncated: false } }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-    resumed = true;
-  });
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumed = true; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2283,7 +2276,7 @@ test("an accepted native Goal resume fails closed when its snapshot is unavailab
   });
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /native Goal resumed.*could not be observed/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
 
   const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
@@ -2291,7 +2284,7 @@ test("an accepted native Goal resume fails closed when its snapshot is unavailab
   });
   assert.equal(duplicate.isError, true);
   assert.match(duplicate.content[0].text, /already applied/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -2308,10 +2301,10 @@ test("an uncertain native Goal resume cannot send or retry a tactical instructio
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-    throw new Error("prompt response timed out after possible delivery");
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => {
+    throw new Error("native Goal command could not be confirmed");
   });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2326,14 +2319,14 @@ test("an uncertain native Goal resume cannot send or retry a tactical instructio
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
     message: "Continue the same goal.",
   });
   assert.equal(duplicate.isError, true);
   assert.match(duplicate.content[0].text, /already applied/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -2356,10 +2349,8 @@ test("a replacement session after native Goal resume receives no tactical instru
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-    resumed = true;
-  });
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumed = true; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2374,14 +2365,14 @@ test("a replacement session after native Goal resume receives no tactical instru
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /resulting worker identity did not match/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   const duplicate = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
     message: "Continue the same goal.",
   });
   assert.equal(duplicate.isError, true);
   assert.match(duplicate.content[0].text, /already applied/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -2401,9 +2392,8 @@ test("a native Goal that settles again does not receive a tactical instruction",
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-  });
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => {});
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2418,7 +2408,7 @@ test("a native Goal that settles again does not receive a tactical instruction",
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /settled again before the follow-up instruction/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -2438,10 +2428,10 @@ test("a native Goal resume that cannot be confirmed fails closed without retryin
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-    throw new Error("agent.prompt wait timed out");
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => {
+    throw new Error("native Goal resume timed out");
   });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2457,7 +2447,7 @@ test("a native Goal resume that cannot be confirmed fails closed without retryin
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Could not confirm that the native Goal resumed/);
   assert.match(result.content[0].text, /Do not resume it again/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
 
   const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
@@ -2465,7 +2455,7 @@ test("a native Goal resume that cannot be confirmed fails closed without retryin
   });
   assert.equal(repeated.isError, true);
   assert.match(repeated.content[0].text, /already applied/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -2489,10 +2479,8 @@ test("a native Goal resume that changes worker identity fails closed without a f
   t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
     read: { text: "The worker is ready to continue.", truncated: false },
   }));
-  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => {
-    prompts.push(message);
-    resumed = true;
-  });
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { resumed = true; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
   const pi = fakePi();
@@ -2507,7 +2495,7 @@ test("a native Goal resume that changes worker identity fails closed without a f
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /resulting worker identity did not match/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
 
   const repeated = await pi.tools.get("supervisor_steer").execute("steer-again", {
     pane_id: worker.paneId,
@@ -2515,7 +2503,7 @@ test("a native Goal resume that changes worker identity fails closed without a f
   });
   assert.equal(repeated.isError, true);
   assert.match(repeated.content[0].text, /already applied/);
-  assert.deepEqual(prompts, ["/goal resume"]);
+  assert.deepEqual(prompts, []);
   pi.events.get("session_shutdown")();
 });
 
@@ -3552,9 +3540,9 @@ test("missing-pane recovery adopts the exact session already restored elsewhere"
   t.mock.method(HerdrClient.prototype, "createTab", async () => { creates += 1; });
   t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { resumes += 1; });
   const prompts = [];
+  t.mock.method(HerdrClient.prototype, "resumeNativeGoal", async () => { nativeGoalResumed = true; });
   t.mock.method(HerdrClient.prototype, "promptAgent", async (paneId, message) => {
     prompts.push({ paneId, message });
-    if (message === "/goal resume") nativeGoalResumed = true;
   });
   t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
 
@@ -3570,10 +3558,9 @@ test("missing-pane recovery adopts the exact session already restored elsewhere"
 
   assert.equal(creates, 0);
   assert.equal(resumes, 0);
-  assert.equal(prompts.length, 2);
-  assert.deepEqual(prompts.map(({ paneId }) => paneId), [movedAgent.pane_id, movedAgent.pane_id]);
-  assert.equal(prompts[0].message, "/goal resume");
-  assert.match(prompts[1].message, /Continue from current goal evidence/);
+  assert.equal(prompts.length, 1);
+  assert.deepEqual(prompts.map(({ paneId }) => paneId), [movedAgent.pane_id]);
+  assert.match(prompts[0].message, /Continue from current goal evidence/);
   assert.equal(result.isError, false, result.content[0].text);
   assert.match(result.content[0].text, /Relocated the exact codex session and resumed its native Goal in w1:p9/);
   const [stored] = (await loadSupervisorGoals(root)).active;

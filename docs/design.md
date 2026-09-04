@@ -307,6 +307,14 @@ missing pane may be replaced as a routing location only when the recorded
 session supports exact resume and code verifies that saved identity. A changed
 or unsupported session fails closed.
 
+Model input and Codex TUI commands are different transport surfaces. Sending
+`/goal resume` through `agent.prompt` only asks the model to read that text; it
+does not operate the native Goal. For an exact settled pane, the executor sends
+the native slash command as logical keys, submits Enter separately after the
+TUI can parse it, and verifies that the same worker reports `working` before it
+sends any follow-up. This is one deterministic wake primitive, not another
+queue or lifecycle state machine.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.
@@ -606,13 +614,14 @@ event defect. If the event passes, improve the agent side instead.
 
 For example, a future GitHub portfolio observer could prompt the supervisor
 with changed draft-PR facts and guidance to inspect readiness, overlap, CI, and
-blocked goals before coordinating affected workers. A protocol PoC confirmed
-that Herdr's ordinary `agent.prompt` is sufficient for this path. It is
-intentionally an empowered supervisor turn, not the periodic fenced global
-review. The observer would not maintain a hold state or route workers, and the
-periodic review would remain only a missed-event safety net. This is an
-extension seam, not a feature until live evidence justifies it; it needs no
-custom Herdr event, local bus, spool, queue, or workflow engine.
+blocked goals before coordinating affected workers. A supervisor turn that is
+already able to receive model input may use Herdr's ordinary `agent.prompt`;
+resuming a settled native Codex Goal first requires the exact-pane TUI command
+described above. This would be an empowered supervisor turn, not the periodic
+fenced global review. The observer would not maintain a hold state or route
+workers, and the periodic review would remain only a missed-event safety net.
+This is an extension seam, not a feature until live evidence justifies it; it
+needs no custom Herdr event, local bus, spool, queue, or workflow engine.
 
 The watcher process is `event-watchd`. Its extension point is a statically
 wired source adapter, not a runtime plugin. An adapter identifies the durable

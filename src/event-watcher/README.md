@@ -374,6 +374,12 @@ verifies one exact current native session, resumes a settled Codex Goal when
 needed, and sends the bounded observation. The notification is a wake hint,
 not provider authority or completion proof.
 
+Resume is a native Codex TUI operation, not a model prompt. Delivery sends
+`/goal resume` as logical keys to the exact pane, submits it in a separate
+write, and verifies that the same worker reports `working` before sending the
+event message. It fails closed if that transition cannot be confirmed; it does
+not create a replacement worker or a delivery queue.
+
 ### Diagnostics
 
 Source warnings, source failures, and delivery failures are bounded

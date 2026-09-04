@@ -129,7 +129,7 @@ test("promptAgent waits beyond the default transport timeout for an atomic wait"
     const client = new HerdrClient({ socketPath: fake.socketPath, timeoutMs: 20 });
     // The 35 ms response exceeds the 20 ms transport timeout. A wait-aware
     // prompt must extend its own deadline instead of timing out.
-    const result = await client.promptAgent("w1:p2", "/goal resume", {
+    const result = await client.promptAgent("w1:p2", "Continue the current work.", {
       until: ["working"],
       timeout_ms: 30,
     });
@@ -137,6 +137,33 @@ test("promptAgent waits beyond the default transport timeout for an atomic wait"
   } finally {
     await fake.close();
   }
+});
+
+test("resumeNativeGoal submits the slash command as TUI keys and confirms work", async (t) => {
+  const client = new HerdrClient();
+  const requests = [];
+  let reads = 0;
+  t.mock.method(client, "request", async (method, params) => {
+    requests.push({ method, params });
+    if (method === "agent.get") {
+      reads += 1;
+      return { agent: { agent_status: reads === 1 ? "done" : "working" } };
+    }
+    return { type: "ok" };
+  });
+
+  const agent = await client.resumeNativeGoal("w1:p2", 1_000);
+
+  assert.equal(agent.agent_status, "working");
+  assert.deepEqual(requests.slice(0, 2), [{
+    method: "agent.send_keys",
+    params: { target: "w1:p2", keys: [..."/goal", "space", ..."resume"] },
+  }, {
+    method: "agent.send_keys",
+    params: { target: "w1:p2", keys: ["enter"] },
+  }]);
+  assert.equal(requests.filter(({ method }) => method === "agent.get").length, 2);
+  assert.equal(requests.some(({ method }) => method === "agent.prompt"), false);
 });
 
 test("splitPane creates an unfocused sibling from an exact supervisor pane", async () => {

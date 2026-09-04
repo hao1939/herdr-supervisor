@@ -1746,7 +1746,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           const request = recoveryRequest(binding, liveSnapshot);
           if (relocated) request.name = workerNameForGoal(binding.goalId);
           // An interrupted native Codex Goal is paused by design. Resume that
-          // lifecycle explicitly before queuing the supervisor's fresh
+          // lifecycle explicitly before sending the supervisor's fresh
           // steering; otherwise Codex waits at an interactive "Resume goal?"
           // gate and the apparently recovered worker never moves.
           request.args = [...codexLaunchArgs(), ...request.args, "/goal resume"];
@@ -1771,10 +1771,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           resumed = true;
         } else if (canResumeNativeGoal) {
           try {
-            await client.promptAgent(binding.paneId, "/goal resume", {
-              until: ["working"],
-              timeout_ms: 5000,
-            });
+            await client.resumeNativeGoal(binding.paneId, 5000);
           } catch (error) {
             reviewTurn.close(binding.paneId);
             scheduleReview(binding);
