@@ -2701,6 +2701,11 @@ test("native Goal steering rechecks canonical activity after waiting for its act
   assert.match(result.content[0].text, /goal is no longer active/);
   assert.equal(resumeCalls, 0);
   assert.deepEqual(prompts, []);
+  await pi.events.get("agent_settled")();
+  const status = await pi.tools.get("supervisor_status").execute("status", {
+    goal_id: "g_test",
+  });
+  assert.match(status.content[0].text, /Goal g_test · accepted/);
   pi.events.get("session_shutdown")();
 });
 

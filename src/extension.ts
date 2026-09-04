@@ -1833,13 +1833,25 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             delivery = await deliverWorkerInstruction(continuedBinding, instruction);
           });
         } catch (error) {
+          let currentBinding: ActiveGoal | undefined;
+          let reloadWarning = "";
+          if (!delivery) {
+            try {
+              const goals = await reloadGoals();
+              const canonical = goals.active.find((goal) => goal.goalId === binding.goalId);
+              if (canonical) currentBinding = { ...canonical, ...runtimeFor(canonical) };
+            } catch (reloadError) {
+              goalCache = undefined;
+              reloadWarning = ` Supervisor state could not be refreshed: ${reloadError.message}.`;
+            }
+          }
           if (delivery) {
             actionLockWarning = `\nAction lock warning: ${error.message}`;
           } else if (isRecoveryPreflightError(error)) {
-            return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.`, true);
+            return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.${reloadWarning}`, true);
           } else if (recoveryAttempted) {
             reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
+            if (currentBinding) scheduleReview(currentBinding);
             let warning = "";
             try { await armReviewTimer(); }
             catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
@@ -1847,10 +1859,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             const retry = attemptedNativeResume
               ? "Do not resume it again in this turn."
               : "Do not retry in this turn.";
-            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied.${uncertainty} No worker instruction was sent.${warning}\n\n${retry} The bounded review will reread current state and continue safely.`, true);
+            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied.${uncertainty} No worker instruction was sent.${reloadWarning}${warning}\n\n${retry} The bounded review will reread current state and continue safely.`, true);
           } else {
             reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
+            if (currentBinding) scheduleReview(currentBinding);
             let timerWarning = "";
             try { await armReviewTimer(); }
             catch (timerError) { timerWarning = ` Review timer warning: ${timerError.message}.`; }
@@ -1865,7 +1877,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             const uncertainty = attemptedNativeResume && !resumed
               ? " The resume may have started."
               : "";
-            return text(`${prefix} ${error.message}.${uncertainty} No follow-up instruction was sent.${timerWarning}\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
+            return text(`${prefix} ${error.message}.${uncertainty} No follow-up instruction was sent.${reloadWarning}${timerWarning}\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
           }
         }
         reviewTurn.close(binding.paneId);
