@@ -3943,7 +3943,7 @@ test("post-relocation observation failure closes the turn and schedules recovery
   let snapshots = 0;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => {
     snapshots += 1;
-    if (snapshots === 3) throw new Error("post-relocation snapshot failed");
+    if (snapshots === 4) throw new Error("post-relocation snapshot failed");
     return {
       agents: [movedAgent],
       panes: [{ pane_id: movedAgent.pane_id, terminal_id: movedAgent.terminal_id }],

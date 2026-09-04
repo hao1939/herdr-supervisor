@@ -1687,56 +1687,16 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         let liveAgent = findAgent(liveSnapshot, params.pane_id);
         let livePane = findPane(liveSnapshot, params.pane_id);
         let relocated = false;
-        if (!liveAgent) {
-          const previousPaneId = binding.paneId;
-          try {
-            binding = await recoverWorkerRouting(binding, liveSnapshot);
-          } catch (error) {
-            if (isRecoveryPreflightError(error)) {
-              return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.`, true);
-            }
-            reviewTurn.close(params.pane_id);
-            scheduleReview(binding);
-            let warning = "";
-            try { await armReviewTimer(); }
-            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
-            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied, but no worker instruction was sent.${warning}\n\nDo not retry in this turn. The bounded review will reread current state and continue safely.`, true);
-          }
-          relocated = binding.paneId !== previousPaneId;
-          if (relocated) {
-            reviewTurn.retarget(params.pane_id, binding.paneId);
-            relocatedBinding = binding;
-          }
-          liveSnapshot = await client.snapshot();
-          const latestBinding = await adoptExactSession(binding, liveSnapshot);
-          if (latestBinding && latestBinding.paneId !== binding.paneId) {
-            reviewTurn.retarget(binding.paneId, latestBinding.paneId);
-            binding = latestBinding;
-            relocated = true;
-            relocatedBinding = binding;
-          } else if (latestBinding) {
-            binding = latestBinding;
-          }
-          if (relocated) {
-            try {
-              await connectObserver();
-            } catch (error) {
-              reportBackgroundFailure("Could not watch the relocated worker", error);
-            }
-            displayWarning = await applyWorkerLabel(binding);
-          }
-          liveAgent = findAgent(liveSnapshot, binding.paneId);
-          livePane = findPane(liveSnapshot, binding.paneId);
-        }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
-        const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
-        if (liveMismatch && !canResumeNow) {
-          if (relocatedBinding) throw new Error(liveMismatch);
+        const canRecoverLive = !liveAgent && canRecoverAgentSession(binding.agentSession);
+        if (liveMismatch && !canRecoverLive) {
           return text(`Refusing to continue after rereading worker identity: ${liveMismatch}.`, true);
         }
         let continuedBinding = binding;
         let resumed = false;
+        let restartedProcess = false;
         let attemptedNativeResume = false;
+        let recoveryAttempted = false;
         let actionLockWarning = "";
         const instruction = params.message.trim();
         let delivery;
@@ -1756,8 +1716,38 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               throw new Error("canonical worker routing changed while waiting to continue");
             }
             binding = { ...lockedBinding, ...runtimeFor(lockedBinding) };
-            const lockedSnapshot = await client.snapshot();
+            let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            if (!lockedAgent) {
+              recoveryAttempted = true;
+              const previousPaneId = binding.paneId;
+              binding = await recoverWorkerRouting(binding, lockedSnapshot);
+              relocated = binding.paneId !== previousPaneId;
+              if (relocated) {
+                reviewTurn.retarget(params.pane_id, binding.paneId);
+                relocatedBinding = binding;
+              }
+              lockedSnapshot = await client.snapshot();
+              const latestBinding = await adoptExactSession(binding, lockedSnapshot);
+              if (latestBinding && latestBinding.paneId !== binding.paneId) {
+                reviewTurn.retarget(binding.paneId, latestBinding.paneId);
+                binding = latestBinding;
+                relocated = true;
+                relocatedBinding = binding;
+              } else if (latestBinding) {
+                binding = latestBinding;
+              }
+              continuedBinding = binding;
+              if (relocated) {
+                try {
+                  await connectObserver();
+                } catch (error) {
+                  reportBackgroundFailure("Could not watch the relocated worker", error);
+                }
+                displayWarning = await applyWorkerLabel(binding);
+              }
+              lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            }
             const lockedPane = findPane(lockedSnapshot, binding.paneId);
             const canRecoverNow = !lockedAgent && lockedPane?.terminal_id === binding.terminalId;
             const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
@@ -1778,6 +1768,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               }
               continuedBinding = await refreshObservedLocation(binding, lockedAgent);
               resumed = true;
+              restartedProcess = true;
             } else if (binding.agentSession.agent === "codex" && canResumeNativeGoal(lockedAgent)) {
               attemptedNativeResume = true;
               await client.resumeNativeGoal(binding.paneId, 5000);
@@ -1807,6 +1798,19 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         } catch (error) {
           if (delivery) {
             actionLockWarning = `\nAction lock warning: ${error.message}`;
+          } else if (isRecoveryPreflightError(error)) {
+            return text(`Could not start worker recovery: ${error.message}. No routing action was attempted, so you may decide again in this review turn.`, true);
+          } else if (recoveryAttempted) {
+            reviewTurn.close(binding.paneId);
+            scheduleReview(binding);
+            let warning = "";
+            try { await armReviewTimer(); }
+            catch (timerError) { warning = ` Review timer warning: ${timerError.message}.`; }
+            const uncertainty = attemptedNativeResume ? " The resume may have started." : "";
+            const retry = attemptedNativeResume
+              ? "Do not resume it again in this turn."
+              : "Do not retry in this turn.";
+            return text(`Could not confirm worker recovery: ${error.message}. Routing recovery may have partly applied.${uncertainty} No worker instruction was sent.${warning}\n\n${retry} The bounded review will reread current state and continue safely.`, true);
           } else {
             reviewTurn.close(binding.paneId);
             scheduleReview(binding);
@@ -1856,10 +1860,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           scheduleReview(continuedBinding, deadline ? deadline - Date.now() : reviewIntervalMs());
           const resultText = resumed
             ? `${relocated
-              ? canResumeNow
+              ? restartedProcess
                 ? `Relocated and resumed the exact ${binding.agentSession.agent} session and native Goal`
                 : `Relocated the exact ${binding.agentSession.agent} session and resumed its native Goal`
-              : canResumeNow
+              : restartedProcess
                 ? `Resumed the exact ${binding.agentSession.agent} session and native Goal`
                 : "Resumed the exact native Goal"} in ${continuedBinding.paneId}, then asked it to continue.`
             : relocated
