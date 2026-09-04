@@ -515,7 +515,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
   assert.match(deliveredPrompts[0].prompt, /Create another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /Handoffs stay local/);
-  assert.match(deliveredPrompts[0].prompt, /Never post comments, reviews, mentions, or messages on a foreign resource/);
+  assert.match(deliveredPrompts[0].prompt, /Comments, reviews, mentions, notifications, and messages always require explicit human authority/);
   assert.match(deliveredPrompts[0].prompt, /explicit human authority/);
   assert.match(deliveredPrompts[0].prompt, /distinguish missing convenience tooling/);
   assert.match(deliveredPrompts[0].prompt, /pending pull request, pipeline run, or peer condition/);
