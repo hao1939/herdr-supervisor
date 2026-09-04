@@ -442,6 +442,11 @@ Each focused review receives only what is needed to decide one goal:
 - bounded new assistant messages since the saved cursor;
 - relevant recorded peer progress when coordination requires it.
 
+The review event carries these current facts. Stable decision rules live once
+in the supervisor system policy installed for every turn; they are not copied
+into every event. This keeps the meaningful change visible and prevents a
+long-running supervisor session from accumulating duplicate instructions.
+
 The supervisor may use its human conversation history, but correctness does
 not depend on replaying that history. `goal.json`, `current.json`, fresh Herdr
 state, and bounded new evidence are sufficient after restart.

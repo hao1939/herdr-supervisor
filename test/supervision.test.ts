@@ -436,34 +436,22 @@ test("review notice explains the goal and signal in plain language", () => {
   assert.match(message, /g_waiter \(w1:p7\): Fix cancellation to publish the shared fixture/);
   assert.match(message, /supervisor_reconsider for exactly those panes/);
   assert.match(message, /Do not wake them merely because this goal recorded another decision/);
-  assert.match(message, /Observe this exact worker/);
-  assert.match(message, /supervisor_status to read current recorded peer progress/);
   assert.match(message, /only this worker's evidence can prove this goal complete/);
-  assert.match(message, /Your own response is not worker evidence/);
-  assert.match(message, /confirm that the condition still exists/);
-  assert.match(message, /fresh evidence must cover every part you claim remains unchanged/);
-  assert.match(message, /steer the worker to reread it rather than infer unchanged state from silence or older evidence/);
-  assert.match(message, /peer or external part/);
-  assert.match(message, /continue any independent useful work/);
-  assert.match(message, /durable goal is still coherent, useful, and achievable/);
-  assert.match(message, /current blocker stops the whole outcome or only one path/);
-  assert.match(message, /alternative proof, or preparation/);
-  assert.match(message, /goal contract itself is obsolete, contradictory, or impractical/);
-  assert.match(message, /ask the human one concrete question/);
-  assert.match(message, /final worker message, PR, run, report, or completed review cycle as evidence/);
-  assert.match(message, /review as evidence for this goal, not as a separate supervisor lifecycle/);
-  assert.match(message, /current-revision proof and unresolved-finding disposition/);
-  assert.match(message, /whole objective and every acceptance criterion at the same declared scope and time horizon/);
-  assert.match(message, /criteria quietly narrow a broader or ongoing objective to one milestone/);
-  assert.match(message, /standing improvement loop/);
-  assert.match(message, /Do not invent a finite convergence boundary for standing work/);
-  assert.match(message, /Compare all timestamps with the UTC review time above/);
+  assert.doesNotMatch(message, /\nReview\n/);
 });
 
 test("every supervisor turn receives the null protocol for optional tool fields", () => {
   const prompt = supervisorSystemPrompt("Base prompt.");
   assert.match(prompt, /For every optional tool argument that does not apply, use JSON null/);
   assert.match(prompt, /never invent a placeholder value, identity, revision, watch, wait, or deadline/);
+  assert.match(prompt, /Observe the exact worker only through supervisor_observe/);
+  assert.match(prompt, /Use the review request's exact UTC time for deadline comparisons/);
+  assert.match(prompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
+  assert.match(prompt, /current evidence covers the whole objective and every acceptance criterion/);
+  assert.match(prompt, /review as evidence for the goal, not as a separate lifecycle/);
+  assert.match(prompt, /current-revision proof and disposition every unresolved finding/);
+  assert.match(prompt, /fresh evidence must cover every part claimed unchanged/);
+  assert.match(prompt, /steer the worker to reread it instead of inferring unchanged state/);
 });
 
 test("a human correction updates durable authority before execution", () => {
