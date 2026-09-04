@@ -134,7 +134,7 @@ Watching trusted scopes
   - github-pr: acme/api
 
 Scan interval: 60000 ms
-Stale notification: after 86400000 ms unchanged
+Stale notification: after 1 day unchanged
 Checkpoint: /home/agent/.local/state/herdr-supervisor/external-events.json
 Delivery: linked resource -> durable goal ID -> exact current worker
 Failures: bounded diagnostic -> one Pi supervisor
@@ -253,12 +253,13 @@ Agent response knowledge
 | `linked-resource-stale` | Exact current goal worker | One or more linked resources for the goal remain on the same meaningful revision through the stale threshold | `knowledge/linked-resource-stale.md` |
 | `watcher-diagnostic` | The one Pi supervisor | Source warning or failure, delivery failure, unreadable goal ownership, or checkpoint capacity pressure | `knowledge/watcher-diagnostic.md` |
 
-Stale resources due in one scan are grouped by durable goal and delivered in
-one bounded message. Each resource is reported only once for an unchanged
-revision. The interval starts when the watcher first records that revision and
-survives process restart in its checkpoint. A meaningful provider change resets
-that resource; a later unchanged revision can become stale again. The watcher
-does not decide that the resource or goal is blocked.
+Stale resources due in one scan are grouped by durable goal. Each delivery
+carries at most 20 resources; overflow remains pending until a later successful
+current provider observation. Each resource is reported only once for an
+unchanged revision. The interval starts when the watcher first records that
+revision and survives process restart in its checkpoint. A meaningful provider
+change resets that resource; a later unchanged revision can become stale again.
+The watcher does not decide that the resource or goal is blocked.
 
 The worker does not need to locate watcher documentation before responding.
 The injected guide explains why it received the event, how to reread authority,
