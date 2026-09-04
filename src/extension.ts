@@ -1737,6 +1737,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         let continuedBinding = binding;
         let resumed = false;
         let attemptedNativeResume = false;
+        let actionLockWarning = "";
         const instruction = params.message.trim();
         let delivery;
         if (canResumeNow) {
@@ -1818,17 +1819,21 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
               delivery = await deliverWorkerInstruction(continuedBinding, instruction);
             });
           } catch (error) {
-            reviewTurn.close(binding.paneId);
-            scheduleReview(binding);
-            const prefix = resumed
-              ? `The native Goal resumed in ${binding.paneId}, but`
-              : attemptedNativeResume
-                ? `Could not confirm that the native Goal resumed in ${binding.paneId}:`
-                : `Could not safely steer ${binding.paneId}:`;
-            const retry = attemptedNativeResume
-              ? "Do not resume it again in this turn."
-              : "Do not send the instruction again in this turn.";
-            return text(`${prefix} ${error.message}. No follow-up instruction was sent.\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
+            if (delivery) {
+              actionLockWarning = `\nAction lock warning: ${error.message}`;
+            } else {
+              reviewTurn.close(binding.paneId);
+              scheduleReview(binding);
+              const prefix = resumed
+                ? `The native Goal resumed in ${binding.paneId}, but`
+                : attemptedNativeResume
+                  ? `Could not confirm that the native Goal resumed in ${binding.paneId}:`
+                  : `Could not safely steer ${binding.paneId}:`;
+              const retry = attemptedNativeResume
+                ? "Do not resume it again in this turn."
+                : "Do not send the instruction again in this turn.";
+              return text(`${prefix} ${error.message}. No follow-up instruction was sent.\n\n${retry} End this supervisor turn now and wait for fresh worker evidence.`, true);
+            }
           }
           reviewTurn.close(binding.paneId);
         }
@@ -1845,7 +1850,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             params.evidence || continuedBinding.evidence,
             reviewAt,
           );
-          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
+          return text(`Could not confirm whether ${continuedBinding.paneId} received the instruction: ${delivery.deliveryError.message}.${checkpoint.warning}${actionLockWarning}\n\nDo not send it again in this turn. Wait for fresh worker evidence.`, true);
         }
         // The worker action has happened. Close the turn before bookkeeping so
         // a checkpoint failure cannot cause the model to send it twice.
@@ -1870,7 +1875,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             : relocated
               ? `Relocated the exact ${binding.agentSession.agent} session to ${continuedBinding.paneId}, then steered it: ${params.message.trim()}`
               : `Steered ${params.pane_id}: ${params.message.trim()}`;
-          return text(`${resultText}${warning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
+          return text(`${resultText}${warning}${actionLockWarning}${displayWarning}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
         } catch (error) {
           const reloadWarning = await reconcileCacheAfterWriteFailure();
           scheduleReview(continuedBinding);
