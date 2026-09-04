@@ -44,8 +44,8 @@ parallel sources of goal truth.
 
 The Supervisor implements the small foundation that every goal needs and lets
 the model handle situational judgment. The practical heuristic is **solidify
-the common 20%; teach the model the remaining 80%**. This is not a feature
-quota. It is a test for whether a behavior belongs in code.
+the common 20%; teach the model the remaining 80%**. This is a decision rule
+for whether behavior belongs in code, not a target count.
 
 The minimal core lets an agent:
 
@@ -751,12 +751,12 @@ the remedy belongs in knowledge rather than another mechanism.
 Workers run concurrently. The one supervisor session makes one semantic
 decision at a time.
 
-Dispatch every ready, nonduplicate validation immediately and let the external
-provider accept or queue it. A queued pipeline is useful execution progress,
-but it is not completion proof or a reason to delay other ready validation. If
-the provider rejects a submission or two operations truly conflict, preserve
-that concrete fact and keep unrelated work moving. Asking the portfolio to
-focus on existing work limits speculative new work; every ready change still
+Start every ready, nonduplicate validation immediately and keep unrelated work
+moving while results are pending. A submitted run is useful execution
+progress, but it is not completion proof or a reason to delay other ready
+validation. If the provider reports a concrete failure or two operations truly
+conflict, preserve that fact and continue unaffected work. Asking the portfolio
+to focus on existing work limits speculative new work; every ready change still
 gets validated.
 
 - Each worker has at most one pending in-memory review signal.
