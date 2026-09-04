@@ -3087,7 +3087,7 @@ test("a live checkpoint keeps later unchanged working checks quiet", async (t) =
   pi.events.get("session_shutdown")();
 });
 
-test("restart preserves a peer wait and requires fresh evidence before replacing it with an external wait", async (t) => {
+test("restart preserves a blocked peer wait and requires fresh evidence before replacing it", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-wait-restart-"));
   const sessions = await mkdtemp(join(tmpdir(), "herdr-supervisor-session-"));
   const sessionFile = join(sessions, "worker.jsonl");
@@ -3120,8 +3120,9 @@ test("restart preserves a peer wait and requires fresh evidence before replacing
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
   });
+  let agentStatus = "blocked";
   t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({
-    agent_status: "done",
+    agent_status: agentStatus,
     state_change_seq: 9,
     agent_session: exactWorker.agentSession,
   }));
@@ -3139,6 +3140,7 @@ test("restart preserves a peer wait and requires fresh evidence before replacing
   subscriptionEvent({ data: { pane_id: worker.paneId } });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(pi.messages.length, 0, "lifecycle-only events must not wake an unchanged future wait");
+  agentStatus = "done";
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await waitFor(() => pi.messages.length === 1);
   assert.match(pi.messages[0].content, /review deadline elapsed/);

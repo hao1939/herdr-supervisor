@@ -846,7 +846,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       !signal?.force
       && Number.isFinite(waitingUntil)
       && waitingUntil > Date.now()
-      && (agent?.agent_status === "idle" || agent?.agent_status === "done")
+      && ["idle", "done", "blocked"].includes(agent?.agent_status)
       && !identityMismatch(binding, agent, pane)
       && currentDecision.wake
     ) {
