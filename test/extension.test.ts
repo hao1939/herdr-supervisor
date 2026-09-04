@@ -521,8 +521,8 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Submit each ready, nonduplicate validation/);
   assert.match(deliveredPrompts[0].prompt, /let the provider accept or queue it/);
   assert.match(deliveredPrompts[0].prompt, /preserve any rejection verbatim/);
-  assert.match(deliveredPrompts[0].prompt, /After submitting each owned ADO build.*by returned ID/);
-  assert.match(deliveredPrompts[0].prompt, /Pipeline metadata is not this tag/);
+  assert.match(deliveredPrompts[0].prompt, /For each owned ADO build.*exactly one.*by returned ID/);
+  assert.match(deliveredPrompts[0].prompt, /Metadata is not a tag/);
   assert.match(deliveredPrompts[0].prompt, /Pending review, pipeline, or peer state/);
   assert.match(deliveredPrompts[0].prompt, /Keep other useful work moving/);
   assert.match(deliveredPrompts[0].prompt, /no safe work remains.*block\/stall/s);
@@ -2544,6 +2544,71 @@ test("steering refuses a relocated worker that changed while waiting for its act
   pi.events.get("session_shutdown")();
 });
 
+test("steering refuses fresh output from an exact worker adopted at a new pane", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let release;
+  let enter;
+  const entered = new Promise((resolve) => { enter = resolve; });
+  const held = withGoalActionLock(root, "g_test", async () => {
+    enter();
+    await new Promise((resolve) => { release = resolve; });
+  });
+  await entered;
+  let moved = false;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => moved
+    ? {
+        agents: [{
+          pane_id: "w1:p9",
+          terminal_id: "term_moved",
+          agent_status: "working",
+          state_change_seq: 3,
+          agent_session: worker.agentSession,
+          interactive_ready: true,
+        }],
+        panes: [{ pane_id: "w1:p9", terminal_id: "term_moved" }],
+      }
+    : snapshot({ agent_status: "working", state_change_seq: 2 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The worker was active when observed.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await pi.tools.get("supervisor_reconsider").execute("reconsider", {
+    pane_ids: [worker.paneId],
+    reason: "review the current worker",
+  });
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  moved = true;
+  release();
+  await held;
+
+  const result = await steering;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /worker changed after it was observed/);
+  assert.deepEqual(prompts, []);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.paneId, "w1:p9");
+  pi.events.get("session_shutdown")();
+});
+
 test("native Goal steering rechecks canonical activity after waiting for its action lock", async (t) => {
   const root = await fixture();
   const [binding] = (await loadSupervisorGoals(root)).active;
@@ -3720,7 +3785,7 @@ test("only the current automated review remains in model context", () => {
   ]);
 });
 
-test("a successful steer is not repeated when checkpointing fails", async (t) => {
+test("a checkpoint failure recovers from fresh worker evidence after restart without repeating the steer", async (t) => {
   const root = await fixture();
   const directory = goalPaths("g_test", root).directory;
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

@@ -328,6 +328,13 @@ receipt in the goal checkpoint immediately before prompting, then confirms it
 afterward. If confirmation fails, restart remains fail-closed until fresh worker
 state proves the instruction produced another turn.
 
+Herdr 0.8 does not let `agent.send_keys` require an expected terminal and
+native session. The executor checks exact identity before and after native Goal
+resume and fails closed on a detected replacement, but it cannot make the two
+TUI writes atomic across pane replacement. That remaining runtime race needs a
+small identity-conditioned Herdr operation; the Supervisor does not imitate it
+with another lock, receipt store, or lifecycle.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.

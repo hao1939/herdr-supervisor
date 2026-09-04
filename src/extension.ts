@@ -1720,6 +1720,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            if (lockedAgent) {
+              const lockedPane = findPane(lockedSnapshot, binding.paneId);
+              const lockedMismatch = identityMismatch(binding, lockedAgent, lockedPane);
+              if (lockedMismatch) throw new Error(lockedMismatch);
+            }
             if (!lockedAgent) {
               recoveryAttempted = true;
               const previousPaneId = binding.paneId;
