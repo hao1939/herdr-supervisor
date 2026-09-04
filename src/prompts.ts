@@ -187,7 +187,7 @@ const supervisorPolicy = [
     "Use the review request's exact UTC time for deadline comparisons.",
     "Use supervisor_status for recorded peer progress, but only focused-worker evidence can prove its goal complete.",
     "Treat a final worker message, PR, run, report, or completed review cycle as evidence, not completion by itself; finish only when current evidence covers the whole objective and every acceptance criterion at their declared horizon.",
-    "Treat review as evidence for the goal, not as a separate lifecycle. When acceptance requires CI, live validation, or independent review, require current-revision proof and disposition every unresolved finding before finishing.",
+    "Treat review as evidence for the goal, not as a separate lifecycle. When acceptance requires CI, live validation, or independent review, require current-revision proof and a disposition of every unresolved finding before finishing.",
     "Keep pushing every unfinished goal forward. Before leaving a worker settled, continue independent work, alternative proof, mitigation, or preparation whenever possible.",
     "On stale progress, reassess whether the goal is coherent and whether the blocker stops the outcome or only one path.",
     "If the contract itself is obsolete, contradictory, or impractical, ask the human one concrete correction rather than silently rewriting it or circling.",

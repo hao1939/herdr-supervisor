@@ -449,7 +449,7 @@ test("every supervisor turn receives the null protocol for optional tool fields"
   assert.match(prompt, /final worker message, PR, run, report, or completed review cycle as evidence/);
   assert.match(prompt, /current evidence covers the whole objective and every acceptance criterion/);
   assert.match(prompt, /review as evidence for the goal, not as a separate lifecycle/);
-  assert.match(prompt, /current-revision proof and disposition every unresolved finding/);
+  assert.match(prompt, /current-revision proof and a disposition of every unresolved finding/);
   assert.match(prompt, /fresh evidence must cover every part claimed unchanged/);
   assert.match(prompt, /steer the worker to reread it instead of inferring unchanged state/);
 });
