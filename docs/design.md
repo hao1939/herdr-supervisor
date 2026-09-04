@@ -307,6 +307,12 @@ missing pane may be replaced as a routing location only when the recorded
 session supports exact resume and code verifies that saved identity. A changed
 or unsupported session fails closed.
 
+Generic process or container restoration opens a native session's local goal
+summary but does not resume its paused Goal. It has no goal ownership or wait
+context. Only the ordinary exact active-goal paths—supervisor steering or an
+external event—may resume that Goal. Historical, stopped, and intentionally
+parked sessions therefore remain quiet after infrastructure restarts.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.

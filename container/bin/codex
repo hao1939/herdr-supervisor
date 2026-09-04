@@ -38,13 +38,11 @@ for argument in "$@"; do
   previous="$argument"
 done
 
-# Herdr restores a stopped worker with `codex resume <session>`. Codex
-# deliberately pauses a native Goal after an interruption and otherwise opens
-# an interactive "Resume paused goal?" gate. In this unattended worker image,
-# the system owns that lifecycle decision, so make the normal exact-session
-# restore resume its Goal too. A caller-supplied prompt remains authoritative.
+# A bare `/goal` is a local summary: it bypasses Codex's paused-goal startup
+# prompt without changing goal state. Only the exact supervisor or watcher path
+# sends `/goal resume` when current evidence requires work to continue.
 if [ "$after_resume" -eq 1 ] && [ "$resume_arguments" -eq 1 ]; then
-  set -- "$@" "/goal resume"
+  set -- "$@" "/goal"
 fi
 
 # Codex otherwise asks which directory to use when Herdr restores a session

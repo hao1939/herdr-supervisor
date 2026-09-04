@@ -31,14 +31,14 @@ function run(
   return result.stdout.trim().split("\n");
 }
 
-test("restored Codex sessions resume idle in their saved directory without a prompt", async () => {
+test("restored Codex sessions show paused Goals without resuming them", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["resume", "session-1"]), [
     "-c",
     'tui.resume_cwd="session"',
     "resume",
     "session-1",
-    "/goal resume",
+    "/goal",
   ]);
 });
 
@@ -61,6 +61,17 @@ test("a caller-supplied resume prompt remains authoritative", async () => {
     "resume",
     "session-1",
     "Continue now.",
+  ]);
+});
+
+test("a caller-supplied native Goal resume remains authoritative", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["resume", "session-1", "/goal resume"]), [
+    "-c",
+    'tui.resume_cwd="session"',
+    "resume",
+    "session-1",
+    "/goal resume",
   ]);
 });
 
@@ -90,7 +101,7 @@ test("full-access workers trust their pane directory for unattended resume", asy
     'tui.resume_cwd="session"',
     "resume",
     "session-1",
-    "/goal resume",
+    "/goal",
   ]);
 });
 
@@ -108,7 +119,7 @@ test("caller-supplied project trust remains authoritative", async () => {
     projectTrust,
     "resume",
     "session-1",
-    "/goal resume",
+    "/goal",
   ]);
 });
 

@@ -199,6 +199,9 @@ is transport inside **steer**: for a stopped Codex process, the executor resumes
 that same session and paused native Goal before delivering the instruction. If
 its pane disappeared and the recorded session supports exact resume, the
 executor may create a new routing pane, but only for that saved session.
+Generic container restoration opens the native session's local goal summary but
+never resumes its Goal; only an exact active supervised-goal wake owns that
+decision.
 Herdr preserves a native Codex session when a human closes its settled pane.
 The supervisor does not automatically close panes because Herdr's current close
 operation cannot atomically require the expected terminal and native session.
