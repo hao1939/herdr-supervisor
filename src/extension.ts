@@ -1719,6 +1719,12 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
             continuedBinding = binding;
             let lockedSnapshot = await client.snapshot();
             let lockedAgent = findAgent(lockedSnapshot, binding.paneId);
+            if (
+              lockedAgent
+              && Number(lockedAgent.state_change_seq || 0) !== runtimeFor(binding).lastReviewStateChangeSeq
+            ) {
+              throw new Error("the worker changed after it was observed");
+            }
             if (!lockedAgent) {
               recoveryAttempted = true;
               const previousPaneId = binding.paneId;
