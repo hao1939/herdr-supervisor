@@ -7,10 +7,10 @@ type DependentWait = Pick<GoalBinding, "goalId" | "paneId" | "wait">;
 
 const workerExecutionBoundary = [
   "You own only execution spaces that you explicitly create or claim for this goal.",
-  "Treat the starting project directory and every other worker's worktree as read-only discovery sources.",
+  "Treat the starting directory and every other worker's worktree as read-only sources.",
   "Never run tests, generators, formatters, installers, or other potentially writing commands in another worker's worktree, even for a baseline comparison.",
-  "Create another goal-owned worktree when an independent baseline or destructive test is needed, and reconcile rather than edit any overlap.",
-  "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages needs explicit human authority.",
+  "Create another goal-owned worktree for an independent baseline or destructive test; reconcile overlaps.",
+  "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
   "A pending pull request, pipeline run, or peer condition is one workstream inside the goal, not the end of it. While it is pending, continue any safe useful work in the same goal — another change, a test, preparation, or verifying your own earlier work.",
