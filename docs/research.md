@@ -252,7 +252,7 @@ than merely announcing the repository. The current open questions are:
 5. Where must sender attribution exist before a management agent or watcher can
    safely relay a request that depends on human authority?
 
-The best primary venue is a Herdr **Show and tell** discussion. A short follow-up
-on issue #301 is also relevant because that thread explicitly points specialized
-task tracking toward extensions. Do not add promotional links to loosely related
-layout, remote-runtime, or agent-catalog discussions.
+The primary venue is [Herdr Show and tell discussion #3607](https://github.com/herdrdev/herdr/discussions/3607). A follow-up
+on issue #301 links that discussion because the thread explicitly points
+specialized task tracking toward extensions. Do not add promotional links to
+loosely related layout, remote-runtime, or agent-catalog discussions.
