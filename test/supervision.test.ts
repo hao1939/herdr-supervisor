@@ -511,7 +511,7 @@ test("goal formation precedes comparison with existing work", () => {
   assert.match(prompt, /objective, continuity horizon, expected artifacts, and acceptance evidence are substantially the same/);
   assert.match(prompt, /shared subject, source, tool, or ability to absorb the work is not enough/);
   assert.match(prompt, /constraints govern that goal only/);
-  assert.match(prompt, /never treat its local one-worker, one-topic, or scope rule as a global admission rule/);
+  assert.match(prompt, /constraints govern that goal only; they do not restrict starting a distinct outcome/);
   assert.match(prompt, /Reuse the exact existing goal for an equivalent outcome/);
   assert.match(prompt, /start a new goal for a distinct outcome/);
   assert.match(prompt, /asks only for a proposal, discuss it without mutation/);

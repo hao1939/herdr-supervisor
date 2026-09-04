@@ -96,7 +96,7 @@ type ContractFields = {
   constraints: string[];
 };
 
-// This is deterministic retry protection, not semantic goal admission.
+// This is deterministic retry protection, not semantic goal matching.
 function sameContractFields(left: ContractFields, right: ContractFields) {
   const sameItems = (first: string[], second: string[]) =>
     first.length === second.length && first.every((item, index) => item.trim() === second[index].trim());
@@ -1773,6 +1773,20 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         } else if (shouldResumeNativeGoal) {
           try {
             await withGoalActionLock(defaultGoalsRoot(), binding.goalId, async () => {
+              const goals = await loadSupervisorGoals(defaultGoalsRoot());
+              if (goals.errors.some((goal) => goal.goalId === binding.goalId)) {
+                throw new Error("canonical goal state is unreadable");
+              }
+              const lockedBinding = goals.active.find((goal) => goal.goalId === binding.goalId);
+              if (!lockedBinding) throw new Error("goal is no longer active");
+              if (
+                lockedBinding.paneId !== binding.paneId
+                || lockedBinding.terminalId !== binding.terminalId
+                || !sameAgentSession(lockedBinding.agentSession, binding.agentSession)
+              ) {
+                throw new Error("canonical worker routing changed while waiting to continue");
+              }
+              binding = { ...lockedBinding, ...runtimeFor(lockedBinding) };
               const lockedSnapshot = await client.snapshot();
               const lockedAgent = findAgent(lockedSnapshot, binding.paneId);
               const lockedMismatch = identityMismatch(

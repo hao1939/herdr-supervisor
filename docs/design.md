@@ -259,7 +259,7 @@ Goal equivalence is intentionally stricter than relatedness. The objective,
 continuity horizon, expected artifacts, and acceptance evidence must be
 substantially the same. Sharing a topic, source, tool, repository, or worker
 capability does not make two outcomes equivalent, and a constraint inside one
-goal never becomes an admission rule for other goals.
+goal does not restrict starting other distinct outcomes.
 
 A new distinct goal owns its own duties. Its creation does not authorize
 rewriting a related goal to permit coexistence or adding coordination work to
