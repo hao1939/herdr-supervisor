@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { atomicReplaceFile } from "../atomic-file.ts";
 
 const VERSION = 1;
 const GOAL_ID = /^g_[a-zA-Z0-9_-]+$/;
@@ -112,26 +112,7 @@ async function load(path, maxResources) {
 
 async function save(path, state) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let file;
-  try {
-    file = await open(temporary, "wx", 0o600);
-    await file.writeFile(`${JSON.stringify(state, null, 2)}\n`);
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporary, path);
-    const directory = await open(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
+  await atomicReplaceFile(path, `${JSON.stringify(state, null, 2)}\n`);
 }
 
 function storeObservation(state, item, maxResources) {

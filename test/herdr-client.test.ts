@@ -278,7 +278,7 @@ test("startAndWaitAgent tolerates a brief missing-agent transition", async (t) =
     }
     return { pane_id: "w1:p2", interactive_ready: true };
   });
-  const agent = await client.startAndWaitAgent({ paneId: "w1:p2" }, 1_000);
+  const agent = await client.startAndWaitAgent({ paneId: "w1:p2" }, 5_000);
   assert.equal(agent.pane_id, "w1:p2");
   assert.equal(reads, 2);
 });

@@ -1,6 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
-import { open, mkdir, readFile, rename, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { atomicReplaceFile } from "./atomic-file.ts";
 import { defaultGoalsRoot } from "./goal-store.ts";
 import { findAgent, findPane, identityMismatch } from "./supervision.ts";
 
@@ -69,26 +70,7 @@ export async function saveGlobalReviewState(state, root = defaultGoalsRoot()) {
   const content = `${JSON.stringify(state, null, 2)}\n`;
   if (Buffer.byteLength(content) > MAX_GLOBAL_STATE_BYTES) throw new Error("global review state is too large");
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let file;
-  try {
-    file = await open(temporary, "wx", 0o600);
-    await file.writeFile(content);
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporary, path);
-    const directory = await open(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error) {
-    await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
+  await atomicReplaceFile(path, content);
   return state;
 }
 
