@@ -117,6 +117,7 @@ export function watcherHelpMessage() {
     "Configure at least one trusted scope",
     "  HERDR_WATCH_GITHUB_REPOSITORIES=owner/repository",
     "  HERDR_WATCH_ADO_REPOSITORIES=organization/project/repository",
+    "  HERDR_WATCH_ADO_CREATOR_ID=identity-uuid (optional ADO PR discovery filter)",
     "  HERDR_WATCH_ADO_DEFINITIONS=organization/project/definition-id",
     "",
     "Start from this checkout",
