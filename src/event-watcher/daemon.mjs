@@ -26,10 +26,13 @@ function list(name) {
 const githubRepositories = list("HERDR_WATCH_GITHUB_REPOSITORIES");
 const adoDefinitions = list("HERDR_WATCH_ADO_DEFINITIONS");
 const adoRepositories = list("HERDR_WATCH_ADO_REPOSITORIES");
+const adoCreatorId = String(process.env.HERDR_WATCH_ADO_CREATOR_ID || "").trim() || undefined;
 const sources = {};
 if (githubRepositories.length) sources["github-pr"] = githubPullRequestSource({ repositories: githubRepositories });
 if (adoDefinitions.length) sources["ado-build"] = adoBuildSource({ definitions: adoDefinitions });
-if (adoRepositories.length) sources["ado-pr"] = adoPullRequestSource({ repositories: adoRepositories });
+if (adoRepositories.length) {
+  sources["ado-pr"] = adoPullRequestSource({ repositories: adoRepositories, creatorId: adoCreatorId });
+}
 const hasSources = Object.keys(sources).length > 0;
 if (!hasSources) {
   throw new Error(`no trusted provider scope configured\n\n${watcherHelpMessage()}`);
@@ -51,7 +54,8 @@ try {
   console.error(watcherStartupMessage({
     scopes: {
       "github-pr": githubRepositories,
-      "ado-pr": adoRepositories,
+      "ado-pr": adoRepositories.map((repository) =>
+        adoCreatorId ? `${repository} (creator ${adoCreatorId})` : repository),
       "ado-build": adoDefinitions,
     },
     intervalMs,

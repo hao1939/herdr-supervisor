@@ -206,6 +206,7 @@ test("watcher help explains setup, linking, and end-to-end proof", () => {
 
   assert.match(message, /HERDR_WATCH_GITHUB_REPOSITORIES=owner\/repository/);
   assert.match(message, /HERDR_WATCH_ADO_REPOSITORIES=organization\/project\/repository/);
+  assert.match(message, /HERDR_WATCH_ADO_CREATOR_ID=identity-uuid/);
   assert.match(message, /HERDR_WATCH_ADO_DEFINITIONS=organization\/project\/definition-id/);
   assert.match(message, /Goal ID: <durable-goal-id>/);
   assert.match(message, /herdr-goal=<durable-goal-id>/);
@@ -1414,6 +1415,57 @@ test("ADO pull request discovery observes reviews, discussions, and policies", a
   assert.equal(second.observations[0].payload.policies[0].status, "approved");
 });
 
+test("ADO pull request discovery narrows candidates by creator before checking metadata", async () => {
+  const creatorId = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE";
+  const otherCreatorId = "11111111-2222-3333-4444-555555555555";
+  const listRequests = [];
+  const source = adoPullRequestSource({
+    repositories: ["org/project/repo"],
+    creatorId,
+    authorization: "Bearer token",
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.endsWith("/pullRequests")) {
+        listRequests.push(parsed);
+        return response({ count: 2, value: [
+          { pullRequestId: 42 },
+          { pullRequestId: 43 },
+        ] });
+      }
+      if (parsed.pathname.endsWith("/pullRequests/42")) return response({
+        pullRequestId: 42,
+        description: "## Supervision\n- Goal ID: g_selected",
+        createdBy: { id: creatorId.toLowerCase() },
+        status: "active",
+        repository: { project: { id: "project-id" } },
+      });
+      if (parsed.pathname.endsWith("/pullRequests/43")) return response({
+        pullRequestId: 43,
+        description: "## Supervision\n- Goal ID: g_previous",
+        createdBy: { id: otherCreatorId },
+        status: "active",
+        repository: { project: { id: "project-id" } },
+      });
+      if (parsed.pathname.endsWith("/threads")) return response({ count: 0, value: [] });
+      if (parsed.pathname.endsWith("/policy/evaluations")) return response({ count: 0, value: [] });
+      throw new Error(`unexpected URL ${url}`);
+    },
+  });
+
+  const found = await source.scan([{
+    subject: "org/project/repo/43",
+    goalId: "g_previous",
+  }]);
+
+  assert.equal(listRequests.length, 1);
+  assert.equal(
+    listRequests[0].searchParams.get("searchCriteria.creatorId"),
+    creatorId.toLowerCase(),
+  );
+  assert.deepEqual(found.observations.map((item) => item.subject), ["org/project/repo/42"]);
+  assert.deepEqual(found.absent, ["org/project/repo/43"]);
+});
+
 test("ADO pull request discovery rereads remembered pulls and forgets removed metadata", async () => {
   const urls = [];
   const source = adoPullRequestSource({
@@ -1561,6 +1613,14 @@ test("ADO pull request discovery keeps repository scope bounded", () => {
       authorization: "Bearer token",
     }),
     /at most 10 repositories/,
+  );
+  assert.throws(
+    () => adoPullRequestSource({
+      repositories: ["org/project/repo"],
+      creatorId: "Hao Yuan",
+      authorization: "Bearer token",
+    }),
+    /creator ID must be an Azure DevOps identity UUID/,
   );
 });
 

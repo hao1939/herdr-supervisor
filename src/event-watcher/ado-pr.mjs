@@ -9,6 +9,7 @@ const MAX_ANNOTATED_PULLS = 20;
 const MAX_REMEMBERED_REFRESH = 10;
 const MAX_EVIDENCE_ITEMS = 25;
 const MAX_POLICIES = 100;
+const ADO_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseRepository(value) {
   const match = /^([^/]+)\/([^/]+)\/([^/]+)$/.exec(value);
@@ -67,6 +68,11 @@ function pullUrl(scope, suffix = "") {
 
 function subjectFor(scope, pullRequestId) {
   return `${scope.organization}/${scope.project}/${scope.repository}/${pullRequestId}`;
+}
+
+function matchesCreator(pull, creatorId) {
+  return !creatorId || (typeof pull.createdBy?.id === "string"
+    && pull.createdBy.id.toLowerCase() === creatorId);
 }
 
 function pullRevision(pull, threads, policies) {
@@ -132,6 +138,7 @@ function pullRevision(pull, threads, policies) {
 
 export function adoPullRequestSource({
   repositories,
+  creatorId,
   fetchImpl = fetch,
   authorization,
   getAuthorization = ambientAdoAuthorization,
@@ -142,6 +149,13 @@ export function adoPullRequestSource({
   if (repositories.length > MAX_REPOSITORIES) {
     throw new Error(`ADO pull request discovery supports at most ${MAX_REPOSITORIES} repositories per watcher`);
   }
+  if (creatorId !== undefined && (typeof creatorId !== "string" || !ADO_ID.test(creatorId.trim()))) {
+    throw new Error("ADO pull request creator ID must be an Azure DevOps identity UUID");
+  }
+  const selectedCreatorId = creatorId?.trim().toLowerCase();
+  const creatorFilter = selectedCreatorId
+    ? `&searchCriteria.creatorId=${encodeURIComponent(selectedCreatorId)}`
+    : "";
   const scopes = [...new Set(repositories)].map(parseRepository);
   const allowedRepositories = new Set(repositories);
   const rememberedWindow = boundedRefreshWindow(MAX_REMEMBERED_REFRESH, (resource) => resource.subject);
@@ -165,7 +179,7 @@ export function adoPullRequestSource({
       for (const scope of scopes) {
         const result = await json(
           fetchImpl,
-          `${pullUrl(scope)}?searchCriteria.status=active&$top=${MAX_ACTIVE_PULLS}&api-version=7.1`,
+          `${pullUrl(scope)}?searchCriteria.status=active${creatorFilter}&$top=${MAX_ACTIVE_PULLS}&api-version=7.1`,
           auth,
           "ADO pull request discovery",
           signal,
@@ -175,7 +189,7 @@ export function adoPullRequestSource({
           const repository = `${scope.organization}/${scope.project}/${scope.repository}`;
           warnings.push({
             code: `active-pull-window:${repository}`,
-            message: `ADO pull request discovery inspected its bounded first ${MAX_ACTIVE_PULLS} active pulls for ${repository}; additional active pulls may be undiscovered. Already-known pulls are still refreshed by exact identity.`,
+            message: `ADO pull request discovery inspected its bounded first ${MAX_ACTIVE_PULLS} active pulls for ${repository}${selectedCreatorId ? ` created by ${selectedCreatorId}` : ""}; additional active pulls may be undiscovered. Already-known pulls are still refreshed by exact identity.`,
           });
         }
         for (const pull of pulls) {
@@ -212,11 +226,13 @@ export function adoPullRequestSource({
       }
       for (const resource of known) {
         const pull = pullsBySubject.get(resource.subject);
-        if (pull && !supervisionGoal(pull.description)) absent.push(resource.subject);
+        if (pull && (!matchesCreator(pull, selectedCreatorId) || !supervisionGoal(pull.description))) {
+          absent.push(resource.subject);
+        }
       }
       const annotated = [...pullsBySubject.entries()]
         .map(([subject, pull]) => ({ subject, pull, goalId: supervisionGoal(pull.description) }))
-        .filter((item) => item.goalId);
+        .filter((item) => item.goalId && matchesCreator(item.pull, selectedCreatorId));
       const retained = annotated.filter((item) => rememberedSubjects.has(item.subject));
       const recent = annotated.filter((item) => !rememberedSubjects.has(item.subject));
       const observations = [];

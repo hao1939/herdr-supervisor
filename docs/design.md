@@ -650,10 +650,12 @@ attempt.
 Provider credentials belong to the environment, not the goal contract. GitHub
 requires `GITHUB_TOKEN` or `GH_TOKEN` and one watcher accepts at most ten
 configured repositories. One watcher also accepts at most ten Azure DevOps
-repositories and ten pipeline definitions. Azure DevOps accepts
-`AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is available in
-the runtime environment. Without usable credentials, discovery fails with a
-clear error and the watcher never guesses.
+repositories and ten pipeline definitions. A deployment that owns PRs through
+one Azure DevOps identity may narrow repository discovery by that stable
+creator ID; supervision metadata remains the final link to a goal. Azure DevOps
+accepts `AZURE_DEVOPS_EXT_PAT`, or an ambient `az login` when Azure CLI is
+available in the runtime environment. Without usable credentials, discovery
+fails with a clear error and the watcher never guesses.
 
 ## Events, diagnostics, and knowledge
 

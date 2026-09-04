@@ -84,15 +84,19 @@ across watcher processes.
 |---|---|---|
 | `HERDR_WATCH_GITHUB_REPOSITORIES` | `owner/repository` | GitHub PR head, state, draft state, checks, and statuses |
 | `HERDR_WATCH_ADO_REPOSITORIES` | `organization/project/repository` | ADO PR head, state, merge status, reviewers, discussions, and policies |
+| `HERDR_WATCH_ADO_CREATOR_ID` | Azure DevOps identity UUID | Optionally narrows every configured ADO repository to PRs created by one identity |
 | `HERDR_WATCH_ADO_DEFINITIONS` | `organization/project/definition-id` | ADO build source revision, state, result, and finish time |
 
 ADO PR discovery intentionally inspects only the first 100 active pulls in each
-configured repository per scan. This keeps polling cost bounded. Pull requests
-already linked to supervised goals are refreshed directly by exact identity,
-even when they are outside that discovery window. A full 100-item discovery
-page also emits a non-fatal warning to the supervisor so it can narrow the
-scope, repair the adapter, or coordinate existing work without stopping useful
-observations.
+configured repository per scan. When `HERDR_WATCH_ADO_CREATOR_ID` is set, ADO
+applies that creator filter before the bounded page is returned; the adapter
+still requires exact supervision metadata before watching anything. This is
+useful in a large shared repository where one identity owns the supervised
+PRs. Pull requests already linked to supervised goals are refreshed directly
+by exact identity and must continue to match the configured creator. A full
+100-item discovery page also emits a non-fatal warning to the supervisor so it
+can narrow the scope, repair the adapter, or coordinate existing work without
+stopping useful observations.
 
 From a source checkout, an agent can pass the scope directly when it starts the
 process. Credentials already present in that runtime are inherited:
