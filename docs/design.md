@@ -320,6 +320,11 @@ uncertain text write cannot append a second command. Herdr's `blocked` lifecycle
 state means an approval or question UI; it is distinct from the native Goal's
 blocked/stalled label and must not receive `/goal resume`.
 
+Supervisor steering and external event delivery share the same process-safe
+per-goal action lock from their final identity read through native resume and
+follow-up delivery. Two internal wake paths therefore cannot interleave TUI
+commands or prompts for one goal.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.
