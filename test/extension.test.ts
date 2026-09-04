@@ -2538,6 +2538,62 @@ test("working Goal steering rechecks canonical activity after waiting for its ac
   pi.events.get("session_shutdown")();
 });
 
+test("missing-process recovery rechecks canonical activity after waiting for its action lock", async (t) => {
+  const root = await fixture();
+  const [binding] = (await loadSupervisorGoals(root)).active;
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  let release;
+  let enter;
+  const entered = new Promise((resolve) => { enter = resolve; });
+  const held = withGoalActionLock(root, "g_test", async () => {
+    enter();
+    await new Promise((resolve) => { release = resolve; });
+    await recordDecision(binding, "accept", {
+      progress: "The other action completed the goal.",
+      action: "Accepted the verified goal.",
+      evidence: ["The exact result is complete."],
+      terminal: { state: "accepted", summary: "The goal is complete." },
+    }, root);
+  });
+  await entered;
+  let starts = 0;
+  const prompts = [];
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot(null));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({
+    read: { text: "The exact process is absent but its pane remains.", truncated: false },
+  }));
+  t.mock.method(HerdrClient.prototype, "startAndWaitAgent", async () => { starts += 1; });
+  t.mock.method(HerdrClient.prototype, "promptAgent", async (_paneId, message) => { prompts.push(message); });
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi();
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const steering = pi.tools.get("supervisor_steer").execute("steer", {
+    pane_id: worker.paneId,
+    message: "Continue the same goal.",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(starts, 0);
+  assert.deepEqual(prompts, []);
+
+  release();
+  await held;
+  const result = await steering;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /goal is no longer active/);
+  assert.equal(starts, 0);
+  assert.deepEqual(prompts, []);
+  pi.events.get("session_shutdown")();
+});
+
 test("a lock release failure after live delivery preserves the applied steering", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
