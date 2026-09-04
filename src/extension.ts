@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import { HerdrClient } from "./herdr-client.ts";
+import { canResumeNativeGoal, HerdrClient } from "./herdr-client.ts";
 import {
   discardInstalledGoal,
   loadSupervisorGoals,
@@ -1730,10 +1730,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         }
         const liveMismatch = identityMismatch(binding, liveAgent, livePane);
         const canResumeNow = !liveAgent && livePane?.terminal_id === binding.terminalId;
-        const canResumeNativeGoal = Boolean(
+        const shouldResumeNativeGoal = Boolean(
           liveAgent
           && binding.agentSession.agent === "codex"
-          && ["idle", "done"].includes(liveAgent.agent_status),
+          && canResumeNativeGoal(liveAgent),
         );
         if (liveMismatch && !canResumeNow) {
           if (relocatedBinding) throw new Error(liveMismatch);
@@ -1769,7 +1769,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           }
           continuedBinding = await refreshObservedLocation(binding, resumedAgent);
           resumed = true;
-        } else if (canResumeNativeGoal) {
+        } else if (shouldResumeNativeGoal) {
           try {
             await client.resumeNativeGoal(binding.paneId, 5000);
           } catch (error) {

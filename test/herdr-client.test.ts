@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { HerdrClient } from "../src/herdr-client.ts";
+import { canResumeNativeGoal, HerdrClient } from "../src/herdr-client.ts";
 
 async function fakeHerdr(handler) {
   const directory = await mkdtemp(join(tmpdir(), "fake-herdr-"));
@@ -157,13 +157,46 @@ test("resumeNativeGoal submits the slash command as TUI keys and confirms work",
   assert.equal(agent.agent_status, "working");
   assert.deepEqual(requests.slice(0, 2), [{
     method: "agent.send_keys",
-    params: { target: "w1:p2", keys: [..."/goal", "space", ..."resume"] },
+    params: { target: "w1:p2", keys: ["ctrl+u", ..."/goal", "space", ..."resume"] },
   }, {
     method: "agent.send_keys",
     params: { target: "w1:p2", keys: ["enter"] },
   }]);
   assert.equal(requests.filter(({ method }) => method === "agent.get").length, 2);
   assert.equal(requests.some(({ method }) => method === "agent.prompt"), false);
+});
+
+test("resumeNativeGoal clears a command left by an uncertain prior submission", async (t) => {
+  const client = new HerdrClient();
+  const keyWrites = [];
+  let enterAttempts = 0;
+  t.mock.method(client, "request", async (method, params) => {
+    if (method === "agent.send_keys") {
+      keyWrites.push(params.keys);
+      if (params.keys.includes("enter") && enterAttempts++ === 0) {
+        throw new Error("uncertain Enter delivery");
+      }
+    }
+    if (method === "agent.get") return { agent: { agent_status: "working" } };
+    return { type: "ok" };
+  });
+
+  await assert.rejects(client.resumeNativeGoal("w1:p2", 1_000), /uncertain Enter delivery/);
+  await client.resumeNativeGoal("w1:p2", 1_000);
+
+  assert.deepEqual(keyWrites, [
+    ["ctrl+u", ..."/goal", "space", ..."resume"],
+    ["enter"],
+    ["ctrl+u", ..."/goal", "space", ..."resume"],
+    ["enter"],
+  ]);
+});
+
+test("only idle and done Herdr agents need a native Goal resume", () => {
+  assert.equal(canResumeNativeGoal({ agent_status: "idle" }), true);
+  assert.equal(canResumeNativeGoal({ agent_status: "done" }), true);
+  assert.equal(canResumeNativeGoal({ agent_status: "working" }), false);
+  assert.equal(canResumeNativeGoal({ agent_status: "blocked" }), false);
 });
 
 test("splitPane creates an unfocused sibling from an exact supervisor pane", async () => {

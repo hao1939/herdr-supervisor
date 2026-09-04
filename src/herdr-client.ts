@@ -3,15 +3,21 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-const nativeGoalResumeKeys = [..."/goal", "space", ..."resume"];
+const nativeGoalResumeKeys = ["ctrl+u", ..."/goal", "space", ..."resume"];
+
+export function canResumeNativeGoal(agent) {
+  // Herdr `blocked` means an approval or question UI, not a parked native Goal.
+  return agent?.agent_status === "idle" || agent?.agent_status === "done";
+}
 
 export async function submitNativeGoalResume(request, paneId, timeoutMs = 5_000) {
   await request("agent.send_keys", {
     target: paneId,
     keys: nativeGoalResumeKeys,
   }, timeoutMs);
-  // Herdr writes logical keys directly to the TUI. Keep Enter in a later write
-  // so Codex has parsed the slash command before it is submitted.
+  // Clear any command text retained after an uncertain earlier write. Herdr
+  // writes logical keys directly to the TUI; keep Enter in a later write so
+  // Codex has parsed the slash command before it is submitted.
   await wait(100);
   await request("agent.send_keys", {
     target: paneId,

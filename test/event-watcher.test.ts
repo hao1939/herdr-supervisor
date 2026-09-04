@@ -2031,7 +2031,7 @@ test("Herdr delivery resolves a goal to its current exact native session", async
   }]);
   const prompts = calls.filter(([method]) => method === "agent.prompt").map(([, params]) => params);
   const keyCalls = calls.filter(([method]) => method === "agent.send_keys").map(([, params]) => params);
-  assert.deepEqual(keyCalls, [{ target: "w1:p9", keys: [..."/goal", "space", ..."resume"] }, {
+  assert.deepEqual(keyCalls, [{ target: "w1:p9", keys: ["ctrl+u", ..."/goal", "space", ..."resume"] }, {
     target: "w1:p9", keys: ["enter"],
   }]);
   assert.equal(prompts.length, 1);

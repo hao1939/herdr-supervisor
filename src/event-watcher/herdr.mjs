@@ -1,5 +1,5 @@
 import { loadSupervisorGoals } from "../goal-registry.ts";
-import { HerdrClient, submitNativeGoalResume } from "../herdr-client.ts";
+import { canResumeNativeGoal, HerdrClient, submitNativeGoalResume } from "../herdr-client.ts";
 import { identityMismatch } from "../supervision.ts";
 import { withGoalActionLock } from "../goal-action-lock.mjs";
 import { defaultGoalsRoot } from "../goal-store.ts";
@@ -45,7 +45,7 @@ export function herdrGoalDelivery({
       return matches[0];
     };
     let agent = await findExact();
-    if (binding.agentSession.agent === "codex" && ["idle", "done"].includes(agent.agent_status)) {
+    if (binding.agentSession.agent === "codex" && canResumeNativeGoal(agent)) {
       await submitNativeGoalResume(
         (method, params, timeoutMs) => request(method, params, { ...options, timeoutMs }),
         agent.pane_id,

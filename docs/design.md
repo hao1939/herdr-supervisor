@@ -315,6 +315,11 @@ TUI can parse it, and verifies that the same worker reports `working` before it
 sends any follow-up. This is one deterministic wake primitive, not another
 queue or lifecycle state machine.
 
+Before typing, the executor clears the current composer line so retrying an
+uncertain text write cannot append a second command. Herdr's `blocked` lifecycle
+state means an approval or question UI; it is distinct from the native Goal's
+blocked/stalled label and must not receive `/goal resume`.
+
 The model never chooses transport, invents worker identity, or directly edits
 checkpoint files. Code never infers semantic intent from keywords or a growing
 set of workflow-specific branches.

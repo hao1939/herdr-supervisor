@@ -375,10 +375,12 @@ needed, and sends the bounded observation. The notification is a wake hint,
 not provider authority or completion proof.
 
 Resume is a native Codex TUI operation, not a model prompt. Delivery sends
-`/goal resume` as logical keys to the exact pane, submits it in a separate
-write, and verifies that the same worker reports `working` before sending the
-event message. It fails closed if that transition cannot be confirmed; it does
-not create a replacement worker or a delivery queue.
+`/goal resume` as logical keys to the exact pane, clearing any command text
+left by an uncertain prior write. It submits Enter separately and verifies that
+the same worker reports `working` before sending the event message. Herdr's
+`blocked` status means an approval or question UI and is not this resume case.
+Delivery fails closed if the transition cannot be confirmed; it does not create
+a replacement worker or a delivery queue.
 
 ### Diagnostics
 
