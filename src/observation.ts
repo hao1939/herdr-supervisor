@@ -68,15 +68,19 @@ function assistantMessage(record) {
 function boundMessages(messages, maxMessages, maxChars) {
   const selected = [];
   let remaining = maxChars;
+  let truncated = false;
   for (let index = messages.length - 1; index >= 0 && selected.length < maxMessages && remaining > 0; index -= 1) {
     const message = messages[index];
-    const clipped = message.text.length > remaining
+    const clipped = message.text.length > remaining;
+    const text = clipped
       ? `${message.text.slice(0, Math.max(0, remaining - 15))}\n…[truncated]`
       : message.text;
-    selected.push({ ...message, text: clipped });
-    remaining -= clipped.length;
+    truncated ||= clipped;
+    selected.push({ ...message, text });
+    remaining -= text.length;
   }
-  return selected.reverse();
+  truncated ||= selected.length < messages.length;
+  return { messages: selected.reverse(), truncated };
 }
 
 export async function readCodexMessages(
@@ -111,11 +115,12 @@ export async function readCodexMessages(
         // A concurrently appended final line can be incomplete. The next read sees it again.
       }
     }
+    const bounded = boundMessages(messages, maxMessages, maxChars);
     return {
       source: "codex-session",
-      messages: boundMessages(messages, maxMessages, maxChars),
+      messages: bounded.messages,
       cursor: { kind: "codex-jsonl", path, offset: start + complete.length },
-      truncated: droppedBytes || (!continued && start > 0) || messages.length > maxMessages,
+      truncated: droppedBytes || (!continued && start > 0) || bounded.truncated,
     };
   } finally {
     await file.close();
@@ -152,6 +157,6 @@ export function formatObservation(observation) {
     const heading = message.phase === "final_answer" ? "Final response" : "Worker update";
     return `${heading}${message.timestamp ? ` · ${message.timestamp}` : ""}\n${message.text}`;
   });
-  const note = observation.truncated ? "\n\nOlder observation data was omitted to keep this review bounded." : "";
+  const note = observation.truncated ? "\n\nSome observation data was omitted to keep this review bounded." : "";
   return `Evidence source: ${observation.source}\n\n${messages.join("\n\n")}\n${note}`.trimEnd();
 }

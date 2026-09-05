@@ -87,6 +87,18 @@ test("cursor retains an incomplete final JSONL record for the next observation",
   assert.deepEqual(resumed.messages.map((message) => message.text), ["second"]);
 });
 
+test("character clipping is reported as truncated evidence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codex-sessions-"));
+  const path = join(root, "rollout-long-message.jsonl");
+  await writeFile(path, `${record("assistant", "a".repeat(100))}\n`);
+
+  const observation = await readCodexMessages(path, undefined, { maxChars: 40 });
+
+  assert.equal(observation.truncated, true);
+  assert.match(observation.messages[0].text, /…\[truncated\]$/);
+  assert.match(formatObservation(observation), /Some observation data was omitted/);
+});
+
 test("a missing native session can be discovered after it is created", async () => {
   const root = await mkdtemp(join(tmpdir(), "codex-sessions-"));
   const session = { kind: "id", value: "late-session" };
