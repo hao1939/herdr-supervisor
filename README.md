@@ -170,6 +170,12 @@ cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi -e "$supervisor_extension" --supervisor-mode live
 ```
 
+Always choose the mode explicitly. Without `--supervisor-mode` or
+`HERDR_SUPERVISOR_MODE`, the extension is inert. Do not copy or link it into
+Pi's user-wide `~/.pi/agent/extensions` directory: every ordinary Pi session
+would discover it even though only the dedicated supervisor should own this
+goal store.
+
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
 supervisor review events without applying decisions. Ordinary Pi tools remain
 available for direct human requests and infrastructure operations. During an

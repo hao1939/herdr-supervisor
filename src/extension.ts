@@ -71,6 +71,19 @@ const EvidenceItems = Type.Array(
 const Optional = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
 const Evidence = Optional(EvidenceItems);
 const client = new HerdrClient();
+const supervisorTools = [
+  "supervisor_start_goal",
+  "supervisor_discard_goal",
+  "supervisor_update_goal",
+  "supervisor_status",
+  "supervisor_reconsider",
+  "supervisor_global_result",
+  "supervisor_observe",
+  "supervisor_leave",
+  "supervisor_steer",
+  "supervisor_ask_human",
+  "supervisor_finish",
+];
 const focusedReviewTools = [
   "supervisor_status",
   "supervisor_reconsider",
@@ -85,7 +98,7 @@ const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const WORKER_EVENT_SETTLE_MS = 250;
-type SupervisorMode = "observe" | "dry-run" | "live";
+type SupervisorMode = "off" | "observe" | "dry-run" | "live";
 type ContractFields = {
   objective: string;
   context: string[];
@@ -441,9 +454,9 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
 
   pi.registerFlag("supervisor-mode", {
-    description: "Supervision authority: observe, dry-run, or live",
+    description: "Supervision authority: off, observe, dry-run, or live",
     type: "string",
-    default: process.env.HERDR_SUPERVISOR_MODE || "observe",
+    default: process.env.HERDR_SUPERVISOR_MODE || "off",
   });
 
   pi.registerFlag("supervisor-review-ms", {
@@ -460,7 +473,20 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   function mode(): SupervisorMode {
     const value = pi.getFlag("supervisor-mode");
-    return value === "live" || value === "dry-run" ? value : "observe";
+    return value === "live" || value === "dry-run" || value === "observe" ? value : "off";
+  }
+
+  function enabled() {
+    return mode() !== "off";
+  }
+
+  function requireEnabled(ctx) {
+    if (enabled()) return true;
+    ctx.ui.notify(
+      "Herdr Supervisor is disabled. Restart this dedicated Pi with --supervisor-mode observe, dry-run, or live.",
+      "warning",
+    );
+    return false;
   }
 
   function reviewIntervalMs() {
@@ -1979,6 +2005,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("supervise", {
     description: "Supervise a pane: /supervise <pane> <goal> or /supervise <pane> --goal-id <id>",
     async handler(args, ctx) {
+      if (!requireEnabled(ctx)) return;
       const [paneId, ...goalParts] = args.trim().split(/\s+/);
       const goal = goalParts.join(" ");
       if (!paneId || !goal) return ctx.ui.notify("Usage: /supervise <pane> <goal>", "warning");
@@ -2003,6 +2030,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("supervised", {
     description: "Show supervised workers and goals",
     async handler(_args, ctx) {
+      if (!requireEnabled(ctx)) return;
       try { ctx.ui.notify(await status(), "info"); }
       catch (error) { ctx.ui.notify(error.message, "error"); }
     },
@@ -2011,6 +2039,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("unsupervise", {
     description: "Stop supervising a pane without stopping it",
     async handler(args, ctx) {
+      if (!requireEnabled(ctx)) return;
       const paneId = args.trim();
       if (!paneId) return ctx.ui.notify("Usage: /unsupervise <pane>", "warning");
       try {
@@ -2057,6 +2086,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("input", (event) => {
+    if (!enabled()) return { action: "continue" };
     const automaticReview = reviewTurn.isBusy() || activeGlobalReview || reviewPumpRunning;
     if (
       event.source === "extension"
@@ -2102,6 +2132,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   pi.on("before_agent_start", (event) => {
+    if (!enabled()) return;
     agentTurnActive = true;
     if (activeGlobalReview || reviewTurn.isBusy()) {
       activateReviewTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
@@ -2159,6 +2190,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   pi.on("message_start", async (event) => {
+    if (!enabled()) return;
     if (event.message.role !== "custom" || event.message.customType !== humanFollowUpMessageType) return;
     const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
@@ -2175,6 +2207,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("context", (event) => {
+    if (!enabled()) return;
     let latestReview = -1;
     for (let index = event.messages.length - 1; index >= 0; index -= 1) {
       if ([reviewMessageType, globalReviewMessageType].includes((event.messages[index] as any).customType)) {
@@ -2201,6 +2234,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("session_start", async (_event, ctx) => {
     shuttingDown = false;
+    if (!enabled()) {
+      pi.setActiveTools(pi.getActiveTools().filter((tool) => !supervisorTools.includes(tool)));
+      ctx.ui.setStatus("herdr-supervisor", undefined);
+      return;
+    }
     globalState = await loadGlobalReviewState();
     const goals = await activeBindings();
     for (const binding of goals.active) {
@@ -2231,6 +2269,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("agent_settled", async () => {
+    if (!enabled()) return;
     agentTurnActive = false;
     restoreOrdinaryTools();
     if (await settleGlobalReview()) {
