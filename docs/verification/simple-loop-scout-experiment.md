@@ -169,13 +169,14 @@ PR #83 was reconciled with main `d048fd9` in a separate integration worktree.
 Main's Codex startup update-gate safeguards and their tests are unchanged.
 Its explicit-supervisor-activation requirement now uses Pi's existing loading
 boundary instead of mode checks: only the dedicated supervisor loads
-`src/extension.ts` with `-e`. Ordinary container Pi sessions no longer discover
+`container/supervisor-extension.ts` with `-e`. Ordinary container Pi sessions no longer discover
 the supervisor automatically.
 
 Container upgrades remove only the exact discovery symlink installed by older
 images. Operator-owned files, directories, and other symlinks are preserved.
-The legacy container extension entry point reports a migration error before
-importing any supervisor code, so stale discovery links cannot activate it.
+The legacy container extension and former direct source entry points report a
+migration error before installing supervisor tools, so preserved stale
+discovery links cannot activate them.
 Obsolete mode settings, including `off`, are rejected by the active extension.
 Custom auto-discovery entries and default-extension settings must be removed
 by their operator; do not install the active source extension there.

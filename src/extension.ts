@@ -163,7 +163,11 @@ type SupervisorServices = {
   workerEventSettleMs?: number;
 };
 
-export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
+export default function removedDirectLoad() {
+  throw new Error("Direct supervisor loading was removed. Start the dedicated Pi with: pi -e /opt/herdr-supervisor/container/supervisor-extension.ts. Remove supervisor auto-discovery and default-extension entries.");
+}
+
+export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
   if (process.env.HERDR_SUPERVISOR_MODE !== undefined
     || process.argv.some((arg) => arg === "--supervisor-mode" || arg.startsWith("--supervisor-mode="))) {
     throw new Error("Supervisor modes were removed. Remove --supervisor-mode and HERDR_SUPERVISOR_MODE before starting supervision; a running supervisor applies validated decisions.");

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Compile } from "typebox/compile";
-import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
+import { herdrSupervisor, pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
@@ -1808,6 +1808,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Propose a new code primitive only for a proven missing capability or trigger/);
   assert.match(result.systemPrompt, /error explicitly says no action was applied/);
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
+  assert.match(result.systemPrompt, /record exactly one successful result with supervisor_global_result/);
+  assert.match(result.systemPrompt, /no result was recorded, correct the inputs and retry in the same turn/);
   assert.match(result.systemPrompt, /follow the current worker evidence/);
   assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
   assert.match(result.systemPrompt, /event-watchd is agent-operable infrastructure/);

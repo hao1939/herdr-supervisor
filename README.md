@@ -53,7 +53,7 @@ In the Herdr UI, open the one dedicated supervisor pane and explicitly load the
 supervisor extension:
 
 ```sh
-pi -e /opt/herdr-supervisor/src/extension.ts
+pi -e /opt/herdr-supervisor/container/supervisor-extension.ts
 ```
 
 Ordinary `pi` sessions do not load the supervisor. Talk to the dedicated
@@ -180,7 +180,7 @@ npm install
 Start Pi in a Herdr pane from a stable directory separate from any worker project:
 
 ```sh
-supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
+supervisor_extension=/path/to/herdr-supervisor/container/supervisor-extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi -e "$supervisor_extension"
 ```

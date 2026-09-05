@@ -59,7 +59,7 @@ jobs:
                   cwd: "/app",
                   agentDir: "/home/node/.pi/agent",
                   settingsManager: SettingsManager.inMemory(),
-                  additionalExtensionPaths: explicit ? ["/opt/herdr-supervisor/src/extension.ts"] : [],
+                  additionalExtensionPaths: explicit ? ["/opt/herdr-supervisor/container/supervisor-extension.ts"] : [],
                 });
                 await loader.reload();
                 const result = loader.getExtensions();

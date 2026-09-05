@@ -7,7 +7,7 @@ codex_skill_root="${CODEX_HOME:-/home/node/.codex}/skills"
 goal_skill_target="${codex_skill_root}/herdr-goals"
 
 # Remove only the discovery link installed by previous container versions.
-# Dedicated supervisors now load src/extension.ts explicitly with Pi's -e.
+# Dedicated supervisors load the active container entry point explicitly with Pi's -e.
 if [ -L "$legacy_extension" ] && [ "$(readlink "$legacy_extension")" = /opt/herdr-supervisor/container/pi-extension.ts ]; then
   rm -- "$legacy_extension"
 fi

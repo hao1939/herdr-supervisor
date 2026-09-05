@@ -3,14 +3,15 @@ import { execFile } from "node:child_process";
 import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 
 const run = promisify(execFile);
 const entrypoint = fileURLToPath(new URL("../container/container-entrypoint.sh", import.meta.url));
-const activeExtension = fileURLToPath(new URL("../src/extension.ts", import.meta.url));
+const directExtension = fileURLToPath(new URL("../src/extension.ts", import.meta.url));
+const activeExtension = fileURLToPath(new URL("../container/supervisor-extension.ts", import.meta.url));
 const legacyExtension = fileURLToPath(new URL("../container/pi-extension.ts", import.meta.url));
 const managedTarget = "/opt/herdr-supervisor/container/pi-extension.ts";
 
@@ -62,6 +63,11 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
   assert.deepEqual(ordinary.errors, []);
   assert.equal(ordinary.extensions.length, 0);
 
+  const oldDirectLoad = await loadPi(fixtureState.root, fixtureState.agentDir, [directExtension]);
+  assert.equal(oldDirectLoad.extensions.length, 0);
+  assert.equal(oldDirectLoad.errors.length, 1);
+  assert.match(oldDirectLoad.errors[0].error, /Direct supervisor loading was removed/);
+
   // additionalExtensionPaths is the same resource-loader input used by Pi's -e.
   const dedicated = await loadPi(fixtureState.root, fixtureState.agentDir, [activeExtension]);
   assert.deepEqual(dedicated.errors, []);
@@ -71,6 +77,20 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
   assert.ok(supervisor.tools.has("supervisor_steer"));
   assert.equal(supervisor.flags.has("supervisor-mode"), false);
   assert.ok(supervisor.handlers.has("session_start"));
+});
+
+test("a preserved discovery entry to the former direct entry point fails closed", async (t) => {
+  const fixtureState = await fixture(t);
+  const source = `export { default } from ${JSON.stringify(pathToFileURL(directExtension).href)};\n`;
+  await writeFile(fixtureState.legacyLink, source);
+  await fixtureState.start();
+  assert.equal(await readFile(fixtureState.legacyLink, "utf8"), source);
+
+  const ordinary = await loadPi(fixtureState.root, fixtureState.agentDir);
+  assert.equal(ordinary.extensions.length, 0);
+  assert.equal(ordinary.errors.length, 1);
+  assert.match(ordinary.errors[0].error, /Direct supervisor loading was removed/);
+  assert.match(ordinary.errors[0].error, /container\/supervisor-extension\.ts/);
 });
 
 test("container upgrades remove only the known managed supervisor discovery link", async (t) => {
@@ -110,5 +130,5 @@ test("a stale legacy discovery link fails before any supervisor tools or hooks a
   assert.equal(ordinary.extensions.length, 0);
   assert.equal(ordinary.errors.length, 1);
   assert.match(ordinary.errors[0].error, /auto-loading was removed/);
-  assert.match(ordinary.errors[0].error, /pi -e \/opt\/herdr-supervisor\/src\/extension\.ts/);
+  assert.match(ordinary.errors[0].error, /pi -e \/opt\/herdr-supervisor\/container\/supervisor-extension\.ts/);
 });
