@@ -2239,7 +2239,7 @@ test("watcher diagnostics retry instead of stranding input in a busy Pi supervis
 
   await assert.rejects(
     diagnose({ message: "provider warning", observedAt: "2026-09-05T08:00:00.000Z" }),
-    /supervisor is working.*retry on the next scan/,
+    /supervisor is working.*retry on a later scan/,
   );
   assert.equal(calls.filter(([method]) => method === "agent.prompt").length, 0);
 });
