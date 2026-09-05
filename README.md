@@ -86,7 +86,6 @@ state at any time.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HERDR_SUPERVISOR_MODE` | `live` | `observe`, `dry-run`, or `live` |
 | `HERDR_SUPERVISOR_CODEX_FULL_ACCESS` | `0` | Set to `1` for unattended operation (see Security below) |
 | `HERDR_SUPERVISOR_DIRECTORY` | `/app` | Supervisor's stable infrastructure directory |
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
@@ -142,7 +141,7 @@ confirm that the replacement has:
 - persistent home storage for Herdr and native agent sessions;
 - the configured model credentials or gateway settings;
 - network access to that gateway and any required source-control provider; and
-- the same supervisor mode and full-access choice.
+- the same full-access choice.
 
 After replacement, open Herdr, run `/supervised`, and verify one existing goal's
 exact pane and native session before trusting unattended work. Provider login
@@ -170,13 +169,16 @@ Start Pi in a Herdr pane from a stable directory separate from any worker projec
 ```sh
 supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-pi -e "$supervisor_extension" --supervisor-mode live
+pi -e "$supervisor_extension"
 ```
 
-After passive behavior is verified, use `--supervisor-mode dry-run` to let the
-supervisor review events without applying decisions. Ordinary Pi tools remain
-available for direct human requests and infrastructure operations. During an
-automatic focused or global review, the extension temporarily exposes only its
+The supervisor applies validated decisions whenever it is running. Remove the
+obsolete `--supervisor-mode` and `HERDR_SUPERVISOR_MODE` settings before startup;
+they are rejected so a formerly passive setup cannot silently enable actions.
+Use `/supervised` and existing logs for inspection, and isolated tests for
+validation. Ordinary Pi tools remain available for direct human requests and
+infrastructure operations. During an automatic focused or global review, the
+extension temporarily exposes only its
 supervision tools and restores the ordinary tools afterward. An operator may
 still pass `--no-builtin-tools` for a deliberately restricted deployment,
 accepting that such a session cannot operate `event-watchd` itself.

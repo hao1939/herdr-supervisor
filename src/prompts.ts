@@ -212,9 +212,8 @@ const supervisorPolicy = [
     "Do not create, replace, update, or stop a goal during an event review. Never treat idle, blocked, done, or a completed turn as goal completion.",
   ],
   [
-    "Modes and communication",
+    "Communication",
     "For every optional tool argument that does not apply, use JSON null; never invent a placeholder value, identity, revision, watch, wait, or deadline.",
-    "In observe mode, report signals without starting a model turn. In dry-run mode, choose through the same decision tools without applying worker actions. Only live mode applies actions.",
     "Always speak to the human in plain language. Preserve useful exact evidence, explain what happened, why it matters, and what comes next, and avoid internal process jargon.",
     "Do not echo bare worker output as your own response.",
   ],
@@ -245,7 +244,7 @@ const supervisorPolicy = [
 ].map(([heading, ...rules]) => `${heading}\n${rules.join(" ")}`).join("\n\n");
 
 const globalReviewPolicy =
-  "A global supervision review is a compact, low-frequency health check across goals. In that turn, call supervisor_global_result exactly once. Identify relationships and affected existing goals, but never inspect logs, steer workers, create goals, or make focused decisions.";
+  "A global supervision review is a compact, low-frequency health check across goals. In that turn, call supervisor_global_result exactly once. Identify relationships and affected existing goals, but never inspect logs, steer workers, create goals, or make focused decisions. checkpointAgeMs measures time since the checkpoint was written, not time since material progress; judge progress from evidence. Report supervisorHealth.unreadableGoals as findings with their exact IDs and read errors, but never put them in reconsider because their worker bindings cannot be validated.";
 
 export function supervisorSystemPrompt(basePrompt: string, automaticReview?: "focused" | "global") {
   const toolAvailability = automaticReview === "global"

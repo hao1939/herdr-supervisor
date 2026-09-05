@@ -103,6 +103,10 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
       pendingFocusedReviews: Number(health.pendingFocusedReviews || 0),
       activeReview: health.activeReview || "none",
       lastBackgroundError: health.lastBackgroundError || undefined,
+      unreadableGoals: (health.goalErrors || []).map(({ goalId, error }) => ({
+        goalId,
+        error: String(error?.message || error).slice(0, 1000),
+      })),
     },
     pendingHumanInput: bindings
       .filter((binding) => binding.lastDecision?.decision === "ask_human")
@@ -115,7 +119,7 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
         goalId: binding.goalId,
         outcome: binding.goal,
         workerState: identityMismatch(binding, agent, pane) || agent?.agent_status || "missing",
-        progressAgeMs: Number.isFinite(updated) ? Math.max(0, timestamp - updated) : undefined,
+        checkpointAgeMs: Number.isFinite(updated) ? Math.max(0, timestamp - updated) : undefined,
         progress: binding.progress || undefined,
         wait: binding.wait ? {
           condition: binding.wait.condition,

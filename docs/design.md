@@ -47,6 +47,13 @@ the model handle situational judgment. The practical heuristic is **solidify
 the common 20%; teach the model the remaining 80%**. This is a decision rule
 for whether behavior belongs in code, not a target count.
 
+Start with deletion: can the need or feature be removed? Then ask whether the
+existing tools, events, facts, and agent judgment already resolve it. Add
+nothing when they do, unless measured evidence shows a substantial gain that
+outweighs the full cost of configuration, state, branches, recovery cases,
+tests, and maintenance. Occasional repeated work or model cost can be the
+simpler and more robust trade-off.
+
 The minimal core lets an agent:
 
 - **observe** current worker and external facts;
@@ -284,6 +291,12 @@ nearest-deadline timer ensures missed events or long waits do not lose a goal.
 Its default one-hour interval is a safety net, not a polling cadence; deployments
 can tune it when their event reliability or recovery needs differ.
 
+A running supervisor follows this one execution path. There are no observe,
+dry-run, or live modes. Use existing status and logs for inspection and isolated
+tests for validation. Goal authority, exact worker identity, action locks, and
+the review fence govern effects. Obsolete mode settings must be removed before
+startup; a formerly passive configuration must never silently enable actions.
+
 ## Decisions
 
 An automatic focused review has exactly four semantic decisions:
@@ -428,6 +441,14 @@ recovery; an invalid goal or checkpoint fails closed.
 
 `.supervisor/` holds local supervisor checkpoints. It is neither portable goal
 authority nor live runtime truth.
+
+The global snapshot reports checkpoint age: elapsed time since `current.json`
+was updated. Another decision refreshes that timestamp even when no work
+advanced. It is not a progress measurement; the model judges progress from
+current evidence. Existing goal-read errors are also included as bounded facts
+in the global snapshot. Findings may name those goals, but only readable active
+bindings can receive a focused worker review. No repair lifecycle or extra
+durable state is introduced.
 
 Every operation that needs current goal records reads the small goal store
 again. The process does not cache contracts or checkpoints, so an external

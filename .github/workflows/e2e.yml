@@ -38,7 +38,6 @@ jobs:
           docker run -d --name herdr-e2e \
             -e ANTHROPIC_API_KEY \
             -e OPENAI_API_KEY \
-            -e HERDR_SUPERVISOR_MODE=live \
             -e HERDR_SUPERVISOR_CODEX_FULL_ACCESS=1 \
             herdr-supervisor:e2e \
             herdr server
@@ -51,8 +50,7 @@ jobs:
           # Start Pi with the supervisor extension in a Herdr pane
           docker exec herdr-e2e \
             herdr agent start supervisor --kind pi --pane w0:p0 -- \
-              --no-builtin-tools \
-              --supervisor-mode live
+              --no-builtin-tools
 
           # Wait for Pi to become interactive
           docker exec herdr-e2e \

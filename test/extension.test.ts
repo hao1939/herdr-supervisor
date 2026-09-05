@@ -49,7 +49,6 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
     activeToolSelections,
     registerFlag() {},
     getFlag(name) {
-      if (name === "supervisor-mode") return "live";
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
     },
@@ -104,6 +103,30 @@ async function fixture() {
   }, root, { goalId: "g_test" });
   return root;
 }
+
+test("removed mode settings fail before supervision tools are installed", () => {
+  const previousMode = process.env.HERDR_SUPERVISOR_MODE;
+  const previousArgv = process.argv;
+  try {
+    for (const value of ["observe", "dry-run", "live", ""]) {
+      process.env.HERDR_SUPERVISOR_MODE = value;
+      const pi = fakePi();
+      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
+      assert.equal(pi.tools.size, 0);
+    }
+    delete process.env.HERDR_SUPERVISOR_MODE;
+    for (const args of [["--supervisor-mode", "observe"], ["--supervisor-mode=dry-run"]]) {
+      process.argv = [...previousArgv, ...args];
+      const pi = fakePi();
+      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
+      assert.equal(pi.tools.size, 0);
+    }
+  } finally {
+    process.argv = previousArgv;
+    if (previousMode === undefined) delete process.env.HERDR_SUPERVISOR_MODE;
+    else process.env.HERDR_SUPERVISOR_MODE = previousMode;
+  }
+});
 
 test("optional supervisor tool fields accept null without placeholder values", () => {
   const pi = fakePi();
@@ -4709,6 +4732,53 @@ test("a global review exposes unstarted goals without pretending they have worke
   pi.events.get("session_shutdown")();
 });
 
+test("global review reports unreadable goals but cannot route actions to them", async (t) => {
+  const root = await fixture();
+  await mkdir(join(root, "g_unreadable"));
+  await writeFile(join(root, "g_unreadable", "goal.json"), "invalid JSON");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  t.after(() => pi.events.get("session_shutdown")());
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-global-review"));
+  const review = pi.messages.find((message) => message.customType === "herdr-supervisor-global-review");
+  assert.match(review.content, /unreadableGoals/);
+  assert.match(review.content, /g_unreadable/);
+  assert.match(review.content, /g_test/);
+  const findings = [{
+    problem: "One goal contract cannot be read",
+    evidence: ["g_unreadable contains invalid JSON"],
+    affected_goal_ids: ["g_unreadable"],
+  }];
+  const rejected = await pi.tools.get("supervisor_global_result").execute("invalid", {
+    summary: "Read error", findings,
+    reconsider: [{ goal_id: "g_unreadable", reason: "Inspect this worker" }],
+  });
+  assert.equal(rejected.isError, true);
+  assert.match(rejected.content[0].text, /no valid worker binding/);
+  assert.equal((await loadGlobalReviewState(root)).lastReviewedAt, undefined);
+  const recorded = await pi.tools.get("supervisor_global_result").execute("valid", {
+    summary: "Read error needs attention", findings,
+    reconsider: [{ goal_id: "g_test", reason: "Check the valid worker's current evidence" }],
+  });
+  assert.equal(recorded.isError, false);
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /g_unreadable/);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
+  const focused = pi.messages.filter((message) => message.customType === "herdr-supervisor-review");
+  assert.equal(focused.length, 1);
+  assert.match(focused[0].content, /g_test/);
+  assert.doesNotMatch(focused[0].content, /g_unreadable/);
+});
+
 test("a global review reloads goal contracts copied in after session start", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-extension-"));
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -4815,7 +4885,7 @@ test("an invalid global result has no partial routing", async (t) => {
     reconsider: [],
   });
   assert.equal(invalid.isError, true);
-  assert.match(invalid.content[0].text, /not found among active or unstarted goals/);
+  assert.match(invalid.content[0].text, /not found among active, unstarted, or unreadable goals/);
   assert.match(invalid.content[0].text, /No focused reviews were queued/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("valid", {
