@@ -3,6 +3,44 @@
 All notable changes to Herdr Supervisor are documented here. This project
 uses [Semantic Versioning](https://semver.org/).
 
+## [0.5.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.4.0...herdr-supervisor-v0.5.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **plugin:** keep one explicit activation path ([#89](https://github.com/hao1939/herdr-supervisor/issues/89))
+* **plugin:** use one supervision execution path
+
+### Features
+
+* **event-watcher:** wake workers for stale linked resources ([#68](https://github.com/hao1939/herdr-supervisor/issues/68)) ([b7825fa](https://github.com/hao1939/herdr-supervisor/commit/b7825fa7357b87e93135d37a9d5a781e67a8e593))
+* filter ADO pull discovery by creator ([#67](https://github.com/hao1939/herdr-supervisor/issues/67)) ([2f44cc7](https://github.com/hao1939/herdr-supervisor/commit/2f44cc776830b1be2ac5d8138f077273a5854b5d))
+
+
+### Bug Fixes
+
+* **container:** preserve explicit supervisor on restart ([#85](https://github.com/hao1939/herdr-supervisor/issues/85)) ([8aefa9a](https://github.com/hao1939/herdr-supervisor/commit/8aefa9a5de5d1e02f1c8bcb0889ea24d227337f0))
+* **container:** prevent Codex update gates on restart ([#81](https://github.com/hao1939/herdr-supervisor/issues/81)) ([d048fd9](https://github.com/hao1939/herdr-supervisor/commit/d048fd93d1b509d54c0845115b14885d47574f28))
+* **event-watcher:** retry source failures with backoff ([6308d10](https://github.com/hao1939/herdr-supervisor/commit/6308d102ae07cd1fa59a1e017112fc7272ac7f14))
+* **event-watcher:** retry source failures with bounded backoff ([#64](https://github.com/hao1939/herdr-supervisor/issues/64)) ([6308d10](https://github.com/hao1939/herdr-supervisor/commit/6308d102ae07cd1fa59a1e017112fc7272ac7f14))
+* keep ADO pull discovery bounded ([#65](https://github.com/hao1939/herdr-supervisor/issues/65)) ([08ad5bf](https://github.com/hao1939/herdr-supervisor/commit/08ad5bf09fda38cb09d9c93d31a83405dadd82c0))
+* keep external handoffs local by default ([#70](https://github.com/hao1939/herdr-supervisor/issues/70)) ([415ceb3](https://github.com/hao1939/herdr-supervisor/commit/415ceb386acb24d656668395dc8163e9e62ed049))
+* keep ready validations concurrent ([#73](https://github.com/hao1939/herdr-supervisor/issues/73)) ([9d80211](https://github.com/hao1939/herdr-supervisor/commit/9d80211286174bae47ef058701f8b68f9b8048c9))
+* park terminal goals after container restore ([#75](https://github.com/hao1939/herdr-supervisor/issues/75)) ([2239a2c](https://github.com/hao1939/herdr-supervisor/commit/2239a2cb0a4b401822fed6bb3e0e3a0c208795ff))
+* **plugin:** keep worker artifacts out of goal storage ([#79](https://github.com/hao1939/herdr-supervisor/issues/79)) ([259873d](https://github.com/hao1939/herdr-supervisor/commit/259873d4d1131211f090ff721b624d248768b595))
+* **plugin:** report clipped worker evidence ([#87](https://github.com/hao1939/herdr-supervisor/issues/87)) ([40449ca](https://github.com/hao1939/herdr-supervisor/commit/40449caec162f0e4a23aeffec35abdfc99c0af46))
+* **plugin:** slow callback-backed safety reviews ([#88](https://github.com/hao1939/herdr-supervisor/issues/88)) ([eda161a](https://github.com/hao1939/herdr-supervisor/commit/eda161a6fd5cb7aea68e146e485c410534802bdf))
+* **prompt:** keep worker output bounded ([#90](https://github.com/hao1939/herdr-supervisor/issues/90)) ([4edbb56](https://github.com/hao1939/herdr-supervisor/commit/4edbb56e0fc6fe24ceb29bbb58da3413f4c5af36))
+* require explicit supervisor activation ([#82](https://github.com/hao1939/herdr-supervisor/issues/82)) ([fb874e2](https://github.com/hao1939/herdr-supervisor/commit/fb874e2357f987461f6589da5ca73bc93a1f2013))
+* route actionable global findings ([#78](https://github.com/hao1939/herdr-supervisor/issues/78)) ([d1f814e](https://github.com/hao1939/herdr-supervisor/commit/d1f814e2eda87f2b3edf24c307891a1d0a4c9b1d))
+* **watcher:** retry busy supervisor diagnostics ([26cdac6](https://github.com/hao1939/herdr-supervisor/commit/26cdac6e508f54c2c494799d1a9a5b9de5082c1a))
+
+
+### Code Refactoring
+
+* **plugin:** keep one explicit activation path ([#89](https://github.com/hao1939/herdr-supervisor/issues/89)) ([b1c18ee](https://github.com/hao1939/herdr-supervisor/commit/b1c18ee87921a710a44f48bc04eec471b458de3c))
+* **plugin:** use one supervision execution path ([025a566](https://github.com/hao1939/herdr-supervisor/commit/025a5666bd36f534a43f2d825fd8802bc8f7ad93))
+
 ## [0.4.0](https://github.com/hao1939/herdr-supervisor/compare/herdr-supervisor-v0.3.0...herdr-supervisor-v0.4.0) (2026-09-03)
 
 
