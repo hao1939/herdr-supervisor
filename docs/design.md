@@ -365,6 +365,11 @@ lifecycle, safe inspection, and portability for any agent or human with direct
 filesystem access. It is one shared explanation, not repeated metadata or a
 skill inside every goal. Existing root files are never overwritten.
 
+The goal store is read-only input to workers and management agents. Detailed
+checkpoints, reports, and artifacts belong in goal-owned project or worktree
+paths and may be referenced from concise supervisor evidence; workers never add
+files to the goal store.
+
 `goal.json` is the portable contract. It contains only:
 
 - objective;

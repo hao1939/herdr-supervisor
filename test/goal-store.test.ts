@@ -87,6 +87,8 @@ test("the first installed goal makes the store self-explaining", async () => {
   assert.match(GOAL_STORE_GUIDE, /restore the whole directory to its exact.*g_<id>/s);
   assert.match(GOAL_STORE_GUIDE, /one supervisor writer/i);
   assert.match(GOAL_STORE_GUIDE, /do not edit them manually/i);
+  assert.match(GOAL_STORE_GUIDE, /must not create checkpoints, artifacts, reports, or other work files here/i);
+  assert.match(GOAL_STORE_GUIDE, /goal-owned project or worktree paths/i);
 });
 
 test("goal-store reads create nothing", async () => {

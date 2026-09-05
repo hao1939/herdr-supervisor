@@ -27,6 +27,11 @@ goals/
 Within a \`g_<id>/\` directory, files other than \`goal.json\` appear only when
 that state exists.
 
+The supervisor owns this directory. Workers and management agents may read it,
+but must not create checkpoints, artifacts, reports, or other work files here.
+Keep those outputs in goal-owned project or worktree paths and cite them from
+supervisor progress or evidence when useful.
+
 - \`goal.json\` is the portable authority: objective, stable context,
   acceptance criteria, and lasting constraints.
 - \`current.json\` is the latest local checkpoint: worker identity, progress,
