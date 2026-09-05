@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+unset HERDR_SUPERVISOR_RESTORED
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 supervisor_install="${HERDR_SUPERVISOR_INSTALL:-/opt/herdr-supervisor}"
@@ -28,6 +29,8 @@ if [ -n "${HERDR_PANE_ID:-}" ] \
     "$supervisor_directory" \
     "$supervisor_extension" \
     "$@")" = 1 ]; then
+  HERDR_SUPERVISOR_RESTORED=1
+  export HERDR_SUPERVISOR_RESTORED
   set -- -e "$supervisor_extension" "$@"
 fi
 
