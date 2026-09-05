@@ -148,19 +148,22 @@ against the same root is outside the architecture. This keeps goal lifecycle
 serialization local and avoids pretending to provide a distributed
 transaction across goal files and Herdr worker creation.
 
-The dedicated Pi explicitly loads `container/supervisor-extension.ts` through Pi's existing `-e`
-option. The container does not install that extension into auto-discovery, so
-ordinary Pi sessions do not read goals, subscribe to Herdr, schedule reviews,
-alter model context, or expose supervisor tools. Startup removes only the known
-legacy container-managed discovery symlink, preserving operator-owned entries.
+The dedicated Pi explicitly loads `container/supervisor-extension.ts` through
+Pi's existing `-e` option. The container does not install that extension into
+auto-discovery, so ordinary Pi sessions do not read goals, subscribe to Herdr,
+schedule reviews, alter model context, or expose supervisor tools. Startup
+removes only the known legacy container-managed discovery symlink, preserving
+operator-owned entries.
 Herdr restores native Pi sessions without their original extension arguments, so
 the explicit container extension records its Herdr pane ID and native Pi session
 after the session starts. A later native resume reapplies the entry only when
 both the durable pane and native session match; every other pane remains
-ordinary. Explicitly launching it in a new pane transfers this one local role
-marker after that session starts. This preserves explicit selection across
-process and container restarts without global discovery, another daemon, or a
-second supervisor state model.
+ordinary. Keep one supervisor active per goal-store root. Moving that role means
+stopping the old Pi before explicitly starting its replacement; concurrent
+supervisors are deliberately not coordinated. This preserves explicit selection
+across process and container restarts without global discovery, another daemon,
+or a second supervisor state model.
+
 The old container entry point and former direct `src/extension.ts` entry fail
 before installing supervisor tools if a stale link or launch command still
 references either one. Do not install the active extension

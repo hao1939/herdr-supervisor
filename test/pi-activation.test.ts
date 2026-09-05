@@ -87,12 +87,9 @@ async function wrapperFixture(t) {
   return { root, goals, invoke };
 }
 
-async function supervisorSessionHandler(goals: string, { restored = false } = {}) {
+async function supervisorSessionHandler(goals: string) {
   const previousGoals = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousRestored = process.env.HERDR_SUPERVISOR_RESTORED;
   process.env.HERDR_SUPERVISOR_GOALS = goals;
-  if (restored) process.env.HERDR_SUPERVISOR_RESTORED = "1";
-  else delete process.env.HERDR_SUPERVISOR_RESTORED;
   try {
     const handlers = [];
     const pi = new Proxy({
@@ -114,8 +111,6 @@ async function supervisorSessionHandler(goals: string, { restored = false } = {}
   } finally {
     if (previousGoals === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousGoals;
-    if (previousRestored === undefined) delete process.env.HERDR_SUPERVISOR_RESTORED;
-    else process.env.HERDR_SUPERVISOR_RESTORED = previousRestored;
   }
 }
 
@@ -124,7 +119,6 @@ async function emitSupervisorSession(
   paneId: string,
   sessionFile: string,
   sessionId = "session-id",
-  reason = "startup",
 ) {
   await writeFile(sessionFile, `${JSON.stringify({
     type: "session",
@@ -136,7 +130,7 @@ async function emitSupervisorSession(
   const previousPane = process.env.HERDR_PANE_ID;
   process.env.HERDR_PANE_ID = paneId;
   try {
-    await handler({ reason }, {
+    await handler({}, {
       sessionManager: {
         getSessionFile: () => sessionFile,
         getSessionId: () => sessionId,
@@ -211,7 +205,7 @@ test("the explicit supervisor entry records the native Pi session once it exists
   assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), `w1:p2\n${initialSession}\ninitial-session\n`);
 });
 
-test("an explicit move transfers restart ownership to the new supervisor pane", async (t) => {
+test("starting a replacement records its restart identity", async (t) => {
   const state = await wrapperFixture(t);
   const oldSession = join(state.root, "old.jsonl");
   const newSession = join(state.root, "new.jsonl");
@@ -222,42 +216,6 @@ test("an explicit move transfers restart ownership to the new supervisor pane", 
   assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), `w1:p9\n${newSession}\nnew-session\n`);
   assert.equal((await state.invoke("w1:p2", ["--session", "old.jsonl"])).stdout, "--session\nold.jsonl\n");
   assert.equal((await state.invoke("w1:p9", ["--session", "new.jsonl"])).stdout, `-e\n${containerActiveExtension}\n--session\nnew.jsonl\n`);
-});
-
-test("a former supervisor cannot reclaim ownership after an explicit transfer", async (t) => {
-  const state = await wrapperFixture(t);
-  const oldHandler = await supervisorSessionHandler(state.goals);
-  const newHandler = await supervisorSessionHandler(state.goals);
-  const oldSession = join(state.root, "old.jsonl");
-  const newSession = join(state.root, "new.jsonl");
-  const laterOldSession = join(state.root, "later-old.jsonl");
-
-  await emitSupervisorSession(oldHandler, "w1:p2", oldSession, "old-session");
-  await emitSupervisorSession(newHandler, "w1:p9", newSession, "new-session");
-  const recreatedOldHandler = await supervisorSessionHandler(state.goals);
-  await emitSupervisorSession(recreatedOldHandler, "w1:p2", laterOldSession, "later-old-session", "resume");
-
-  assert.equal(
-    await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
-    `w1:p9\n${newSession}\nnew-session\n`,
-  );
-});
-
-test("a delayed restored supervisor cannot overwrite a newer explicit owner", async (t) => {
-  const state = await wrapperFixture(t);
-  const restoredHandler = await supervisorSessionHandler(state.goals, { restored: true });
-  const explicitHandler = await supervisorSessionHandler(state.goals);
-  const oldSession = join(state.root, "old.jsonl");
-  const newSession = join(state.root, "new.jsonl");
-
-  await recordSupervisorSession(state.goals, "w1:p2", oldSession, "old-session");
-  await emitSupervisorSession(explicitHandler, "w1:p9", newSession, "new-session");
-  await emitSupervisorSession(restoredHandler, "w1:p2", oldSession, "old-session");
-
-  assert.equal(
-    await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
-    `w1:p9\n${newSession}\nnew-session\n`,
-  );
 });
 
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
