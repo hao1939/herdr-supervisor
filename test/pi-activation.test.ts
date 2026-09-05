@@ -134,17 +134,22 @@ test("an explicit move transfers restart ownership to the new supervisor pane", 
   assert.equal((await state.invoke("w1:p9")).stdout, `-e\n${containerActiveExtension}\n`);
 });
 
-test("wrapper records only extension options before Pi command arguments", async (t) => {
-  const state = await wrapperFixture(t);
-  const marker = join(state.goals, ".supervisor", "pane-id");
-
-  const promptArgument = await state.invoke("w1:p2", ["review", "-e", containerActiveExtension]);
+test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
+  const optionState = await wrapperFixture(t);
+  const promptArgument = await optionState.invoke("w1:p2", ["review", "-e", containerActiveExtension]);
   assert.equal(promptArgument.stdout, `review\n-e\n${containerActiveExtension}\n`);
-  await assert.rejects(readFile(marker), { code: "ENOENT" });
+  assert.equal(
+    await readFile(join(optionState.goals, ".supervisor", "pane-id"), "utf8"),
+    "w1:p2\n",
+  );
 
-  const afterSeparator = await state.invoke("w1:p2", ["--", "-e", containerActiveExtension]);
+  const separatorState = await wrapperFixture(t);
+  const afterSeparator = await separatorState.invoke("w1:p2", ["--", "-e", containerActiveExtension]);
   assert.equal(afterSeparator.stdout, `--\n-e\n${containerActiveExtension}\n`);
-  await assert.rejects(readFile(marker), { code: "ENOENT" });
+  await assert.rejects(
+    readFile(join(separatorState.goals, ".supervisor", "pane-id")),
+    { code: "ENOENT" },
+  );
 });
 
 test("wrapper restores the caller umask before launching Pi", async (t) => {

@@ -16,7 +16,8 @@ esac
 
 # Herdr restores a native Pi session but not the extension argument that gave
 # that pane its supervisor role. Remember only an explicit container launch,
-# then restore the same role only in that exact durable pane.
+# then restore the same role only in that exact durable pane. Pi parses options
+# on either side of its optional initial message; only -- ends option parsing.
 explicit_supervisor=0
 expect_extension=0
 for argument in "$@"; do
@@ -35,8 +36,6 @@ for argument in "$@"; do
       explicit_supervisor=1
       break
       ;;
-    -*) ;;
-    *) break ;;
   esac
 done
 
@@ -47,7 +46,9 @@ if [ "$explicit_supervisor" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
     umask 077
     mkdir -p "$marker_directory"
     printf '%s\n' "$HERDR_PANE_ID" >"$marker_temporary"
+    sync -f "$marker_temporary"
     mv -f "$marker_temporary" "$supervisor_pane_file"
+    sync -f "$marker_directory"
   )
 elif [ -n "${HERDR_PANE_ID:-}" ] \
   && [ -f "$supervisor_pane_file" ] \
