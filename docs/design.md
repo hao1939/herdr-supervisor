@@ -141,6 +141,12 @@ against the same root is outside the architecture. This keeps goal lifecycle
 serialization local and avoids pretending to provide a distributed
 transaction across goal files and Herdr worker creation.
 
+Loading the extension is not enough to claim that writer role. A dedicated Pi
+must explicitly select `observe`, `dry-run`, or `live` mode. With no selected
+mode the extension does not read the goal store, subscribe to Herdr, schedule
+reviews, alter model context, or expose supervisor tools to the model. This
+makes accidental user-wide Pi discovery inert.
+
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.

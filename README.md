@@ -49,8 +49,16 @@ docker compose up -d --build
 docker compose exec herdr herdr
 ```
 
-In the Herdr UI, open a pane and type `pi`. The extension loads automatically.
-Talk to the supervisor — describe what you want done and it handles the rest.
+In the Herdr UI, open the one dedicated supervisor pane and start Pi with an
+explicit mode:
+
+```sh
+pi --supervisor-mode live
+```
+
+The extension is available to other Pi sessions in the container but remains
+inert unless they also select a mode. Talk to the supervisor — describe what
+you want done and it handles the rest.
 
 After starting or restarting that agent, name it so external diagnostics and
 optional management panes can address it without relying on a recyclable pane
@@ -86,7 +94,7 @@ state at any time.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HERDR_SUPERVISOR_MODE` | `live` | `observe`, `dry-run`, or `live` |
+| `HERDR_SUPERVISOR_MODE` | `off` | `off`, `observe`, `dry-run`, or `live`; prefer the per-Pi flag when only one pane should supervise |
 | `HERDR_SUPERVISOR_CODEX_FULL_ACCESS` | `0` | Set to `1` for unattended operation (see Security below) |
 | `HERDR_SUPERVISOR_DIRECTORY` | `/app` | Supervisor's stable infrastructure directory |
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
@@ -169,6 +177,12 @@ supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi -e "$supervisor_extension" --supervisor-mode live
 ```
+
+Always choose the mode explicitly. Without `--supervisor-mode` or
+`HERDR_SUPERVISOR_MODE`, the extension is inert. Do not copy or link it into
+Pi's user-wide `~/.pi/agent/extensions` directory: every ordinary Pi session
+would discover it even though only the dedicated supervisor should own this
+goal store.
 
 After passive behavior is verified, use `--supervisor-mode dry-run` to let the
 supervisor review events without applying decisions. Ordinary Pi tools remain

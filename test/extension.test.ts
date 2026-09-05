@@ -30,8 +30,9 @@ function goalWorkerName(goalId: string) {
   return `goal-${createHash("sha256").update(goalId).digest("hex").slice(0, 27)}`;
 }
 
-function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
+function fakePi({ mode = "live", reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const commands = new Map();
+  const flags = new Map();
   const tools = new Map();
   const events = new Map();
   const messages = [];
@@ -41,15 +42,16 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   let activeTools = ["read", "bash", "edit", "write"];
   return {
     commands,
+    flags,
     tools,
     events,
     messages,
     customMessages,
     userMessages,
     activeToolSelections,
-    registerFlag() {},
+    registerFlag(name, flag) { flags.set(name, flag); },
     getFlag(name) {
-      if (name === "supervisor-mode") return "live";
+      if (name === "supervisor-mode") return mode;
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
     },
@@ -71,6 +73,37 @@ function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
     },
   };
 }
+
+test("the extension stays inert until supervision is explicitly enabled", async () => {
+  const pi = fakePi({ mode: "off" });
+  const statuses = [];
+  const notifications = [];
+  herdrSupervisor(pi);
+
+  assert.equal(pi.flags.get("supervisor-mode").default, "off");
+
+  await pi.events.get("session_start")({}, {
+    ui: {
+      setStatus(name, value) { statuses.push({ name, value }); },
+      notify(message, level) { notifications.push({ message, level }); },
+    },
+  });
+
+  assert.deepEqual(pi.getActiveTools(), ["read", "bash", "edit", "write"]);
+  assert.deepEqual(statuses, [{ name: "herdr-supervisor", value: undefined }]);
+  assert.equal(pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." }), undefined);
+  assert.equal(pi.events.get("context")({ messages: [] }), undefined);
+  await pi.events.get("agent_settled")();
+  assert.equal(pi.messages.length, 0);
+
+  await pi.commands.get("supervised").handler("", {
+    ui: { notify(message, level) { notifications.push({ message, level }); } },
+  });
+  assert.deepEqual(notifications, [{
+    message: "Herdr Supervisor is disabled. Restart this dedicated Pi with --supervisor-mode observe, dry-run, or live.",
+    level: "warning",
+  }]);
+});
 
 function snapshot(agent = {}) {
   const current = {
