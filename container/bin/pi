@@ -18,41 +18,37 @@ esac
 # that pane its supervisor role. Remember only an explicit container launch,
 # then restore the same role only in that exact durable pane.
 explicit_supervisor=0
-extension_option_pending=0
+expect_extension=0
 for argument in "$@"; do
-  if [ "$extension_option_pending" -eq 1 ]; then
+  if [ "$expect_extension" -eq 1 ]; then
     if [ "$argument" = "$supervisor_extension" ]; then
       explicit_supervisor=1
+      break
     fi
-    break
+    expect_extension=0
+    continue
   fi
-
   case "$argument" in
-    -e)
-      extension_option_pending=1
-      continue
-      ;;
-    --)
+    --) break ;;
+    -e | --extension) expect_extension=1 ;;
+    "--extension=$supervisor_extension")
+      explicit_supervisor=1
       break
       ;;
-    -*)
-      continue
-      ;;
-    *)
-      break
-      ;;
+    -*) ;;
+    *) break ;;
   esac
 done
 
 if [ "$explicit_supervisor" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
   marker_directory=$(dirname "$supervisor_pane_file")
   marker_temporary="${supervisor_pane_file}.$$"
-  previous_umask=$(umask)
-  umask 077
-  mkdir -p "$marker_directory"
-  printf '%s\n' "$HERDR_PANE_ID" >"$marker_temporary"
-  mv -f "$marker_temporary" "$supervisor_pane_file"
-  umask "$previous_umask"
+  (
+    umask 077
+    mkdir -p "$marker_directory"
+    printf '%s\n' "$HERDR_PANE_ID" >"$marker_temporary"
+    mv -f "$marker_temporary" "$supervisor_pane_file"
+  )
 elif [ -n "${HERDR_PANE_ID:-}" ] \
   && [ -f "$supervisor_pane_file" ] \
   && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ]; then

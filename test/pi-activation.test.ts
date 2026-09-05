@@ -61,7 +61,12 @@ async function wrapperFixture(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const agent = join(root, "pi-agent");
   const wrapper = join(root, "pi");
-  await writeFile(agent, "#!/bin/sh\nif [ \"${HERDR_TEST_PRINT_UMASK:-0}\" = 1 ]; then printf 'umask=%s\\n' \"$(umask)\"; fi\nprintf '%s\\n' \"$@\"\n", { mode: 0o700 });
+  await writeFile(agent, [
+    "#!/bin/sh",
+    "if [ -n \"${REPORT_UMASK:-}\" ]; then umask; exit; fi",
+    "printf '%s\\n' \"$@\"",
+    "",
+  ].join("\n"), { mode: 0o700 });
   await writeFile(
     wrapper,
     (await readFile(piWrapper, "utf8")).replace("/usr/local/bin/pi-agent", agent),
@@ -144,10 +149,13 @@ test("wrapper records only extension options before Pi command arguments", async
 
 test("wrapper restores the caller umask before launching Pi", async (t) => {
   const state = await wrapperFixture(t);
-  const env = { HERDR_TEST_PRINT_UMASK: "1" };
-  const ordinaryUmask = (await state.invoke("w1:p1", [], env)).stdout.split("\n")[0];
-  const explicitUmask = (await state.invoke("w1:p2", ["-e", containerActiveExtension], env)).stdout.split("\n")[0];
-  assert.equal(explicitUmask, ordinaryUmask);
+  const ordinary = await state.invoke("w1:p3", [], { REPORT_UMASK: "1" });
+  const supervisor = await state.invoke(
+    "w1:p2",
+    ["-e", containerActiveExtension],
+    { REPORT_UMASK: "1" },
+  );
+  assert.equal(supervisor.stdout, ordinary.stdout);
 });
 
 test("a preserved discovery entry to the former direct entry point fails closed", async (t) => {
