@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +14,8 @@ const directExtension = fileURLToPath(new URL("../src/extension.ts", import.meta
 const activeExtension = fileURLToPath(new URL("../container/supervisor-extension.ts", import.meta.url));
 const legacyExtension = fileURLToPath(new URL("../container/pi-extension.ts", import.meta.url));
 const managedTarget = "/opt/herdr-supervisor/container/pi-extension.ts";
+const piWrapper = fileURLToPath(new URL("../container/bin/pi", import.meta.url));
+const containerActiveExtension = "/opt/herdr-supervisor/container/supervisor-extension.ts";
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "herdr-pi-activation-"));
@@ -54,6 +56,29 @@ async function loadPi(root: string, agentDir: string, additionalExtensionPaths: 
   return loader.getExtensions();
 }
 
+async function wrapperFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), "herdr-pi-wrapper-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const agent = join(root, "pi-agent");
+  const wrapper = join(root, "pi");
+  await writeFile(agent, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o700 });
+  await writeFile(
+    wrapper,
+    (await readFile(piWrapper, "utf8")).replace("/usr/local/bin/pi-agent", agent),
+  );
+  await chmod(wrapper, 0o700);
+  const goals = join(root, "goals");
+  const invoke = (paneId: string, args: string[] = []) => run(wrapper, args, {
+    env: {
+      ...process.env,
+      HERDR_PANE_ID: paneId,
+      HERDR_SUPERVISOR_DIRECTORY: root,
+      HERDR_SUPERVISOR_GOALS: goals,
+    },
+  });
+  return { goals, invoke };
+}
+
 test("ordinary Pi loads no supervisor; explicit Pi extension loading installs the single path", async (t) => {
   const fixtureState = await fixture(t);
   await fixtureState.start();
@@ -79,6 +104,28 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
   assert.ok(supervisor.tools.has("supervisor_steer"));
   assert.equal(supervisor.flags.has("supervisor-mode"), false);
   assert.ok(supervisor.handlers.has("session_start"));
+});
+
+test("an explicitly chosen supervisor pane keeps its role across native Pi resume", async (t) => {
+  const state = await wrapperFixture(t);
+  const explicit = await state.invoke("w1:p2", ["-e", containerActiveExtension, "--model", "test"]);
+  assert.equal(explicit.stdout, `-e\n${containerActiveExtension}\n--model\ntest\n`);
+  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p2\n");
+
+  const resumed = await state.invoke("w1:p2", ["--session", "saved.jsonl"]);
+  assert.equal(resumed.stdout, `-e\n${containerActiveExtension}\n--session\nsaved.jsonl\n`);
+
+  const ordinary = await state.invoke("w1:p3", ["--session", "other.jsonl"]);
+  assert.equal(ordinary.stdout, "--session\nother.jsonl\n");
+});
+
+test("an explicit move transfers restart ownership to the new supervisor pane", async (t) => {
+  const state = await wrapperFixture(t);
+  await state.invoke("w1:p2", ["-e", containerActiveExtension]);
+  await state.invoke("w1:p9", ["-e", containerActiveExtension]);
+  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p9\n");
+  assert.equal((await state.invoke("w1:p2")).stdout, "\n");
+  assert.equal((await state.invoke("w1:p9")).stdout, `-e\n${containerActiveExtension}\n`);
 });
 
 test("a preserved discovery entry to the former direct entry point fails closed", async (t) => {

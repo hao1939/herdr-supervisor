@@ -2,6 +2,9 @@
 set -eu
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
+supervisor_extension="/opt/herdr-supervisor/container/supervisor-extension.ts"
+supervisor_goals="${HERDR_SUPERVISOR_GOALS:-${XDG_STATE_HOME:-/home/node/.local/state}/herdr-supervisor/goals}"
+supervisor_pane_file="${supervisor_goals}/.supervisor/pane-id"
 
 case "$supervisor_directory" in
   /*) ;;
@@ -10,6 +13,32 @@ case "$supervisor_directory" in
     exit 2
     ;;
 esac
+
+# Herdr restores a native Pi session but not the extension argument that gave
+# that pane its supervisor role. Remember only an explicit container launch,
+# then restore the same role only in that exact durable pane.
+explicit_supervisor=0
+previous_argument=""
+for argument in "$@"; do
+  if [ "$previous_argument" = "-e" ] && [ "$argument" = "$supervisor_extension" ]; then
+    explicit_supervisor=1
+    break
+  fi
+  previous_argument="$argument"
+done
+
+if [ "$explicit_supervisor" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
+  marker_directory=$(dirname "$supervisor_pane_file")
+  marker_temporary="${supervisor_pane_file}.$$"
+  umask 077
+  mkdir -p "$marker_directory"
+  printf '%s\n' "$HERDR_PANE_ID" >"$marker_temporary"
+  mv -f "$marker_temporary" "$supervisor_pane_file"
+elif [ -n "${HERDR_PANE_ID:-}" ] \
+  && [ -f "$supervisor_pane_file" ] \
+  && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ]; then
+  set -- -e "$supervisor_extension" "$@"
+fi
 
 cd "$supervisor_directory"
 exec /usr/local/bin/pi-agent "$@"

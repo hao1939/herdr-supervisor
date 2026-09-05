@@ -56,8 +56,13 @@ supervisor extension:
 pi -e /opt/herdr-supervisor/container/supervisor-extension.ts
 ```
 
-Ordinary `pi` sessions do not load the supervisor. Talk to the dedicated
-supervisor — describe what you want done and it handles the rest.
+That explicit container launch records only the current Herdr pane ID in local
+supervisor state. When Herdr later restores the same native Pi session after a
+container restart, the wrapper reapplies the extension to that exact pane.
+Ordinary `pi` sessions in other panes do not load the supervisor. Explicitly
+starting the supervisor in a different pane transfers restart ownership there.
+Talk to the dedicated supervisor — describe what you want done and it handles
+the rest.
 
 On upgrade, startup removes only the old container-managed auto-discovery
 symlink. Operator-owned entries are preserved. The legacy
@@ -65,9 +70,9 @@ symlink. Operator-owned entries are preserved. The legacy
 loading supervision; update old launch commands to the explicit command above
 and remove any custom supervisor auto-discovery entries.
 
-After starting or restarting that agent, name it so external diagnostics and
-optional management panes can address it without relying on a recyclable pane
-ID. Herdr clears the name when the agent exits or is replaced:
+After starting that agent, name it so external diagnostics and optional
+management panes can address it without relying on a recyclable pane ID. Herdr
+clears the name when the agent exits or is replaced:
 
 ```sh
 herdr agent rename <pi-pane-id> supervisor

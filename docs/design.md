@@ -153,6 +153,13 @@ option. The container does not install that extension into auto-discovery, so
 ordinary Pi sessions do not read goals, subscribe to Herdr, schedule reviews,
 alter model context, or expose supervisor tools. Startup removes only the known
 legacy container-managed discovery symlink, preserving operator-owned entries.
+Herdr restores native Pi sessions without their original extension arguments,
+so the container wrapper records the pane ID only when that exact explicit
+supervisor entry is launched. A later native resume in the same durable pane
+reapplies the entry; every other pane remains ordinary. Explicitly launching it
+in a new pane transfers this one local role marker. This preserves explicit
+selection across process and container restarts without global discovery,
+another daemon, or a second supervisor state model.
 The old container entry point and former direct `src/extension.ts` entry fail
 before installing supervisor tools if a stale link or launch command still
 references either one. Do not install the active extension
