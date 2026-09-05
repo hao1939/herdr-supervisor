@@ -70,9 +70,9 @@ symlink. Operator-owned entries are preserved. The legacy
 loading supervision; update old launch commands to the explicit command above
 and remove any custom supervisor auto-discovery entries.
 
-After starting that agent, name it so external diagnostics and optional
-management panes can address it without relying on a recyclable pane ID. Herdr
-clears the name when the agent exits or is replaced:
+After starting or restarting that agent, name it so external diagnostics and
+optional management panes can address it without relying on a recyclable pane
+ID. Herdr clears the name when the agent exits or is replaced:
 
 ```sh
 herdr agent rename <pi-pane-id> supervisor

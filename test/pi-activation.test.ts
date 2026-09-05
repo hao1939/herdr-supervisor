@@ -61,19 +61,20 @@ async function wrapperFixture(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const agent = join(root, "pi-agent");
   const wrapper = join(root, "pi");
-  await writeFile(agent, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n", { mode: 0o700 });
+  await writeFile(agent, "#!/bin/sh\nif [ \"${HERDR_TEST_PRINT_UMASK:-0}\" = 1 ]; then printf 'umask=%s\\n' \"$(umask)\"; fi\nprintf '%s\\n' \"$@\"\n", { mode: 0o700 });
   await writeFile(
     wrapper,
     (await readFile(piWrapper, "utf8")).replace("/usr/local/bin/pi-agent", agent),
   );
   await chmod(wrapper, 0o700);
   const goals = join(root, "goals");
-  const invoke = (paneId: string, args: string[] = []) => run(wrapper, args, {
+  const invoke = (paneId: string, args: string[] = [], env = {}) => run(wrapper, args, {
     env: {
       ...process.env,
       HERDR_PANE_ID: paneId,
       HERDR_SUPERVISOR_DIRECTORY: root,
       HERDR_SUPERVISOR_GOALS: goals,
+      ...env,
     },
   });
   return { goals, invoke };
@@ -126,6 +127,27 @@ test("an explicit move transfers restart ownership to the new supervisor pane", 
   assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p9\n");
   assert.equal((await state.invoke("w1:p2")).stdout, "\n");
   assert.equal((await state.invoke("w1:p9")).stdout, `-e\n${containerActiveExtension}\n`);
+});
+
+test("wrapper records only extension options before Pi command arguments", async (t) => {
+  const state = await wrapperFixture(t);
+  const marker = join(state.goals, ".supervisor", "pane-id");
+
+  const promptArgument = await state.invoke("w1:p2", ["review", "-e", containerActiveExtension]);
+  assert.equal(promptArgument.stdout, `review\n-e\n${containerActiveExtension}\n`);
+  await assert.rejects(readFile(marker), { code: "ENOENT" });
+
+  const afterSeparator = await state.invoke("w1:p2", ["--", "-e", containerActiveExtension]);
+  assert.equal(afterSeparator.stdout, `--\n-e\n${containerActiveExtension}\n`);
+  await assert.rejects(readFile(marker), { code: "ENOENT" });
+});
+
+test("wrapper restores the caller umask before launching Pi", async (t) => {
+  const state = await wrapperFixture(t);
+  const env = { HERDR_TEST_PRINT_UMASK: "1" };
+  const ordinaryUmask = (await state.invoke("w1:p1", [], env)).stdout.split("\n")[0];
+  const explicitUmask = (await state.invoke("w1:p2", ["-e", containerActiveExtension], env)).stdout.split("\n")[0];
+  assert.equal(explicitUmask, ordinaryUmask);
 });
 
 test("a preserved discovery entry to the former direct entry point fails closed", async (t) => {
