@@ -34,17 +34,19 @@ if (valid
   && !nonInteractiveMetadata
   && !parsed.noSession
   && !parsed.extensions?.includes(supervisorExtension)
-  && Boolean(parsed.session) !== Boolean(parsed.sessionId)) {
+  && !parsed.fork
+  && !parsed.sessionId
+  && parsed.session) {
   try {
     const [markerPane, markerSessionFile, markerSessionId] = readFileSync(markerFile, "utf8").split(/\r?\n/);
-    if (markerPane === paneId && markerSessionFile && markerSessionId && sessionFileId(markerSessionFile) === markerSessionId) {
-      if (parsed.sessionId) {
-        restore = parsed.sessionId === markerSessionId;
-      } else if (parsed.session === markerSessionId) {
-        restore = true;
-      } else if (parsed.session?.includes("/") || parsed.session?.includes("\\") || parsed.session?.endsWith(".jsonl")) {
-        restore = resolve(cwd, parsed.session) === markerSessionFile;
-      }
+    const pathSession = parsed.session.includes("/") || parsed.session.includes("\\") || parsed.session.endsWith(".jsonl");
+    if (markerPane === paneId
+      && markerSessionFile
+      && markerSessionId
+      && pathSession
+      && resolve(cwd, parsed.session) === markerSessionFile
+      && sessionFileId(markerSessionFile) === markerSessionId) {
+      restore = true;
     }
   } catch {
     // A missing or concurrently replaced marker fails closed. The next native

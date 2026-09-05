@@ -262,8 +262,17 @@ test("wrapper restores only canonical session marker matches", async (t) => {
   const exactPath = await state.invoke("w1:p2", ["--session", "exact.jsonl"]);
   assert.equal(exactPath.stdout, `-e\n${containerActiveExtension}\n--session\nexact.jsonl\n`);
 
-  const exactId = await state.invoke("w1:p2", ["--session-id", "exact-session"]);
-  assert.equal(exactId.stdout, `-e\n${containerActiveExtension}\n--session-id\nexact-session\n`);
+  const idOnly = await state.invoke("w1:p2", ["--session-id", "exact-session"]);
+  assert.equal(idOnly.stdout, "--session-id\nexact-session\n");
+
+  const idAsSession = await state.invoke("w1:p2", ["--session", "exact-session"]);
+  assert.equal(idAsSession.stdout, "--session\nexact-session\n");
+
+  const sessionIdLookup = await state.invoke("w1:p2", ["--session", "exact-session", "--session-dir", join(state.root, "other")]);
+  assert.equal(sessionIdLookup.stdout, `--session\nexact-session\n--session-dir\n${join(state.root, "other")}\n`);
+
+  const pathWithSessionDirectory = await state.invoke("w1:p2", ["--session", "exact.jsonl", "--session-dir", join(state.root, "other")]);
+  assert.equal(pathWithSessionDirectory.stdout, `-e\n${containerActiveExtension}\n--session\nexact.jsonl\n--session-dir\n${join(state.root, "other")}\n`);
 
   const partialId = await state.invoke("w1:p2", ["--session", "exact"]);
   assert.equal(partialId.stdout, "--session\nexact\n");
@@ -276,6 +285,9 @@ test("wrapper restores only canonical session marker matches", async (t) => {
 
   const conflictingIdentity = await state.invoke("w1:p2", ["--session", "exact.jsonl", "--session-id", "exact-session"]);
   assert.equal(conflictingIdentity.stdout, "--session\nexact.jsonl\n--session-id\nexact-session\n");
+
+  const conflictingFork = await state.invoke("w1:p2", ["--fork", "other-session", "--session", "exact.jsonl"]);
+  assert.equal(conflictingFork.stdout, "--fork\nother-session\n--session\nexact.jsonl\n");
 
   await writeFile(join(state.root, "exact.jsonl"), `${JSON.stringify({ type: "session", version: 3, id: "replacement" })}\n`);
   const replacedFile = await state.invoke("w1:p2", ["--session", "exact.jsonl"]);
