@@ -7,6 +7,7 @@ import {
   buildGlobalSnapshot,
   emptyGlobalReviewState,
   globalFindingHash,
+  globalReviewMessage,
   loadGlobalReviewState,
   saveGlobalReviewState,
 } from "../src/global-review.ts";
@@ -69,4 +70,21 @@ test("finding hashes ignore finding and goal ordering", () => {
     { problem: "Two goals wait on each other", evidence: ["g_one -> g_two"], affectedGoalIds: ["g_one", "g_two"] },
   ];
   assert.equal(globalFindingHash(first), globalFindingHash(second));
+});
+
+test("global review routes an actionable finding into ordinary focused review", () => {
+  const message = globalReviewMessage({ goals: [{
+    goalId: "g_active",
+    outcome: "Keep the release healthy.",
+    workerState: "idle",
+  }] }, "bounded system review", [
+    "- The active goal still names a retired owner.",
+    "  Affects: g_active",
+  ].join("\n"), new Date("2026-09-05T01:00:00.000Z"));
+
+  assert.match(message, /Findings report facts; reconsider routes action/);
+  assert.match(message, /Do not merely repeat an actionable finding/);
+  assert.match(message, /put that exact fact and goal in reconsider/);
+  assert.match(message, /ask the human one concrete question when durable authority is needed/);
+  assert.match(message, /healthy focused review or future bounded wait already covers it/);
 });
