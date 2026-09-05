@@ -1473,14 +1473,14 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
   pi.registerTool({
     name: "supervisor_leave",
     label: "Leave worker alone",
-    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. Provider metadata wakes workers for supported PR and build changes; bounded review remains the safety net. Use review_at for an evidence-appropriate exact safety check, or null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait unless fresh current evidence establishes why and supplies the next boundary.",
+    description: "Record acceptable progress and take no worker action until its next event or a bounded review. Leave a working worker as working and use null for waiting_for; its next checkpoint belongs in progress. A settled worker may be left alone only when waiting_for names a concrete peer or external condition. Provider metadata wakes workers for supported PR and build changes; bounded review remains the safety net. Use review_at for an evidence-appropriate exact safety check, or null for the normal interval. At that review, confirm the condition still exists, seek a safe mitigation or independent useful work, and continue the worker whenever anything can move. Do not extend the same wait without fresh current evidence. Use the next exact boundary when one is known, or the normal interval when a verified goal-linked external watch owns change detection.",
     parameters: Type.Object({
       pane_id: Pane,
       progress: Type.String({ minLength: 1 }),
       waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
       waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker this wait depends on. Its reviews receive this condition so the model can wake this goal only when materially affected. Use null for self or external waits." })),
       evidence: Evidence,
-      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. Use null for the normal interval." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. For a verified goal-linked external watch with no concrete near-term transition, use null for the normal interval; do not reuse a prior arbitrary safety deadline. A shorter-than-normal deadline is accepted only when waiting_for names that exact authoritative timestamp." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
@@ -1514,10 +1514,19 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       const reviewAt = params.review_at?.trim()
         || (waitingFor ? new Date(Date.now() + reviewIntervalMs()).toISOString() : undefined);
       let deadline: number | undefined;
+      const decisionAt = Date.now();
       try {
-        if (reviewAt) deadline = reviewDeadline(reviewAt);
+        if (reviewAt) deadline = reviewDeadline(reviewAt, decisionAt);
       } catch (error) {
         return text(`Cannot schedule review_at ${reviewAt}; ${error.message}.`, true);
+      }
+      if (
+        waitingFor
+        && params.review_at?.trim()
+        && deadline! - decisionAt < reviewIntervalMs()
+        && !waitingFor.includes(reviewAt)
+      ) {
+        return text(`Cannot schedule short review_at ${reviewAt} because waiting_for does not name that exact authoritative time. Use null for the normal interval, or include the timestamp in waiting_for when external evidence sets that boundary. No action was applied.`, true);
       }
       const [latestGoals, latestSnapshot] = await Promise.all([activeBindings(), client.snapshot()]);
       const latestBinding = latestGoals.active.find((goal) => (
