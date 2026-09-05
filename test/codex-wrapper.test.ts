@@ -7,6 +7,8 @@ import test from "node:test";
 import { installSupervisorGoal, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { startGoal } from "../src/goal-store.ts";
 
+const managedUpdateConfig = ["-c", "check_for_update_on_startup=false"];
+
 async function wrapper() {
   const directory = await mkdtemp(join(tmpdir(), "herdr-supervisor-codex-"));
   const agent = join(directory, "codex-agent");
@@ -42,6 +44,16 @@ function run(
   return result.stdout.trim().split("\n");
 }
 
+function runFailure(script: string, args: string[]) {
+  const result = spawnSync(script, args, {
+    encoding: "utf8",
+    env: { ...process.env, HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "0" },
+  });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /check_for_update_on_startup is managed by the container image/);
+}
+
 async function activeGoal(sessionId = "session-1") {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-goals-"));
   const binding = await registerSupervisedGoal({
@@ -66,6 +78,7 @@ test("restored active Codex sessions resume idle in their saved directory withou
   assert.deepEqual(run(script, ["resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_GOALS: root },
   }), [
+    ...managedUpdateConfig,
     "-c",
     'tui.resume_cwd="session"',
     "resume",
@@ -74,7 +87,7 @@ test("restored active Codex sessions resume idle in their saved directory withou
   ]);
   assert.deepEqual(run(script, ["resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p9", HERDR_SUPERVISOR_GOALS: root },
-  }), ["-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
+  }), [...managedUpdateConfig, "-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
 });
 
 test("restored stopped and unknown sessions stay parked", async () => {
@@ -87,13 +100,13 @@ test("restored stopped and unknown sessions stay parked", async () => {
     terminal: { state: "stopped", summary: "Stopped explicitly by the human." },
   }, root);
 
-  const expected = ["-c", 'tui.resume_cwd="session"', "resume", "session-1"];
+  const expected = [...managedUpdateConfig, "-c", 'tui.resume_cwd="session"', "resume", "session-1"];
   assert.deepEqual(run(script, ["resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_GOALS: root },
   }), expected);
   assert.deepEqual(run(script, ["resume", "unknown-session"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_GOALS: root },
-  }), ["-c", 'tui.resume_cwd="session"', "resume", "unknown-session"]);
+  }), [...managedUpdateConfig, "-c", 'tui.resume_cwd="session"', "resume", "unknown-session"]);
 });
 
 test("a native session bound to active goals in different panes stays parked", async () => {
@@ -111,7 +124,7 @@ test("a native session bound to active goals in different panes stays parked", a
 
   assert.deepEqual(run(script, ["resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_GOALS: root },
-  }), ["-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
+  }), [...managedUpdateConfig, "-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
 });
 
 test("an unreadable goal store parks an otherwise active session", async () => {
@@ -123,12 +136,13 @@ test("an unreadable goal store parks an otherwise active session", async () => {
 
   assert.deepEqual(run(script, ["resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_GOALS: root },
-  }), ["-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
+  }), [...managedUpdateConfig, "-c", 'tui.resume_cwd="session"', "resume", "session-1"]);
 });
 
 test("an explicit Codex resume-directory choice remains authoritative", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["-c", 'tui.resume_cwd="current"', "resume", "session-1", "Continue now."]), [
+    ...managedUpdateConfig,
     "-c",
     'tui.resume_cwd="current"',
     "resume",
@@ -140,6 +154,7 @@ test("an explicit Codex resume-directory choice remains authoritative", async ()
 test("a caller-supplied resume prompt remains authoritative", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["resume", "session-1", "Continue now."]), [
+    ...managedUpdateConfig,
     "-c",
     'tui.resume_cwd="session"',
     "resume",
@@ -148,14 +163,52 @@ test("a caller-supplied resume prompt remains authoritative", async () => {
   ]);
 });
 
-test("new Codex sessions do not receive a resume-directory override", async () => {
+test("new Codex sessions disable image-managed update prompts without a resume-directory override", async () => {
   const script = await wrapper();
-  assert.deepEqual(run(script, ["Start work."]), ["Start work."]);
+  assert.deepEqual(run(script, ["Start work."]), [...managedUpdateConfig, "Start work."]);
+});
+
+test("callers cannot override the image-managed update setting", async () => {
+  const script = await wrapper();
+  for (const args of [
+    ["-c", "check_for_update_on_startup=true", "Start work."],
+    ["--config", "check_for_update_on_startup=false", "Start work."],
+    ["-c", " check_for_update_on_startup = true", "Start work."],
+    ["-ccheck_for_update_on_startup=true", "Start work."],
+    ["-c=check_for_update_on_startup=true", "Start work."],
+    ["--config=check_for_update_on_startup=false", "Start work."],
+  ]) {
+    runFailure(script, args);
+  }
+});
+
+test("unrelated caller configuration remains authoritative", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["-c", 'model_reasoning_effort="high"', "Start work."]), [
+    ...managedUpdateConfig,
+    "-c",
+    'model_reasoning_effort="high"',
+    "Start work.",
+  ]);
+});
+
+test("the end-of-options marker leaves following text to Codex", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["--", "-ccheck_for_update_on_startup=true"]), [
+    ...managedUpdateConfig,
+    "--",
+    "-ccheck_for_update_on_startup=true",
+  ]);
 });
 
 test("the wrapper preserves native Codex Goals", async () => {
   const script = await wrapper();
-  assert.deepEqual(run(script, ["--enable", "goals", "Start work."]), ["--enable", "goals", "Start work."]);
+  assert.deepEqual(run(script, ["--enable", "goals", "Start work."]), [
+    ...managedUpdateConfig,
+    "--enable",
+    "goals",
+    "Start work.",
+  ]);
 });
 
 test("full-access workers trust their pane directory for unattended resume", async () => {
@@ -167,6 +220,7 @@ test("full-access workers trust their pane directory for unattended resume", asy
     cwd,
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "1", HERDR_SUPERVISOR_GOALS: root },
   }), [
+    ...managedUpdateConfig,
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
     "-c",
@@ -186,6 +240,7 @@ test("caller-supplied project trust remains authoritative", async () => {
   assert.deepEqual(run(script, ["-c", projectTrust, "resume", "session-1"], {
     env: { HERDR_PANE_ID: "w1:p2", HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "1", HERDR_SUPERVISOR_GOALS: root },
   }), [
+    ...managedUpdateConfig,
     "--dangerously-bypass-approvals-and-sandbox",
     "--dangerously-bypass-hook-trust",
     "-c",
@@ -202,5 +257,5 @@ test("project trust is not added outside full-access mode", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["Start work."], {
     env: { HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "0" },
-  }), ["Start work."]);
+  }), [...managedUpdateConfig, "Start work."]);
 });

@@ -1,6 +1,15 @@
 #!/bin/sh
 set -eu
 
+reject_managed_update_override() {
+  config_key=${1%%=*}
+  config_key=$(printf '%s\n' "$config_key" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  if [ "$config_key" = "check_for_update_on_startup" ]; then
+    echo "herdr-supervisor: check_for_update_on_startup is managed by the container image" >&2
+    exit 2
+  fi
+}
+
 previous=""
 has_full_access=0
 has_hook_trust=0
@@ -9,7 +18,21 @@ has_resume_cwd=0
 after_resume=0
 resume_arguments=0
 resume_session=""
+scan_managed_options=1
 for argument in "$@"; do
+  if [ "$scan_managed_options" -eq 1 ]; then
+    if [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; then
+      reject_managed_update_override "$argument"
+    fi
+    case "$argument" in
+      --) scan_managed_options=0 ;;
+      -c?*)
+        config_override=${argument#-c}
+        reject_managed_update_override "${config_override#=}"
+        ;;
+      --config=*) reject_managed_update_override "${argument#--config=}" ;;
+    esac
+  fi
   if [ "$after_resume" -eq 1 ]; then
     if [ "$resume_arguments" -eq 0 ]; then
       resume_session=$argument
@@ -101,5 +124,10 @@ if [ "${HERDR_SUPERVISOR_CODEX_FULL_ACCESS:-0}" = "1" ]; then
     set -- --dangerously-bypass-approvals-and-sandbox "$@"
   fi
 fi
+
+# The container image pins and centrally updates Codex. Disable its startup
+# update check so an image refresh cannot leave restored workers at an
+# interactive upgrade gate before their exact session and native Goal resume.
+set -- -c 'check_for_update_on_startup=false' "$@"
 
 exec /usr/local/bin/codex-agent "$@"
