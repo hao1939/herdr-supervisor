@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 unset HERDR_SUPERVISOR_RESTORED
+unset HERDR_SUPERVISOR_RESTORE_MARKER_SHA256
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 supervisor_install="${HERDR_SUPERVISOR_INSTALL:-/opt/herdr-supervisor}"
@@ -22,16 +23,20 @@ esac
 # pinned parser and one marker snapshot then prove the exact session match.
 if [ -n "${HERDR_PANE_ID:-}" ] \
   && [ -f "$supervisor_pane_file" ] \
-  && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ] \
-  && [ "$(node "$supervisor_argument_parser" \
+  && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ]; then
+  restore_marker_token="$(node "$supervisor_argument_parser" \
     "$supervisor_pane_file" \
     "$HERDR_PANE_ID" \
     "$supervisor_directory" \
     "$supervisor_extension" \
-    "$@")" = 1 ]; then
-  HERDR_SUPERVISOR_RESTORED=1
-  export HERDR_SUPERVISOR_RESTORED
-  set -- -e "$supervisor_extension" "$@"
+    "$@")"
+  if [ "$restore_marker_token" != 0 ]; then
+    HERDR_SUPERVISOR_RESTORED=1
+    HERDR_SUPERVISOR_RESTORE_MARKER_SHA256="$restore_marker_token"
+    export HERDR_SUPERVISOR_RESTORED
+    export HERDR_SUPERVISOR_RESTORE_MARKER_SHA256
+    set -- -e "$supervisor_extension" "$@"
+  fi
 fi
 
 cd "$supervisor_directory"
