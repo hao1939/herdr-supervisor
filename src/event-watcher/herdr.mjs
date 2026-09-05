@@ -75,6 +75,9 @@ export function herdrSupervisorDiagnostic({
     if (supervisors.length !== 1) {
       throw new Error(`expected one Pi supervisor, found ${supervisors.length}`);
     }
+    if (supervisors[0].agent_status === "working") {
+      throw new Error("Pi supervisor is working; diagnostic delivery will retry on a later scan");
+    }
     await request("agent.prompt", {
       target: supervisors[0].pane_id,
       text: supervisorDiagnosticMessage(diagnostic),

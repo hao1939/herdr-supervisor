@@ -279,6 +279,13 @@ Failed change or stale delivery remains pending and retries after a later
 successful current observation of that resource; bounded refresh means this
 may be later than the next scan. Both failure kinds are sent as diagnostics to
 the one Pi supervisor.
+If Pi is already working, the watcher does not place diagnostic text in its
+composer. The existing diagnostic path retries on a later scan, after Pi has
+settled, so an accepted prompt means an actionable supervisor turn rather than
+stranded input in the normal busy case. Herdr does not currently offer an
+atomic prompt-if-settled precondition, so a narrow state transition between the
+snapshot and prompt remains possible; solve that in Herdr rather than adding a
+second queue or cross-process scheduler here.
 The receiving agent should inspect the affected existing goals and watcher
 process with its available tools, repair what current authority permits, and
 ask only for genuinely missing credentials or authority. This is an ordinary
