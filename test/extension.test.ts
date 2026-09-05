@@ -4992,6 +4992,16 @@ test("an invalid global result has no partial routing", async (t) => {
   assert.match(invalidDeadline.content[0].text, /No global review result was recorded/);
   assert.match(invalidDeadline.content[0].text, /retry in this turn/);
 
+  const invalidGoalId = await pi.tools.get("supervisor_global_result").execute("invalid-goal-id", {
+    summary: "The finding has an empty goal ID.",
+    findings: [{ problem: "Check the goal", evidence: ["The goal ID is empty"], affected_goal_ids: [""] }],
+    reconsider: [],
+  });
+  assert.equal(invalidGoalId.isError, true);
+  assert.match(invalidGoalId.content[0].text, /goal IDs must not be empty/);
+  assert.match(invalidGoalId.content[0].text, /No global review result was recorded/);
+  assert.match(invalidGoalId.content[0].text, /retry in this turn/);
+
   const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
     summary: "One reference is invalid.",
     findings: [{ problem: "Check both", evidence: ["one is unknown"], affected_goal_ids: ["g_test", "g_unknown"] }],

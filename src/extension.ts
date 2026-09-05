@@ -1314,10 +1314,10 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       findings: Type.Array(Type.Object({
         problem: Type.String({ minLength: 1, maxLength: 2000 }),
         evidence: Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { minItems: 1, maxItems: 8 }),
-        affected_goal_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
+        affected_goal_ids: Type.Array(Type.String(), { minItems: 1, maxItems: 10 }),
       }), { maxItems: 10 }),
       reconsider: Type.Array(Type.Object({
-        goal_id: Type.String({ minLength: 1 }),
+        goal_id: Type.String(),
         reason: Type.String({ minLength: 1, maxLength: 2000 }),
       }), { maxItems: 10 }),
       next_review_at: Optional(Type.String({ minLength: 1 })),
@@ -1344,6 +1344,10 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
         ...params.findings.flatMap((finding) => finding.affected_goal_ids),
         ...params.reconsider.map((item) => item.goal_id),
       ]);
+      const invalidGoalIds = [...referenced].filter((goalId) => !goalId.trim());
+      if (invalidGoalIds.length) {
+        return retryableResultError("Global result goal IDs must not be empty.");
+      }
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
         return retryableResultError(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}.`);
