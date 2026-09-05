@@ -134,6 +134,14 @@ test("optional supervisor tool fields accept null without placeholder values", (
 
   assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
   assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
+  assert.match(
+    JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
+    /verified automatic callback with no concrete near-term transition, use null/,
+  );
+  assert.match(
+    JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
+    /do not reuse a prior arbitrary safety deadline/,
+  );
 
   const startGoal = Compile(pi.tools.get("supervisor_start_goal").parameters);
   assert.equal(startGoal.Check({
@@ -1788,7 +1796,10 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /provider rejection without delaying unaffected work/);
   assert.match(result.systemPrompt, /stop speculative new work while still validating every ready change/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
-  assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
+  assert.match(result.systemPrompt, /Keep an evidence-specific deadline for a concrete near-term transition/);
+  assert.match(result.systemPrompt, /verifies an automatic external callback but no concrete near-term transition exists/);
+  assert.match(result.systemPrompt, /pass null for review_at so the runtime uses its normal low-frequency safety interval/);
+  assert.match(result.systemPrompt, /callback still wakes the worker immediately/);
   assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);

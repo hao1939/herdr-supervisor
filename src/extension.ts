@@ -1480,7 +1480,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       waiting_for: Optional(Type.String({ minLength: 1, description: "Concrete peer or external condition that can resume a settled worker. Use null when the worker is actively working." })),
       waiting_on_pane: Optional(Type.String({ minLength: 1, description: "Exact different supervised worker this wait depends on. Its reviews receive this condition so the model can wake this goal only when materially affected. Use null for self or external waits." })),
       evidence: Evidence,
-      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. Use null for the normal interval." })),
+      review_at: Optional(Type.String({ minLength: 1, description: "Optional evidence-appropriate ISO 8601 safety-check time no more than 24 hours ahead. Peer decisions and watched changes wake earlier. For a verified automatic callback with no concrete near-term transition, use null for the normal interval; do not reuse a prior arbitrary safety deadline." })),
     }),
     executionMode: "sequential",
     async execute(_id, params) {
