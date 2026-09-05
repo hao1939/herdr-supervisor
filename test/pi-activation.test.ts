@@ -119,7 +119,13 @@ async function supervisorSessionHandler(goals: string, { restored = false } = {}
   }
 }
 
-async function emitSupervisorSession(handler, paneId: string, sessionFile: string, sessionId = "session-id") {
+async function emitSupervisorSession(
+  handler,
+  paneId: string,
+  sessionFile: string,
+  sessionId = "session-id",
+  reason = "startup",
+) {
   await writeFile(sessionFile, `${JSON.stringify({
     type: "session",
     version: 3,
@@ -130,7 +136,7 @@ async function emitSupervisorSession(handler, paneId: string, sessionFile: strin
   const previousPane = process.env.HERDR_PANE_ID;
   process.env.HERDR_PANE_ID = paneId;
   try {
-    await handler({}, {
+    await handler({ reason }, {
       sessionManager: {
         getSessionFile: () => sessionFile,
         getSessionId: () => sessionId,
@@ -228,7 +234,8 @@ test("a former supervisor cannot reclaim ownership after an explicit transfer", 
 
   await emitSupervisorSession(oldHandler, "w1:p2", oldSession, "old-session");
   await emitSupervisorSession(newHandler, "w1:p9", newSession, "new-session");
-  await emitSupervisorSession(oldHandler, "w1:p2", laterOldSession, "later-old-session");
+  const recreatedOldHandler = await supervisorSessionHandler(state.goals);
+  await emitSupervisorSession(recreatedOldHandler, "w1:p2", laterOldSession, "later-old-session", "resume");
 
   assert.equal(
     await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
@@ -257,7 +264,7 @@ test("an unsuccessful initial marker update remains retryable", async (t) => {
   const state = await wrapperFixture(t);
   const handler = await supervisorSessionHandler(state.goals);
   await emitSupervisorSession(handler, "w1:p2", join(state.root, "invalid.jsonl"), "");
-  await emitSupervisorSession(handler, "w1:p2", join(state.root, "valid.jsonl"), "valid-session");
+  await emitSupervisorSession(handler, "w1:p2", join(state.root, "valid.jsonl"), "valid-session", "reload");
 
   assert.equal(
     await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),

@@ -44,15 +44,14 @@ async function rememberSupervisorSession(ctx, mayTransfer) {
 
 export default function explicitSupervisor(pi, services) {
   const restored = process.env.HERDR_SUPERVISOR_RESTORED === "1";
-  let initialSession = true;
-  pi.on("session_start", async (_event, ctx) => {
-    const mayTransfer = initialSession && !restored;
-    initialSession = false;
+  let retryInitialClaim = false;
+  pi.on("session_start", async (event, ctx) => {
+    const mayTransfer = (event.reason === "startup" && !restored) || retryInitialClaim;
     let remembered = false;
     try {
       remembered = await rememberSupervisorSession(ctx, mayTransfer);
     } finally {
-      if (mayTransfer && !remembered) initialSession = true;
+      retryInitialClaim = mayTransfer && !remembered;
     }
   });
   return herdrSupervisor(pi, services);
