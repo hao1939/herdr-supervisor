@@ -151,10 +151,8 @@ transaction across goal files and Herdr worker creation.
 The dedicated Pi explicitly loads `container/supervisor-extension.ts` through
 Pi's existing `-e` option. The container does not install that extension into
 auto-discovery, so ordinary Pi sessions do not read goals, subscribe to Herdr,
-schedule reviews, alter model context, or expose supervisor tools. Startup
-removes only the known legacy container-managed discovery symlink, preserving
-operator-owned entries.
-Herdr restores native Pi sessions without their original extension arguments, so
+schedule reviews, alter model context, or expose supervisor tools. Herdr
+restores native Pi sessions without their original extension arguments, so
 the explicit container extension records its Herdr pane ID and native Pi session
 after the session starts. A later native resume reapplies the entry only when
 both the durable pane and native session match; every other pane remains
@@ -162,13 +160,9 @@ ordinary. Keep one supervisor active per goal-store root. Moving that role means
 stopping the old Pi before explicitly starting its replacement; concurrent
 supervisors are deliberately not coordinated. This preserves explicit selection
 across process and container restarts without global discovery, another daemon,
-or a second supervisor state model.
-
-The old container entry point and former direct `src/extension.ts` entry fail
-before installing supervisor tools if a stale link or launch command still
-references either one. Do not install the active extension
-into user-wide or project discovery or default Pi settings. This keeps explicit
-activation at the loading boundary, without adding a replacement mode or flag.
+or a second supervisor state model. Do not install the active extension into
+user-wide or project discovery or default Pi settings. Explicit `-e` loading is
+the only supervisor activation path.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -321,8 +315,7 @@ can tune it when their event reliability or recovery needs differ.
 A running supervisor follows this one execution path. There are no observe,
 dry-run, or live modes. Use existing status and logs for inspection and isolated
 tests for validation. Goal authority, exact worker identity, action locks, and
-the review fence govern effects. Obsolete mode settings must be removed before
-startup; a formerly passive configuration must never silently enable actions.
+the review fence govern effects.
 
 ## Decisions
 
