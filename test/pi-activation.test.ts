@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -88,24 +87,12 @@ async function wrapperFixture(t) {
   return { root, goals, invoke };
 }
 
-async function markerToken(goals: string) {
-  return createHash("sha256")
-    .update(await readFile(join(goals, ".supervisor", "pane-id"), "utf8"))
-    .digest("hex");
-}
-
-async function supervisorSessionHandler(goals: string, { restored = false, restoredToken = "" } = {}) {
+async function supervisorSessionHandler(goals: string, { restored = false } = {}) {
   const previousGoals = process.env.HERDR_SUPERVISOR_GOALS;
   const previousRestored = process.env.HERDR_SUPERVISOR_RESTORED;
-  const previousRestoreToken = process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
   process.env.HERDR_SUPERVISOR_GOALS = goals;
-  if (restored) {
-    process.env.HERDR_SUPERVISOR_RESTORED = "1";
-    process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256 = restoredToken;
-  } else {
-    delete process.env.HERDR_SUPERVISOR_RESTORED;
-    delete process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
-  }
+  if (restored) process.env.HERDR_SUPERVISOR_RESTORED = "1";
+  else delete process.env.HERDR_SUPERVISOR_RESTORED;
   try {
     const handlers = [];
     const pi = new Proxy({
@@ -129,8 +116,6 @@ async function supervisorSessionHandler(goals: string, { restored = false, resto
     else process.env.HERDR_SUPERVISOR_GOALS = previousGoals;
     if (previousRestored === undefined) delete process.env.HERDR_SUPERVISOR_RESTORED;
     else process.env.HERDR_SUPERVISOR_RESTORED = previousRestored;
-    if (previousRestoreToken === undefined) delete process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
-    else process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256 = previousRestoreToken;
   }
 }
 
@@ -260,74 +245,19 @@ test("a former supervisor cannot reclaim ownership after an explicit transfer", 
 
 test("a delayed restored supervisor cannot overwrite a newer explicit owner", async (t) => {
   const state = await wrapperFixture(t);
+  const restoredHandler = await supervisorSessionHandler(state.goals, { restored: true });
   const explicitHandler = await supervisorSessionHandler(state.goals);
   const oldSession = join(state.root, "old.jsonl");
   const newSession = join(state.root, "new.jsonl");
 
   await recordSupervisorSession(state.goals, "w1:p2", oldSession, "old-session");
-  const restoredHandler = await supervisorSessionHandler(state.goals, {
-    restored: true,
-    restoredToken: await markerToken(state.goals),
-  });
   await emitSupervisorSession(explicitHandler, "w1:p9", newSession, "new-session");
-  await assert.rejects(
-    emitSupervisorSession(restoredHandler, "w1:p2", oldSession, "old-session"),
-    /Restored supervisor marker changed before activation/,
-  );
+  await emitSupervisorSession(restoredHandler, "w1:p2", oldSession, "old-session");
 
   assert.equal(
     await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
     `w1:p9\n${newSession}\nnew-session\n`,
   );
-});
-
-test("a stale restored activation fails before installing supervisor core", async (t) => {
-  const state = await wrapperFixture(t);
-  const oldSession = join(state.root, "old.jsonl");
-  const newSession = join(state.root, "new.jsonl");
-  await recordSupervisorSession(state.goals, "w1:p2", oldSession, "old-session");
-  const oldToken = await markerToken(state.goals);
-  await recordSupervisorSession(state.goals, "w1:p9", newSession, "new-session");
-
-  const previousGoals = process.env.HERDR_SUPERVISOR_GOALS;
-  const previousRestored = process.env.HERDR_SUPERVISOR_RESTORED;
-  const previousRestoreToken = process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
-  process.env.HERDR_SUPERVISOR_GOALS = state.goals;
-  process.env.HERDR_SUPERVISOR_RESTORED = "1";
-  process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256 = oldToken;
-  try {
-    let registeredTools = 0;
-    let registeredHandlers = 0;
-    const pi = new Proxy({
-      getActiveTools: () => [],
-      getFlag: () => undefined,
-      on() {
-        registeredHandlers += 1;
-      },
-      registerTool() {
-        registeredTools += 1;
-      },
-    }, {
-      get(target, property) {
-        if (property in target) return target[property];
-        return () => undefined;
-      },
-    });
-    const { default: explicitSupervisor } = await import(`${pathToFileURL(activeExtension).href}?marker=${Date.now()}-${Math.random()}`);
-    assert.throws(
-      () => explicitSupervisor(pi),
-      /Restored supervisor marker changed before activation/,
-    );
-    assert.equal(registeredTools, 0);
-    assert.equal(registeredHandlers, 0);
-  } finally {
-    if (previousGoals === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousGoals;
-    if (previousRestored === undefined) delete process.env.HERDR_SUPERVISOR_RESTORED;
-    else process.env.HERDR_SUPERVISOR_RESTORED = previousRestored;
-    if (previousRestoreToken === undefined) delete process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
-    else process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256 = previousRestoreToken;
-  }
 });
 
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {

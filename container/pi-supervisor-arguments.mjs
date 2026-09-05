@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "@earendil-works/pi-coding-agent";
@@ -37,8 +36,7 @@ if (valid
   && !parsed.extensions?.includes(supervisorExtension)
   && Boolean(parsed.session) !== Boolean(parsed.sessionId)) {
   try {
-    const marker = readFileSync(markerFile, "utf8");
-    const [markerPane, markerSessionFile, markerSessionId] = marker.split(/\r?\n/);
+    const [markerPane, markerSessionFile, markerSessionId] = readFileSync(markerFile, "utf8").split(/\r?\n/);
     if (markerPane === paneId && markerSessionFile && markerSessionId && sessionFileId(markerSessionFile) === markerSessionId) {
       if (parsed.sessionId) {
         restore = parsed.sessionId === markerSessionId;
@@ -48,14 +46,10 @@ if (valid
         restore = resolve(cwd, parsed.session) === markerSessionFile;
       }
     }
-    if (restore) {
-      process.stdout.write(`${createHash("sha256").update(marker).digest("hex")}\n`);
-      process.exit(0);
-    }
   } catch {
     // A missing or concurrently replaced marker fails closed. The next native
     // restart can retry from the durable session marker.
   }
 }
 
-process.stdout.write("0\n");
+process.stdout.write(restore ? "1\n" : "0\n");

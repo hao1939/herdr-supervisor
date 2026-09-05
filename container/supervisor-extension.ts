@@ -1,6 +1,4 @@
 // Explicit entry point for the one dedicated supervisor Pi session.
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
@@ -45,26 +43,9 @@ async function rememberSupervisorSession(ctx, mayTransfer) {
 
 export default function explicitSupervisor(pi, services) {
   const restored = process.env.HERDR_SUPERVISOR_RESTORED === "1";
-  function assertRestoredMarkerCurrent() {
-    if (!restored) return;
-    const expected = process.env.HERDR_SUPERVISOR_RESTORE_MARKER_SHA256;
-    const actual = createHash("sha256").update(readFileSync(supervisorPaneFile, "utf8")).digest("hex");
-    if (!expected || actual !== expected) {
-      throw new Error("Restored supervisor marker changed before activation; starting ordinary Pi.");
-    }
-  }
-
-  assertRestoredMarkerCurrent();
   pi.on("session_start", async (event, ctx) => {
-    if (restored && event.reason === "startup") {
-      assertRestoredMarkerCurrent();
-      return;
-    }
     const mayTransfer = event.reason === "startup" && !restored;
     await rememberSupervisorSession(ctx, mayTransfer);
   });
-  return herdrSupervisor(pi, {
-    ...services,
-    beforeSessionStart: restored ? assertRestoredMarkerCurrent : services?.beforeSessionStart,
-  });
+  return herdrSupervisor(pi, services);
 }

@@ -160,7 +160,6 @@ function exactSessionAgent(snapshot, session) {
 
 type SupervisorServices = {
   loadGoals?: typeof loadSupervisorGoals;
-  beforeSessionStart?: () => void | Promise<void>;
   workerEventSettleMs?: number;
 };
 
@@ -2195,7 +2194,6 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await services.beforeSessionStart?.();
     shuttingDown = false;
     globalState = await loadGlobalReviewState();
     const goals = await activeBindings();
