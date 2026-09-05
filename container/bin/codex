@@ -35,9 +35,19 @@ for argument in "$@"; do
   then
     has_project_trust=1
   fi
+  if { [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; } &&
+    case "$argument" in check_for_update_on_startup=*) true ;; *) false ;; esac
+  then
+    echo "herdr-supervisor: check_for_update_on_startup is managed by the container image" >&2
+    exit 2
+  fi
   case "$argument" in
     -c=tui.resume_cwd=*|--config=tui.resume_cwd=*) has_resume_cwd=1 ;;
     -c=projects=*|--config=projects=*|-c=projects.*.trust_level=*|--config=projects.*.trust_level=*) has_project_trust=1 ;;
+    -c=check_for_update_on_startup=*|--config=check_for_update_on_startup=*)
+      echo "herdr-supervisor: check_for_update_on_startup is managed by the container image" >&2
+      exit 2
+      ;;
   esac
   previous="$argument"
 done
