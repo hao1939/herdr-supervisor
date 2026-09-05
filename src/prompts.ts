@@ -13,7 +13,7 @@ const workerExecutionBoundary = [
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",
-  "Pending review, validation, or peer state is one workstream, not the goal. Start each ready, nonduplicate validation and keep other useful work moving. Preserve any concrete provider failure verbatim.",
+  "Pending review, validation, or peer state is one workstream, not the goal. Submit each ready, nonduplicate validation without waiting for another run to finish; the provider schedules and queues it. Keep other useful work moving. Preserve any concrete provider rejection verbatim.",
   "When no safe work remains, report the resume condition and let the native Goal block/stall. This parks execution; the durable goal stays active. Do not poll or reread until a fresh event/check; then reread authority once, even if unchanged.",
   "Do not assume that authentication in one host, container, identity, or service changes another.",
   "For code changes, review the exact final diff, run the required tests, and resolve applicable review findings before claiming completion. CI, live validation, and independent review count only when the goal requires them and the evidence matches the current candidate revision.",
