@@ -94,8 +94,8 @@ test("global review routes an actionable finding into ordinary focused review", 
 
   assert.match(message, /Findings report facts; reconsider routes action/);
   assert.match(message, /Record exactly one successful result with supervisor_global_result/);
-  assert.match(message, /no result was recorded, correct the inputs and retry in this turn/);
-  assert.match(message, /a result was or may have been recorded, follow the error's recovery instruction/);
+  assert.match(message, /rejects a result before routing worker action, correct it and retry in this turn/);
+  assert.match(message, /never repeat a successful result/);
   assert.match(message, /Do not merely repeat an actionable finding/);
   assert.match(message, /put that exact fact and goal in reconsider/);
   assert.match(message, /ask the human one concrete question when durable authority is needed/);

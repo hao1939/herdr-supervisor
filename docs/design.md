@@ -206,8 +206,8 @@ The supervisor sleeps otherwise. It does not poll workers or providers. The
 optional shared watcher performs bounded provider reads without model turns.
 The low-frequency global review remains a safety net for missed system-level
 events, not the primary way to discover facts that a cheap observer can report.
-Its result is applied once: a failure before the state changes explicitly permits
-a corrected retry because persistence precedes worker routing. Once routing
+Its result is applied once: a failure before worker routing explicitly permits
+a corrected retry because persistence precedes that routing. Once routing
 begins, the in-memory decision fence prevents a same-turn repeat. Later finding
 display failure is reported as a warning and never reopens routing. No separate
 recovery state is needed.
