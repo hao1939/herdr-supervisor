@@ -113,3 +113,51 @@ The regression exercises this exact sequence: reject a replaced peer without
 changing the checkpoint, restore the exact idle peer, queue its reconsideration,
 record the real peer wait, and dispatch the peer review only after settlement.
 There is no new queue, state field, dependency scheduler, or recovery path.
+
+## Third live pass
+
+Candidate `58e44c3` passed `npm run check` and all 308 tests, then was loaded by
+`/reload` in the same Pi session. The ordinary startup review observed the
+reviewer's pending result. At 07:32:50 UTC it successfully recorded reviewer
+checkpoint revision 69 with the real producer goal as its peer dependency.
+It did not request immediate producer reconsideration. The producer's existing
+07:36 UTC bounded review remained the next wake; this tests that safety path
+without another manual prompt or a new scheduling feature.
+
+At 07:36:08 UTC the existing deadline automatically opened the producer review.
+The supervisor recognized the old lifecycle blocker as stale from current peer
+context and used the normal steer action at 07:36:24. The exact producer native
+session resumed, checkpoint revision 134 cleared the obsolete wait, and the
+producer actually inspected the reviewer commit, its direct-parent lineage,
+full patch, finding dispositions, and local validation instructions. No further
+human or management prompt was sent after the candidate reload.
+
+This proves eventual handoff through the existing bounded path, not immediate
+peer reconsideration: the accepted wait preceded continuation by about
+3 minutes 35 seconds. That delay is visible and acceptable for this local
+baseline; this experiment does not prove optimal scheduling or long-run Scout
+research quality. The standing workers continue to own integration and later
+research. Reopen improvement work if delays materially hurt throughput or the
+same evidence stops producing useful action; do not preemptively add a
+dependency scheduler.
+
+## Scope and remaining limits
+
+The runtime-source diff is a net reduction of 27 lines. There is one execution
+path, no new persisted field, and no speculative progress metric or dependency
+mechanism. The original repository and its unrelated changes were not edited;
+the implementation lives on `refactor/simple-supervision-loop` in the isolated
+worktree loaded by the local supervisor. Nothing was pushed or deployed
+remotely.
+
+Goal-read failures and routing isolation were exercised in temporary test
+stores, not by corrupting the live experiment. A read-only snapshot of the real
+store showed checkpoint age and no unreadable goals. The periodic global model
+review was not due during this experiment, so its live handling of a corrupt
+goal is not claimed as proven.
+
+Both portable contract hashes remained identical to the baseline, both worker
+native sessions were retained, and neither standing goal was completed. The
+existing Herdr limitation around identity-conditioned TUI writes is unchanged.
+The reload-time display-name `write EPIPE` warning recurred but did not prevent
+the subsequent focused review; no recovery subsystem was added for it.
