@@ -311,7 +311,9 @@ Container restoration preserves every native session but automatically resumes
 a native Goal only when exactly one active canonical goal owns that Codex
 session and its binding names the restoring Herdr pane. A terminal, unknown,
 duplicate, mismatched, or unreadable binding stays at Codex's ordinary
-paused-goal gate. This keeps
+paused-goal gate. Because the container image pins the Codex version, its
+wrapper disables Codex's startup update check; an upgrade prompt must never
+interpose itself before exact-session recovery. This keeps
 interrupted work moving without reactivating accepted or explicitly stopped
 outcomes, and adds no restore state outside the existing goal record.
 
