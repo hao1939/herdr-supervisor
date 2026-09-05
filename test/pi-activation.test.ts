@@ -67,7 +67,7 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
   assert.equal(oldDirectLoad.extensions.length, 0);
   assert.equal(oldDirectLoad.errors.length, 1);
   assert.match(oldDirectLoad.errors[0].error, /Direct supervisor loading was removed/);
-  assert.match(oldDirectLoad.errors[0].error, /checkout's container\/supervisor-extension\.ts/);
+  assert.match(oldDirectLoad.errors[0].error, /Source checkout: pi -e \/path\/to\/herdr-supervisor\/container\/supervisor-extension\.ts/);
   assert.match(oldDirectLoad.errors[0].error, /\/opt\/herdr-supervisor\/container\/supervisor-extension\.ts/);
 
   // additionalExtensionPaths is the same resource-loader input used by Pi's -e.
@@ -92,7 +92,7 @@ test("a preserved discovery entry to the former direct entry point fails closed"
   assert.equal(ordinary.extensions.length, 0);
   assert.equal(ordinary.errors.length, 1);
   assert.match(ordinary.errors[0].error, /Direct supervisor loading was removed/);
-  assert.match(ordinary.errors[0].error, /container\/supervisor-extension\.ts/);
+  assert.match(ordinary.errors[0].error, /Source checkout: pi -e \/path\/to\/herdr-supervisor\/container\/supervisor-extension\.ts/);
 });
 
 test("container upgrades remove only the known managed supervisor discovery link", async (t) => {

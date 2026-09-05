@@ -165,7 +165,7 @@ type SupervisorServices = {
 };
 
 export default function removedDirectLoad() {
-  throw new Error("Direct supervisor loading was removed. Start the dedicated Pi with the checkout's container/supervisor-extension.ts (container path: /opt/herdr-supervisor/container/supervisor-extension.ts). Remove supervisor auto-discovery and default-extension entries.");
+  throw new Error("Direct supervisor loading was removed. Source checkout: pi -e /path/to/herdr-supervisor/container/supervisor-extension.ts. Container: pi -e /opt/herdr-supervisor/container/supervisor-extension.ts. Remove supervisor auto-discovery and default-extension entries.");
 }
 
 export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
