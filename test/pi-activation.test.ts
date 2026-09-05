@@ -67,6 +67,8 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
   assert.equal(oldDirectLoad.extensions.length, 0);
   assert.equal(oldDirectLoad.errors.length, 1);
   assert.match(oldDirectLoad.errors[0].error, /Direct supervisor loading was removed/);
+  assert.match(oldDirectLoad.errors[0].error, /checkout's container\/supervisor-extension\.ts/);
+  assert.match(oldDirectLoad.errors[0].error, /\/opt\/herdr-supervisor\/container\/supervisor-extension\.ts/);
 
   // additionalExtensionPaths is the same resource-loader input used by Pi's -e.
   const dedicated = await loadPi(fixtureState.root, fixtureState.agentDir, [activeExtension]);
