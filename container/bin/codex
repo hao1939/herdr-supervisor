@@ -18,17 +18,21 @@ has_resume_cwd=0
 after_resume=0
 resume_arguments=0
 resume_session=""
+scan_managed_options=1
 for argument in "$@"; do
-  if [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; then
-    reject_managed_update_override "$argument"
+  if [ "$scan_managed_options" -eq 1 ]; then
+    if [ "$previous" = "-c" ] || [ "$previous" = "--config" ]; then
+      reject_managed_update_override "$argument"
+    fi
+    case "$argument" in
+      --) scan_managed_options=0 ;;
+      -c?*)
+        config_override=${argument#-c}
+        reject_managed_update_override "${config_override#=}"
+        ;;
+      --config=*) reject_managed_update_override "${argument#--config=}" ;;
+    esac
   fi
-  case "$argument" in
-    -c?*)
-      config_override=${argument#-c}
-      reject_managed_update_override "${config_override#=}"
-      ;;
-    --config=*) reject_managed_update_override "${argument#--config=}" ;;
-  esac
   if [ "$after_resume" -eq 1 ]; then
     if [ "$resume_arguments" -eq 0 ]; then
       resume_session=$argument

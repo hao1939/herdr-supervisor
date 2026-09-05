@@ -192,6 +192,15 @@ test("unrelated caller configuration remains authoritative", async () => {
   ]);
 });
 
+test("the end-of-options marker leaves following text to Codex", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["--", "-ccheck_for_update_on_startup=true"]), [
+    ...managedUpdateConfig,
+    "--",
+    "-ccheck_for_update_on_startup=true",
+  ]);
+});
+
 test("the wrapper preserves native Codex Goals", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["--enable", "goals", "Start work."]), [
