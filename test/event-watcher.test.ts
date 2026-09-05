@@ -2223,6 +2223,27 @@ test("watcher diagnostics fail closed when the supervisor is ambiguous", async (
   );
 });
 
+test("watcher diagnostics retry instead of stranding input in a busy Pi supervisor", async () => {
+  const calls = [];
+  const diagnose = herdrSupervisorDiagnostic({
+    request: async (method, params) => {
+      calls.push([method, params]);
+      return { snapshot: { agents: [{
+        agent: "pi",
+        agent_status: "working",
+        pane_id: "w1:p2",
+        agent_session: { source: "herdr:pi", agent: "pi", kind: "path", value: "/session" },
+      }] } };
+    },
+  });
+
+  await assert.rejects(
+    diagnose({ message: "provider warning", observedAt: "2026-09-05T08:00:00.000Z" }),
+    /supervisor is working.*retry on the next scan/,
+  );
+  assert.equal(calls.filter(([method]) => method === "agent.prompt").length, 0);
+});
+
 test("GitHub discovery refreshes every remembered pull request within a few bounded scans", async () => {
   const known = Array.from({ length: 25 }, (_, index) => ({
     subject: `owner/repo#${index + 1}`,

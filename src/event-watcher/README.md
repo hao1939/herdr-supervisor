@@ -279,6 +279,10 @@ Failed change or stale delivery remains pending and retries after a later
 successful current observation of that resource; bounded refresh means this
 may be later than the next scan. Both failure kinds are sent as diagnostics to
 the one Pi supervisor.
+If Pi is already working, the watcher does not place diagnostic text in its
+composer. The existing diagnostic path retries on a later scan, after Pi has
+settled, so an accepted prompt means an actionable supervisor turn rather than
+stranded input.
 The receiving agent should inspect the affected existing goals and watcher
 process with its available tools, repair what current authority permits, and
 ask only for genuinely missing credentials or authority. This is an ordinary
