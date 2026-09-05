@@ -800,7 +800,10 @@ ready change still gets validated.
   failure the human may simply resend the request.
 - A low-frequency system health check sees every unfinished goal, including
   saved contracts that have no local worker. It reports cross-goal or unstarted
-  problems and may wake ordinary focused reviews; it never acts on workers.
+  problems and routes each actionable active-goal fact into an ordinary focused
+  review; it never acts on workers. It leaves reconsideration empty only when
+  no fresh goal decision is needed, such as when an existing focused review or
+  bounded wait already covers the finding.
 - A small local checkpoint suppresses repeated identical health findings. The
   check is another observation source feeding the same goal loop, not a second
   kind of supervision.
