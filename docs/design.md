@@ -774,14 +774,12 @@ the remedy belongs in knowledge rather than another mechanism.
 Workers run concurrently. The one supervisor session makes one semantic
 decision at a time.
 
-Submit every ready, nonduplicate validation without waiting for another run to
-finish. The provider schedules and queues submitted work; the Supervisor does
-not hold a local place or delay unrelated work. A submitted run is useful
-execution progress, but it is not completion proof. Delay only the exact
-operation with a destructive or shared-resource conflict. If the provider
-rejects a submission, preserve that fact and continue unaffected work. Asking
-the portfolio to focus on existing work limits speculative new work; every
-ready change still gets validated.
+Submit every ready, nonduplicate validation independently; do not wait for
+another run to finish. A submitted run is useful execution progress, but it is
+not completion proof. Delay only the exact operation with a destructive or
+shared-resource conflict. If the provider rejects a submission, preserve that
+fact and continue unaffected work. Asking the portfolio to focus on existing
+work limits speculative new work; every ready change still gets validated.
 
 - Each worker has at most one pending in-memory review signal.
 - Repeated signals coalesce because the review rereads authoritative state.
