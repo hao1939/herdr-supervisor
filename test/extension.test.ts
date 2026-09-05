@@ -532,7 +532,7 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Keep terminal output bounded/);
   assert.match(deliveredPrompts[0].prompt, /save raw evidence in goal-owned files/);
   assert.match(deliveredPrompts[0].prompt, /other workers' worktrees are read-only/);
-  assert.match(deliveredPrompts[0].prompt, /Use a goal-owned worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Use another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /Handoffs stay local/);
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
