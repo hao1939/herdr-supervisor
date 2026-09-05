@@ -72,9 +72,44 @@ available without a new runtime mechanism.
 
 ## Guidance adjustment
 
-The next candidate adds one short supervisor rule: before extending a peer
+Candidate `39902f3` adds one short supervisor rule: before extending a peer
 wait, inspect current peer status and reconsider pending peer work through the
 existing action. A settled process or absent new output from the waiting worker
 does not prove that the peer condition stayed unchanged. Prior waits and
 one-turn steering do not create new durable restrictions. The design now makes
 the same distinction. No scheduling or persisted state was added.
+
+Pi's native `/reload` loaded this candidate into the same supervisor session at
+07:23 UTC. The reload receipt was visible. One display-name refresh reported
+`write EPIPE`; worker execution continued, so this did not justify another
+recovery path. The full Supervisor suite still passed (308 tests).
+
+The reviewer confirmed that both earlier reviewer commits were contained
+verbatim in the producer tip. The remaining successor was documentation-only,
+so it checked exact lineage and current-tip behavior in a reviewer-owned
+worktree. At 07:26 UTC it reported the full Scout gate passing: 312 tests,
+1,533 assertions, zero failures, 110 scoped links, and navigation checks of
+11/14, 8/8, and 14/14. This is actual worker progress, not merely a scheduled
+reconsideration receipt.
+
+## Second live pass: remove a conflicting guard
+
+The reviewer committed result `8f5b1a46665d6618b45624bdf8ae38a56875bb86`, a direct
+child of reviewed producer tip `764cb00e…`. Its completion event automatically
+woke the supervisor at 07:29:30 UTC. Both the first review and the existing
+bounded retry tried to record a peer wait on the settled producer; both were
+rejected. Neither routed the completed result onward. The guidance-only
+candidate was therefore insufficient.
+
+The rejected condition exposed a code-policy conflict: reconsideration queues
+the peer's review until the current turn ends, but the guard required the peer
+to be working before that turn could record its wait. Removed that activity
+requirement. Exact peer identity and bounded deadlines remain validated; the
+model judges whether a real peer condition is useful and requests existing
+reconsideration. Guidance now covers creating as well as extending waits and
+describes one successful decision rather than one attempted call.
+
+The regression exercises this exact sequence: reject a replaced peer without
+changing the checkpoint, restore the exact idle peer, queue its reconsideration,
+record the real peer wait, and dispatch the peer review only after settlement.
+There is no new queue, state field, dependency scheduler, or recovery path.

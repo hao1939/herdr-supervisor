@@ -553,6 +553,10 @@ promise to reconsider, not permission to forget the goal.
 
 For a peer wait, the existing status tool supplies current peer progress and
 reconsideration routes pending peer work through an ordinary focused review.
+Queue that reconsideration before recording the real peer condition. The peer
+need not already be working: its queued review runs after this review ends.
+Code validates peer identity, not whether the peer's current activity can
+eventually satisfy the condition; that remains the model's judgment.
 Silence from the waiting worker does not prove that the peer stayed unchanged.
 Recorded waits and earlier steering are execution context, not new lasting
 restrictions on the portable goal. Resolve these cases with existing facts and

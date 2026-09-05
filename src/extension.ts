@@ -1531,9 +1531,8 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           latestPeerAgent,
           findPane(latestSnapshot, latestPeer.paneId),
         );
-        if (!latestPeer || latestPeerProblem || latestPeerAgent?.agent_status !== "working") {
-          const peerState = latestPeerProblem || `worker is ${latestPeerAgent?.agent_status || "not running"}`;
-          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. An inactive peer cannot satisfy this condition; choose useful work that can proceed or name the real external blocker.`, true);
+        if (!latestPeer || latestPeerProblem) {
+          return text(`Cannot record this peer wait: ${latestPeerProblem || "the peer goal is no longer active"}. No action was applied; choose a valid decision from current evidence.`, true);
         }
         effectiveWaitingOnPane = latestPeer.paneId;
       }

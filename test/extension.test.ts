@@ -3189,7 +3189,7 @@ test("a native Goal resume that changes worker identity fails closed without a f
   pi.events.get("session_shutdown")();
 });
 
-test("a settled worker may wait on one explicit peer condition", async (t) => {
+test("a settled worker can record a peer wait and queue that idle peer's review", async (t) => {
   const root = await fixture();
   const peerWorker = {
     paneId: "w1:p7",
@@ -3208,6 +3208,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   });
   let prompts = 0;
   let peerStatus = "working";
+  let peerSession = peerWorker.agentSession;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [
       snapshot({ agent_status: "done", state_change_seq: 3 }).agents[0],
@@ -3216,7 +3217,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
         terminal_id: peerWorker.terminalId,
         agent_status: peerStatus,
         state_change_seq: 4,
-        agent_session: peerWorker.agentSession,
+        agent_session: peerSession,
       },
     ],
     panes: [
@@ -3235,15 +3236,25 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   peerStatus = "idle";
-  const convoy = await pi.tools.get("supervisor_leave").execute("leave-convoy", {
+  peerSession = { ...peerWorker.agentSession, value: "replacement_session" };
+  const before = (await loadSupervisorGoals(root)).active;
+  const mismatched = await pi.tools.get("supervisor_leave").execute("leave-replacement", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
-    waiting_for: "w1:p7 to prepare the shared fixture",
-    waiting_on_pane: "w1:p7",
+    waiting_for: "the shared fixture",
+    waiting_on_pane: peerWorker.paneId,
   });
-  assert.equal(convoy.isError, true);
-  assert.match(convoy.content[0].text, /inactive peer cannot satisfy this condition/);
-  peerStatus = "working";
+  assert.equal(mismatched.isError, true);
+  assert.match(mismatched.content[0].text, /worker value changed/);
+  assert.match(mismatched.content[0].text, /No action was applied/);
+  assert.deepEqual((await loadSupervisorGoals(root)).active, before);
+  peerSession = peerWorker.agentSession;
+  const reconsider = await pi.tools.get("supervisor_reconsider").execute("reconsider-peer", {
+    pane_ids: [peerWorker.paneId],
+    reason: "The local result is ready; the peer can prepare the shared fixture now.",
+  });
+  assert.equal(reconsider.isError, false);
+  assert.equal(pi.messages.length, 1);
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
@@ -3261,6 +3272,10 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   assert.equal(stored.wait.condition, "w1:p7 to report that the shared fixture is ready");
   assert.equal(stored.wait.goalId, "g_peer");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /g_peer/);
+  assert.match(pi.messages[1].content, /peer can prepare the shared fixture now/);
   pi.events.get("session_shutdown")();
 });
 
