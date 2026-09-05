@@ -173,6 +173,8 @@ test("callers cannot override the image-managed update setting", async () => {
   for (const args of [
     ["-c", "check_for_update_on_startup=true", "Start work."],
     ["--config", "check_for_update_on_startup=false", "Start work."],
+    ["-c", " check_for_update_on_startup = true", "Start work."],
+    ["-ccheck_for_update_on_startup=true", "Start work."],
     ["-c=check_for_update_on_startup=true", "Start work."],
     ["--config=check_for_update_on_startup=false", "Start work."],
   ]) {
