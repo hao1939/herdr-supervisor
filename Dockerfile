@@ -3,7 +3,6 @@ FROM node:26-bookworm-slim@sha256:367679cf9792759492a486e4aa4b421764d71a9546a6da
 ARG HERDR_VERSION=0.8.0
 ARG HERDR_SHA256_AMD64=b872ea7e40fa2cb17e857ac9b62b1bf26db7b403c622f5d2f3f5b35f6e9acd28
 ARG HERDR_SHA256_ARM64=f647ac66468d9efbc642fe534fb284468f0aea60641606fc008dfc0d82a3ca87
-ARG PI_VERSION=0.84.2
 ARG CODEX_VERSION=0.150.1
 ARG TARGETARCH
 
@@ -18,9 +17,7 @@ RUN apt-get update \
     && curl -fsSL "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-${herdr_arch}" -o /usr/local/bin/herdr \
     && echo "${herdr_sha}  /usr/local/bin/herdr" | sha256sum --check --strict - \
     && chmod 0755 /usr/local/bin/herdr \
-    && npm install --global \
-         "@earendil-works/pi-coding-agent@${PI_VERSION}" \
-         "@openai/codex@${CODEX_VERSION}" \
+    && npm install --global "@openai/codex@${CODEX_VERSION}" \
     && npm cache clean --force
 
 RUN mkdir -p /app /opt/herdr-supervisor \
@@ -34,7 +31,7 @@ RUN npm ci --prefix /opt/herdr-supervisor --omit=dev \
     && npm cache clean --force \
     && chmod 0755 /opt/herdr-supervisor/container/bin/codex /opt/herdr-supervisor/container/bin/pi /opt/herdr-supervisor/container/container-entrypoint.sh \
     && mv /usr/local/bin/codex /usr/local/bin/codex-agent \
-    && mv /usr/local/bin/pi /usr/local/bin/pi-agent \
+    && ln -s /opt/herdr-supervisor/node_modules/.bin/pi /usr/local/bin/pi-agent \
     && ln -s /opt/herdr-supervisor/container/bin/codex /usr/local/bin/codex \
     && ln -s /opt/herdr-supervisor/container/bin/pi /usr/local/bin/pi
 

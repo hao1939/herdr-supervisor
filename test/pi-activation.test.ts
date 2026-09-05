@@ -16,6 +16,7 @@ const legacyExtension = fileURLToPath(new URL("../container/pi-extension.ts", im
 const managedTarget = "/opt/herdr-supervisor/container/pi-extension.ts";
 const piWrapper = fileURLToPath(new URL("../container/bin/pi", import.meta.url));
 const containerActiveExtension = "/opt/herdr-supervisor/container/supervisor-extension.ts";
+const supervisorInstall = fileURLToPath(new URL("..", import.meta.url));
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "herdr-pi-activation-"));
@@ -78,6 +79,7 @@ async function wrapperFixture(t) {
       ...process.env,
       HERDR_PANE_ID: paneId,
       HERDR_SUPERVISOR_DIRECTORY: root,
+      HERDR_SUPERVISOR_INSTALL: supervisorInstall,
       HERDR_SUPERVISOR_GOALS: goals,
       ...env,
     },
@@ -85,11 +87,8 @@ async function wrapperFixture(t) {
   return { root, goals, invoke };
 }
 
-async function recordSupervisorSession(goals: string, paneId: string, sessionFile: string, sessionId = "session-id") {
-  await writeFile(sessionFile, "");
-  const previousPane = process.env.HERDR_PANE_ID;
+async function supervisorSessionHandler(goals: string) {
   const previousGoals = process.env.HERDR_SUPERVISOR_GOALS;
-  process.env.HERDR_PANE_ID = paneId;
   process.env.HERDR_SUPERVISOR_GOALS = goals;
   try {
     const handlers = [];
@@ -108,7 +107,19 @@ async function recordSupervisorSession(goals: string, paneId: string, sessionFil
     const { default: explicitSupervisor } = await import(`${pathToFileURL(activeExtension).href}?marker=${Date.now()}-${Math.random()}`);
     explicitSupervisor(pi);
     assert.ok(handlers.length >= 1);
-    await handlers[0]({}, {
+    return handlers[0];
+  } finally {
+    if (previousGoals === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousGoals;
+  }
+}
+
+async function emitSupervisorSession(handler, paneId: string, sessionFile: string, sessionId = "session-id") {
+  await writeFile(sessionFile, "");
+  const previousPane = process.env.HERDR_PANE_ID;
+  process.env.HERDR_PANE_ID = paneId;
+  try {
+    await handler({}, {
       sessionManager: {
         getSessionFile: () => sessionFile,
         getSessionId: () => sessionId,
@@ -117,9 +128,12 @@ async function recordSupervisorSession(goals: string, paneId: string, sessionFil
   } finally {
     if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
     else process.env.HERDR_PANE_ID = previousPane;
-    if (previousGoals === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
-    else process.env.HERDR_SUPERVISOR_GOALS = previousGoals;
   }
+}
+
+async function recordSupervisorSession(goals: string, paneId: string, sessionFile: string, sessionId = "session-id") {
+  const handler = await supervisorSessionHandler(goals);
+  await emitSupervisorSession(handler, paneId, sessionFile, sessionId);
 }
 
 test("ordinary Pi loads no supervisor; explicit Pi extension loading installs the single path", async (t) => {
@@ -193,6 +207,24 @@ test("an explicit move transfers restart ownership to the new supervisor pane", 
   assert.equal((await state.invoke("w1:p9", ["--session", "new.jsonl"])).stdout, `-e\n${containerActiveExtension}\n--session\nnew.jsonl\n`);
 });
 
+test("a former supervisor cannot reclaim ownership after an explicit transfer", async (t) => {
+  const state = await wrapperFixture(t);
+  const oldHandler = await supervisorSessionHandler(state.goals);
+  const newHandler = await supervisorSessionHandler(state.goals);
+  const oldSession = join(state.root, "old.jsonl");
+  const newSession = join(state.root, "new.jsonl");
+  const laterOldSession = join(state.root, "later-old.jsonl");
+
+  await emitSupervisorSession(oldHandler, "w1:p2", oldSession, "old-session");
+  await emitSupervisorSession(newHandler, "w1:p9", newSession, "new-session");
+  await emitSupervisorSession(oldHandler, "w1:p2", laterOldSession, "later-old-session");
+
+  assert.equal(
+    await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
+    `w1:p9\n${newSession}\nnew-session\n`,
+  );
+});
+
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
   const optionState = await wrapperFixture(t);
   await recordSupervisorSession(optionState.goals, "w1:p2", join(optionState.root, "saved.jsonl"));
@@ -218,6 +250,16 @@ test("wrapper recognizes extension options anywhere before the option boundary",
   await recordSupervisorSession(consumedOptionState.goals, "w1:p2", join(consumedOptionState.root, "model.jsonl"));
   const consumedOptionValue = await consumedOptionState.invoke("w1:p2", ["--model", "-e", containerActiveExtension, "--session", "model.jsonl"]);
   assert.equal(consumedOptionValue.stdout, `-e\n${containerActiveExtension}\n--model\n-e\n${containerActiveExtension}\n--session\nmodel.jsonl\n`);
+
+  const equalsState = await wrapperFixture(t);
+  await recordSupervisorSession(equalsState.goals, "w1:p2", join(equalsState.root, "equals.jsonl"));
+  const equalsForm = await equalsState.invoke("w1:p2", ["--session", "equals.jsonl", `--extension=${containerActiveExtension}`]);
+  assert.equal(equalsForm.stdout, `-e\n${containerActiveExtension}\n--session\nequals.jsonl\n--extension=${containerActiveExtension}\n`);
+
+  const optionValueState = await wrapperFixture(t);
+  await recordSupervisorSession(optionValueState.goals, "w1:p2", join(optionValueState.root, "value.jsonl"));
+  const optionValue = await optionValueState.invoke("w1:p2", ["--system-prompt", "-e", containerActiveExtension, "--session", "value.jsonl"]);
+  assert.equal(optionValue.stdout, `-e\n${containerActiveExtension}\n--system-prompt\n-e\n${containerActiveExtension}\n--session\nvalue.jsonl\n`);
 });
 
 test("wrapper restores only canonical session marker matches", async (t) => {
@@ -235,6 +277,12 @@ test("wrapper restores only canonical session marker matches", async (t) => {
 
   const noSession = await state.invoke("w1:p2", ["--no-session", "--session", "exact.jsonl"]);
   assert.equal(noSession.stdout, "--no-session\n--session\nexact.jsonl\n");
+
+  const metadataOnly = await state.invoke("w1:p2", ["--help", "--session", "exact.jsonl"]);
+  assert.equal(metadataOnly.stdout, "--help\n--session\nexact.jsonl\n");
+
+  const conflictingIdentity = await state.invoke("w1:p2", ["--session", "exact.jsonl", "--session-id", "exact-session"]);
+  assert.equal(conflictingIdentity.stdout, "--session\nexact.jsonl\n--session-id\nexact-session\n");
 });
 
 test("wrapper restores the caller umask before launching Pi", async (t) => {

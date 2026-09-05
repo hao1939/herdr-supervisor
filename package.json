@@ -29,11 +29,11 @@
     "node": ">=26"
   },
   "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.84.4",
     "proper-lockfile": "4.1.2",
     "typebox": "^1.1.38"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.2",
     "typescript": "^7.0.2"
   }
 }
