@@ -2,6 +2,11 @@
 set -eu
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
+supervisor_install="${HERDR_SUPERVISOR_INSTALL:-/opt/herdr-supervisor}"
+supervisor_extension="/opt/herdr-supervisor/container/supervisor-extension.ts"
+supervisor_argument_parser="${supervisor_install}/container/pi-supervisor-arguments.mjs"
+supervisor_goals="${HERDR_SUPERVISOR_GOALS:-${XDG_STATE_HOME:-/home/node/.local/state}/herdr-supervisor/goals}"
+supervisor_pane_file="${supervisor_goals}/.supervisor/pane-id"
 
 case "$supervisor_directory" in
   /*) ;;
@@ -10,6 +15,21 @@ case "$supervisor_directory" in
     exit 2
     ;;
 esac
+
+# Herdr restores a native Pi session but not the extension argument that gave
+# that session its supervisor role. Only the recorded pane is a candidate; Pi's
+# pinned parser and one marker snapshot then prove the exact session match.
+if [ -n "${HERDR_PANE_ID:-}" ] \
+  && [ -f "$supervisor_pane_file" ] \
+  && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ] \
+  && [ "$(node "$supervisor_argument_parser" \
+    "$supervisor_pane_file" \
+    "$HERDR_PANE_ID" \
+    "$supervisor_directory" \
+    "$supervisor_extension" \
+    "$@")" = 1 ]; then
+  set -- -e "$supervisor_extension" "$@"
+fi
 
 cd "$supervisor_directory"
 exec /usr/local/bin/pi-agent "$@"
