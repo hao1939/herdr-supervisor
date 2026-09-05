@@ -11,12 +11,13 @@ const supervisorPaneFile = join(supervisorGoals, ".supervisor", "pane-id");
 
 async function rememberSupervisorSession(ctx) {
   const paneId = process.env.HERDR_PANE_ID;
-  const sessionRef = ctx?.sessionManager?.getSessionFile?.() || ctx?.sessionManager?.getSessionId?.();
-  if (!paneId || !sessionRef || paneId.includes("\n") || sessionRef.includes("\n")) {
+  const sessionFile = ctx?.sessionManager?.getSessionFile?.();
+  const sessionId = ctx?.sessionManager?.getSessionId?.();
+  if (!paneId || !sessionFile || !sessionId || paneId.includes("\n") || sessionFile.includes("\n") || sessionId.includes("\n")) {
     return;
   }
   await mkdir(dirname(supervisorPaneFile), { recursive: true, mode: 0o700 });
-  await atomicReplaceFile(supervisorPaneFile, `${paneId}\n${sessionRef}\n`);
+  await atomicReplaceFile(supervisorPaneFile, `${paneId}\n${sessionFile}\n${sessionId}\n`);
 }
 
 export default function explicitSupervisor(pi, services) {

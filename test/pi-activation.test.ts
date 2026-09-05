@@ -82,10 +82,11 @@ async function wrapperFixture(t) {
       ...env,
     },
   });
-  return { goals, invoke };
+  return { root, goals, invoke };
 }
 
-async function recordSupervisorSession(goals: string, paneId: string, sessionRef: string) {
+async function recordSupervisorSession(goals: string, paneId: string, sessionFile: string, sessionId = "session-id") {
+  await writeFile(sessionFile, "");
   const previousPane = process.env.HERDR_PANE_ID;
   const previousGoals = process.env.HERDR_SUPERVISOR_GOALS;
   process.env.HERDR_PANE_ID = paneId;
@@ -109,7 +110,8 @@ async function recordSupervisorSession(goals: string, paneId: string, sessionRef
     assert.ok(handlers.length >= 1);
     await handlers[0]({}, {
       sessionManager: {
-        getSessionFile: () => sessionRef,
+        getSessionFile: () => sessionFile,
+        getSessionId: () => sessionId,
       },
     });
   } finally {
@@ -149,6 +151,7 @@ test("ordinary Pi loads no supervisor; explicit Pi extension loading installs th
 
 test("an explicitly chosen supervisor pane keeps its role across native Pi resume", async (t) => {
   const state = await wrapperFixture(t);
+  const savedSession = join(state.root, "saved.jsonl");
   const explicit = await state.invoke("w1:p2", ["--session", "saved.jsonl", "-e", containerActiveExtension, "--model", "test"]);
   assert.equal(explicit.stdout, `--session\nsaved.jsonl\n-e\n${containerActiveExtension}\n--model\ntest\n`);
   await assert.rejects(
@@ -156,8 +159,8 @@ test("an explicitly chosen supervisor pane keeps its role across native Pi resum
     { code: "ENOENT" },
   );
 
-  await recordSupervisorSession(state.goals, "w1:p2", "saved.jsonl");
-  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p2\nsaved.jsonl\n");
+  await recordSupervisorSession(state.goals, "w1:p2", savedSession);
+  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), `w1:p2\n${savedSession}\nsession-id\n`);
   assert.equal((await stat(join(state.goals, ".supervisor", "pane-id"))).mode & 0o777, 0o600);
 
   const resumed = await state.invoke("w1:p2", ["--session", "saved.jsonl"]);
@@ -172,46 +175,66 @@ test("an explicitly chosen supervisor pane keeps its role across native Pi resum
 
 test("the explicit supervisor entry records the native Pi session once it exists", async (t) => {
   const state = await wrapperFixture(t);
-  await recordSupervisorSession(state.goals, "w1:p2", "initial.jsonl");
-  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p2\ninitial.jsonl\n");
+  const initialSession = join(state.root, "initial.jsonl");
+  await recordSupervisorSession(state.goals, "w1:p2", initialSession, "initial-session");
+  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), `w1:p2\n${initialSession}\ninitial-session\n`);
 });
 
 test("an explicit move transfers restart ownership to the new supervisor pane", async (t) => {
   const state = await wrapperFixture(t);
+  const oldSession = join(state.root, "old.jsonl");
+  const newSession = join(state.root, "new.jsonl");
   await state.invoke("w1:p2", ["--session", "old.jsonl", "-e", containerActiveExtension]);
-  await recordSupervisorSession(state.goals, "w1:p2", "old.jsonl");
+  await recordSupervisorSession(state.goals, "w1:p2", oldSession, "old-session");
   await state.invoke("w1:p9", ["--session", "new.jsonl", "-e", containerActiveExtension]);
-  await recordSupervisorSession(state.goals, "w1:p9", "new.jsonl");
-  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p9\nnew.jsonl\n");
+  await recordSupervisorSession(state.goals, "w1:p9", newSession, "new-session");
+  assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), `w1:p9\n${newSession}\nnew-session\n`);
   assert.equal((await state.invoke("w1:p2", ["--session", "old.jsonl"])).stdout, "--session\nold.jsonl\n");
   assert.equal((await state.invoke("w1:p9", ["--session", "new.jsonl"])).stdout, `-e\n${containerActiveExtension}\n--session\nnew.jsonl\n`);
 });
 
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
   const optionState = await wrapperFixture(t);
-  await recordSupervisorSession(optionState.goals, "w1:p2", "saved.jsonl");
+  await recordSupervisorSession(optionState.goals, "w1:p2", join(optionState.root, "saved.jsonl"));
   const afterOptionValue = await optionState.invoke("w1:p2", ["--model", "test", "--session", "saved.jsonl", "-e", containerActiveExtension]);
   assert.equal(afterOptionValue.stdout, `--model\ntest\n--session\nsaved.jsonl\n-e\n${containerActiveExtension}\n`);
 
   const optionalFlagState = await wrapperFixture(t);
-  await recordSupervisorSession(optionalFlagState.goals, "w1:p2", "print.jsonl");
+  await recordSupervisorSession(optionalFlagState.goals, "w1:p2", join(optionalFlagState.root, "print.jsonl"));
   const afterOptionalFlag = await optionalFlagState.invoke("w1:p2", ["--print", "-e", containerActiveExtension, "--session", "print.jsonl"]);
   assert.equal(afterOptionalFlag.stdout, `--print\n-e\n${containerActiveExtension}\n--session\nprint.jsonl\n`);
 
   const promptArgumentState = await wrapperFixture(t);
-  await recordSupervisorSession(promptArgumentState.goals, "w1:p2", "prompt.jsonl");
+  await recordSupervisorSession(promptArgumentState.goals, "w1:p2", join(promptArgumentState.root, "prompt.jsonl"));
   const promptArgument = await promptArgumentState.invoke("w1:p2", ["review", "-e", containerActiveExtension, "--session", "prompt.jsonl"]);
   assert.equal(promptArgument.stdout, `review\n-e\n${containerActiveExtension}\n--session\nprompt.jsonl\n`);
 
   const separatorState = await wrapperFixture(t);
-  await recordSupervisorSession(separatorState.goals, "w1:p2", "separator.jsonl");
+  await recordSupervisorSession(separatorState.goals, "w1:p2", join(separatorState.root, "separator.jsonl"));
   const afterSeparator = await separatorState.invoke("w1:p2", ["--session", "separator.jsonl", "--", "-e", containerActiveExtension]);
   assert.equal(afterSeparator.stdout, `-e\n${containerActiveExtension}\n--session\nseparator.jsonl\n--\n-e\n${containerActiveExtension}\n`);
 
   const consumedOptionState = await wrapperFixture(t);
-  await recordSupervisorSession(consumedOptionState.goals, "w1:p2", "model.jsonl");
+  await recordSupervisorSession(consumedOptionState.goals, "w1:p2", join(consumedOptionState.root, "model.jsonl"));
   const consumedOptionValue = await consumedOptionState.invoke("w1:p2", ["--model", "-e", containerActiveExtension, "--session", "model.jsonl"]);
   assert.equal(consumedOptionValue.stdout, `-e\n${containerActiveExtension}\n--model\n-e\n${containerActiveExtension}\n--session\nmodel.jsonl\n`);
+});
+
+test("wrapper restores only canonical session marker matches", async (t) => {
+  const state = await wrapperFixture(t);
+  await recordSupervisorSession(state.goals, "w1:p2", join(state.root, "exact.jsonl"), "exact-session");
+
+  const exactPath = await state.invoke("w1:p2", ["--session", "exact.jsonl"]);
+  assert.equal(exactPath.stdout, `-e\n${containerActiveExtension}\n--session\nexact.jsonl\n`);
+
+  const exactId = await state.invoke("w1:p2", ["--session-id", "exact-session"]);
+  assert.equal(exactId.stdout, `-e\n${containerActiveExtension}\n--session-id\nexact-session\n`);
+
+  const partialId = await state.invoke("w1:p2", ["--session", "exact"]);
+  assert.equal(partialId.stdout, "--session\nexact\n");
+
+  const noSession = await state.invoke("w1:p2", ["--no-session", "--session", "exact.jsonl"]);
+  assert.equal(noSession.stdout, "--no-session\n--session\nexact.jsonl\n");
 });
 
 test("wrapper restores the caller umask before launching Pi", async (t) => {

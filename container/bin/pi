@@ -20,57 +20,122 @@ esac
 # and native Pi session. Pi parses options on either side of its optional
 # initial message; only -- ends option parsing.
 explicit_supervisor=0
-expect_extension=0
-expect_session=0
-expect_value=0
-expect_optional_message=0
-session_ref=""
-for argument in "$@"; do
-  if [ "$expect_optional_message" -eq 1 ]; then
-    expect_optional_message=0
+restore_disabled=0
+session_arg=""
+session_id_arg=""
+parse_pi_arguments() {
+  while [ "$#" -gt 0 ]; do
+    argument="$1"
+    shift
     case "$argument" in
-      @*) ;;
-      ---*) continue ;;
-      -*) ;;
-      *) continue ;;
+      --) break ;;
+      -e | --extension)
+        if [ "$#" -gt 0 ]; then
+          if [ "$1" = "$supervisor_extension" ]; then
+            explicit_supervisor=1
+          fi
+          shift
+        fi
+        ;;
+      --session)
+        if [ "$#" -gt 0 ]; then
+          session_arg="$1"
+          shift
+        fi
+        ;;
+      --session-id)
+        if [ "$#" -gt 0 ]; then
+          session_id_arg="$1"
+          shift
+        fi
+        ;;
+      --no-session | --help | -h | --version | -v)
+        restore_disabled=1
+        ;;
+      --mode | --provider | --model | --api-key | --system-prompt | --append-system-prompt | --name | -n | --fork | --session-dir | --models | --tools | -t | --exclude-tools | -xt | --thinking | --export | --skill | --prompt-template | --theme)
+        if [ "$#" -gt 0 ]; then
+          shift
+        fi
+        ;;
+      --print | -p)
+        if [ "$#" -gt 0 ]; then
+          case "$1" in
+            @*) ;;
+            ---*) shift ;;
+            -*) ;;
+            *) shift ;;
+          esac
+        fi
+        ;;
+      --list-models)
+        restore_disabled=1
+        if [ "$#" -gt 0 ]; then
+          case "$1" in
+            @* | -*) ;;
+            *) shift ;;
+          esac
+        fi
+        ;;
+      --use-theme | --tui-mode)
+        if [ "$#" -gt 0 ]; then
+          case "$1" in
+            -*) ;;
+            *) shift ;;
+          esac
+        fi
+        ;;
+      --*=*) ;;
+      --*)
+        if [ "$#" -gt 0 ]; then
+          case "$1" in
+            @* | -*) ;;
+            *) shift ;;
+          esac
+        fi
+        ;;
     esac
-  fi
-  if [ "$expect_value" -eq 1 ]; then
-    expect_value=0
-    continue
-  fi
-  if [ "$expect_extension" -eq 1 ]; then
-    if [ "$argument" = "$supervisor_extension" ]; then
-      explicit_supervisor=1
+  done
+}
+
+parse_pi_arguments "$@"
+
+marker_session_matches=0
+if [ -n "${HERDR_PANE_ID:-}" ] && [ -f "$supervisor_pane_file" ]; then
+  marker_pane_id="$(sed -n '1p' "$supervisor_pane_file")"
+  marker_session_file="$(sed -n '2p' "$supervisor_pane_file")"
+  marker_session_id="$(sed -n '3p' "$supervisor_pane_file")"
+  if [ "$marker_pane_id" = "$HERDR_PANE_ID" ]; then
+    if [ -n "$session_arg" ]; then
+      case "$session_arg" in
+        */* | *\\* | *.jsonl)
+          session_file="$(node -e 'console.log(require("node:path").resolve(process.argv[1], process.argv[2]))' "$supervisor_directory" "$session_arg")"
+          if [ "$session_file" = "$marker_session_file" ]; then
+            marker_session_matches=1
+          fi
+          ;;
+        *)
+          if [ -n "$marker_session_id" ] \
+            && [ -f "$marker_session_file" ] \
+            && [ "$session_arg" = "$marker_session_id" ]; then
+            marker_session_matches=1
+          fi
+          ;;
+      esac
     fi
-    expect_extension=0
-    continue
+    if [ -n "$session_id_arg" ] \
+      && [ -n "$marker_session_id" ] \
+      && [ -f "$marker_session_file" ] \
+      && [ "$session_id_arg" = "$marker_session_id" ]; then
+      marker_session_matches=1
+    fi
   fi
-  if [ "$expect_session" -eq 1 ]; then
-    session_ref="$argument"
-    expect_session=0
-    continue
-  fi
-  case "$argument" in
-    --) break ;;
-    -e | --extension) expect_extension=1 ;;
-    --session | --session-id) expect_session=1 ;;
-    --mode | --provider | --model | --api-key | --system-prompt | --append-system-prompt | --name | -n | --fork | --session-dir | --models | --tools | -t | --exclude-tools | -xt | --thinking | --export | --skill | --prompt-template | --theme)
-      expect_value=1
-      ;;
-    --print | -p | --list-models) expect_optional_message=1 ;;
-    --use-theme | --tui-mode)
-      expect_optional_message=1
-      ;;
-  esac
-done
+fi
 
 if [ "$explicit_supervisor" -eq 0 ] \
+  && [ "$restore_disabled" -eq 0 ] \
   && [ -n "${HERDR_PANE_ID:-}" ] \
-  && [ -f "$supervisor_pane_file" ] \
-  && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ] \
-  && [ -n "$session_ref" ] \
-  && [ "$(sed -n '2p' "$supervisor_pane_file")" = "$session_ref" ]; then
+  && { [ -z "$session_arg" ] || [ -z "$session_id_arg" ]; } \
+  && [ "$marker_session_matches" -eq 1 ]; then
   set -- -e "$supervisor_extension" "$@"
 fi
 
