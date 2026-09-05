@@ -24,7 +24,7 @@ async function rememberSupervisorSession(ctx, mayTransfer) {
   const sessionFile = ctx?.sessionManager?.getSessionFile?.();
   const sessionId = ctx?.sessionManager?.getSessionId?.();
   if (!paneId || !sessionFile || !sessionId || paneId.includes("\n") || sessionFile.includes("\n") || sessionId.includes("\n")) {
-    return false;
+    return;
   }
   await mkdir(dirname(supervisorPaneFile), { recursive: true, mode: 0o700 });
   const release = await lockfile.lock(supervisorPaneFile, {
@@ -34,9 +34,8 @@ async function rememberSupervisorSession(ctx, mayTransfer) {
     update: 10_000,
   });
   try {
-    if (!mayTransfer && await markerPane() !== paneId) return false;
+    if (!mayTransfer && await markerPane() !== paneId) return;
     await atomicReplaceFile(supervisorPaneFile, `${paneId}\n${sessionFile}\n${sessionId}\n`);
-    return true;
   } finally {
     await release();
   }
@@ -44,15 +43,9 @@ async function rememberSupervisorSession(ctx, mayTransfer) {
 
 export default function explicitSupervisor(pi, services) {
   const restored = process.env.HERDR_SUPERVISOR_RESTORED === "1";
-  let retryInitialClaim = false;
   pi.on("session_start", async (event, ctx) => {
-    const mayTransfer = (event.reason === "startup" && !restored) || retryInitialClaim;
-    let remembered = false;
-    try {
-      remembered = await rememberSupervisorSession(ctx, mayTransfer);
-    } finally {
-      retryInitialClaim = mayTransfer && !remembered;
-    }
+    const mayTransfer = event.reason === "startup" && !restored;
+    await rememberSupervisorSession(ctx, mayTransfer);
   });
   return herdrSupervisor(pi, services);
 }
