@@ -103,6 +103,10 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
       pendingFocusedReviews: Number(health.pendingFocusedReviews || 0),
       activeReview: health.activeReview || "none",
       lastBackgroundError: health.lastBackgroundError || undefined,
+      unreadableGoals: (health.goalErrors || []).map(({ goalId, error }) => ({
+        goalId,
+        error: String(error?.message || error).slice(0, 1000),
+      })),
     },
     pendingHumanInput: bindings
       .filter((binding) => binding.lastDecision?.decision === "ask_human")
@@ -115,7 +119,7 @@ export function buildGlobalSnapshot(bindings, unstarted, herdr, health, now = ne
         goalId: binding.goalId,
         outcome: binding.goal,
         workerState: identityMismatch(binding, agent, pane) || agent?.agent_status || "missing",
-        progressAgeMs: Number.isFinite(updated) ? Math.max(0, timestamp - updated) : undefined,
+        checkpointAgeMs: Number.isFinite(updated) ? Math.max(0, timestamp - updated) : undefined,
         progress: binding.progress || undefined,
         wait: binding.wait ? {
           condition: binding.wait.condition,
@@ -142,5 +146,5 @@ export function globalReviewMessage(snapshot, reason, previousFinding?, now = ne
   const previous = previousFinding
     ? `\n\nPreviously active finding:\n${previousFinding}\n\nReturn it again if the current snapshot still proves it, even when unchanged. Omit it only when the current snapshot proves it is resolved. Exact unchanged findings are suppressed after your decision.`
     : "";
-  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}${previous}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. A goal whose workerState is unstarted has a saved contract but no local worker; report unexpected unstarted work as a finding, but do not put it in reconsider because there is no worker to review. Do not inspect full logs and do not act on workers here. Call supervisor_global_result exactly once. Findings are the complete set of problems still proven by this snapshot; include active findings even when they are unchanged, and return none only when no problem remains. Findings report facts; reconsider routes action. Do not merely repeat an actionable finding: when an active goal needs current execution or its durable contract reconciled, put that exact fact and goal in reconsider. The focused review can decide from exact goal evidence or ask the human one concrete question when durable authority is needed. Leave reconsider empty only when no fresh goal decision is needed, such as when a healthy focused review or future bounded wait already covers it. If the system is healthy, return no findings and schedule the next low-frequency review.`;
+  return `Global supervision review\nReview time: ${now.toISOString()} (UTC)\nReason: ${reason}\n\nThis is a compact current snapshot across all unfinished goals:\n${JSON.stringify(snapshot, null, 2)}${previous}\n\nLook for cross-goal waits, lost or stalled work, missing recovery, supervisor/runtime failure, and duplicated or conflicting activity that a one-goal review cannot see. A goal whose workerState is unstarted has a saved contract but no local worker; report unexpected unstarted work as a finding, but do not put it in reconsider because there is no worker to review. Do not inspect full logs and do not act on workers here. Record exactly one successful result with supervisor_global_result. If the tool rejects a result before routing worker action, correct it and retry in this turn; never repeat a successful result. Findings are the complete set of problems still proven by this snapshot; include active findings even when they are unchanged, and return none only when no problem remains. Findings report facts; reconsider routes action. Do not merely repeat an actionable finding: when an active goal needs current execution or its durable contract reconciled, put that exact fact and goal in reconsider. The focused review can decide from exact goal evidence or ask the human one concrete question when durable authority is needed. Leave reconsider empty only when no fresh goal decision is needed, such as when a healthy focused review or future bounded wait already covers it. If the system is healthy, return no findings and schedule the next low-frequency review.`;
 }

@@ -45,13 +45,40 @@ jobs:
           cache-to: type=gha,mode=max,scope=herdr-supervisor-ci
       - name: Smoke test container
         run: |
-          # Verify the entrypoint installs the extension symlink
+          # Ordinary Pi sessions must not auto-load the supervisor
           docker run --rm herdr-supervisor:ci \
-            test -L /home/node/.pi/agent/extensions/herdr-supervisor.ts
+            sh -c 'test ! -e /home/node/.pi/agent/extensions/herdr-supervisor.ts && test ! -L /home/node/.pi/agent/extensions/herdr-supervisor.ts'
 
-          # Verify the symlink target exists and re-exports the extension
+          # Exercise the packaged Pi loader, with and without explicit activation
           docker run --rm herdr-supervisor:ci \
-            grep -q 'extension.ts' /home/node/.pi/agent/extensions/herdr-supervisor.ts
+            node --input-type=module -e '
+              import assert from "node:assert/strict";
+              import { DefaultResourceLoader, SettingsManager } from "/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
+              for (const explicit of [false, true]) {
+                const loader = new DefaultResourceLoader({
+                  cwd: "/app",
+                  agentDir: "/home/node/.pi/agent",
+                  settingsManager: SettingsManager.inMemory(),
+                  additionalExtensionPaths: explicit ? ["/opt/herdr-supervisor/container/supervisor-extension.ts"] : [],
+                });
+                await loader.reload();
+                const result = loader.getExtensions();
+                assert.deepEqual(result.errors, []);
+                assert.equal(result.extensions.length, explicit ? 1 : 0);
+                if (explicit) assert.ok(result.extensions[0].tools.has("supervisor_start_goal"));
+              }
+            '
+
+          # The old auto-load entry point must never activate supervision
+          docker run --rm herdr-supervisor:ci \
+            node --input-type=module -e '
+              import legacy from "/opt/herdr-supervisor/container/pi-extension.ts";
+              try { legacy(); } catch (error) {
+                if (error.message.includes("auto-loading was removed")) process.exit(0);
+                throw error;
+              }
+              process.exit(1);
+            '
 
           # Verify all source modules were copied
           docker run --rm herdr-supervisor:ci \

@@ -47,6 +47,13 @@ the model handle situational judgment. The practical heuristic is **solidify
 the common 20%; teach the model the remaining 80%**. This is a decision rule
 for whether behavior belongs in code, not a target count.
 
+Start with deletion: can the need or feature be removed? Then ask whether the
+existing tools, events, facts, and agent judgment already resolve it. Add
+nothing when they do, unless measured evidence shows a substantial gain that
+outweighs the full cost of configuration, state, branches, recovery cases,
+tests, and maintenance. Occasional repeated work or model cost can be the
+simpler and more robust trade-off.
+
 The minimal core lets an agent:
 
 - **observe** current worker and external facts;
@@ -141,11 +148,16 @@ against the same root is outside the architecture. This keeps goal lifecycle
 serialization local and avoids pretending to provide a distributed
 transaction across goal files and Herdr worker creation.
 
-Loading the extension is not enough to claim that writer role. A dedicated Pi
-must explicitly select `observe`, `dry-run`, or `live` mode. With no selected
-mode the extension does not read the goal store, subscribe to Herdr, schedule
-reviews, alter model context, or expose supervisor tools to the model. This
-makes accidental user-wide Pi discovery inert.
+The dedicated Pi explicitly loads `container/supervisor-extension.ts` through Pi's existing `-e`
+option. The container does not install that extension into auto-discovery, so
+ordinary Pi sessions do not read goals, subscribe to Herdr, schedule reviews,
+alter model context, or expose supervisor tools. Startup removes only the known
+legacy container-managed discovery symlink, preserving operator-owned entries.
+The old container entry point and former direct `src/extension.ts` entry fail
+before installing supervisor tools if a stale link or launch command still
+references either one. Do not install the active extension
+into user-wide or project discovery or default Pi settings. This keeps explicit
+activation at the loading boundary, without adding a replacement mode or flag.
 
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
@@ -194,6 +206,11 @@ The supervisor sleeps otherwise. It does not poll workers or providers. The
 optional shared watcher performs bounded provider reads without model turns.
 The low-frequency global review remains a safety net for missed system-level
 events, not the primary way to discover facts that a cheap observer can report.
+Its result is applied once: a failure before worker routing explicitly permits
+a corrected retry because persistence precedes that routing. Once routing
+begins, the in-memory decision fence prevents a same-turn repeat. Later finding
+display failure is reported as a warning and never reopens routing. No separate
+recovery state is needed.
 
 ### One review, one decision
 
@@ -289,6 +306,12 @@ The supervisor is normally asleep. Events improve response time; a single
 nearest-deadline timer ensures missed events or long waits do not lose a goal.
 Its default one-hour interval is a safety net, not a polling cadence; deployments
 can tune it when their event reliability or recovery needs differ.
+
+A running supervisor follows this one execution path. There are no observe,
+dry-run, or live modes. Use existing status and logs for inspection and isolated
+tests for validation. Goal authority, exact worker identity, action locks, and
+the review fence govern effects. Obsolete mode settings must be removed before
+startup; a formerly passive configuration must never silently enable actions.
 
 ## Decisions
 
@@ -435,6 +458,14 @@ recovery; an invalid goal or checkpoint fails closed.
 `.supervisor/` holds local supervisor checkpoints. It is neither portable goal
 authority nor live runtime truth.
 
+The global snapshot reports checkpoint age: elapsed time since `current.json`
+was updated. Another decision refreshes that timestamp even when no work
+advanced. It is not a progress measurement; the model judges progress from
+current evidence. Existing goal-read errors are also included as bounded facts
+in the global snapshot. Findings may name those goals, but only readable active
+bindings can receive a focused worker review. No repair lifecycle or extra
+durable state is introduced.
+
 Every operation that needs current goal records reads the small goal store
 again. The process does not cache contracts or checkpoints, so an external
 copy, completed goal, or concurrent durable update is visible on the next
@@ -534,7 +565,20 @@ goal's acceptance criteria.
 
 Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
-promise to reconsider, not permission to forget the goal:
+promise to reconsider, not permission to forget the goal.
+
+For a peer wait, the existing status tool supplies current peer progress and
+reconsideration routes pending peer work through an ordinary focused review.
+When current evidence gives the peer useful work it can do now, queue that
+reconsideration before recording the real peer condition; do not queue a
+redundant review when the peer is already doing that work. A queued peer need
+not already be working: its review runs after this review ends.
+Code validates peer identity, not whether the peer's current activity can
+eventually satisfy the condition; that remains the model's judgment.
+Silence from the waiting worker does not prove that the peer stayed unchanged.
+Recorded waits and earlier steering are execution context, not new lasting
+restrictions on the portable goal. Resolve these cases with existing facts and
+actions rather than a new dependency mechanism.
 
 - a direct peer wait resolves the selected pane to the peer's durable goal ID;
   when a peer review proves that condition materially changed, the model

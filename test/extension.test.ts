@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Compile } from "typebox/compile";
-import herdrSupervisor, { pullRequestTraceability } from "../src/extension.ts";
+import { herdrSupervisor, pullRequestTraceability } from "../src/extension.ts";
 import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSupervisedGoal } from "../src/goal-registry.ts";
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
@@ -30,9 +30,8 @@ function goalWorkerName(goalId: string) {
   return `goal-${createHash("sha256").update(goalId).digest("hex").slice(0, 27)}`;
 }
 
-function fakePi({ mode = "live", reviewMs = "600000", globalReviewMs = "0" } = {}): any {
+function fakePi({ reviewMs = "600000", globalReviewMs = "0" } = {}): any {
   const commands = new Map();
-  const flags = new Map();
   const tools = new Map();
   const events = new Map();
   const messages = [];
@@ -42,16 +41,14 @@ function fakePi({ mode = "live", reviewMs = "600000", globalReviewMs = "0" } = {
   let activeTools = ["read", "bash", "edit", "write"];
   return {
     commands,
-    flags,
     tools,
     events,
     messages,
     customMessages,
     userMessages,
     activeToolSelections,
-    registerFlag(name, flag) { flags.set(name, flag); },
+    registerFlag() {},
     getFlag(name) {
-      if (name === "supervisor-mode") return mode;
       if (name === "supervisor-review-ms") return reviewMs;
       if (name === "supervisor-global-review-ms") return globalReviewMs;
     },
@@ -73,37 +70,6 @@ function fakePi({ mode = "live", reviewMs = "600000", globalReviewMs = "0" } = {
     },
   };
 }
-
-test("the extension stays inert until supervision is explicitly enabled", async () => {
-  const pi = fakePi({ mode: "off" });
-  const statuses = [];
-  const notifications = [];
-  herdrSupervisor(pi);
-
-  assert.equal(pi.flags.get("supervisor-mode").default, "off");
-
-  await pi.events.get("session_start")({}, {
-    ui: {
-      setStatus(name, value) { statuses.push({ name, value }); },
-      notify(message, level) { notifications.push({ message, level }); },
-    },
-  });
-
-  assert.deepEqual(pi.getActiveTools(), ["read", "bash", "edit", "write"]);
-  assert.deepEqual(statuses, [{ name: "herdr-supervisor", value: undefined }]);
-  assert.equal(pi.events.get("before_agent_start")({ systemPrompt: "Base prompt." }), undefined);
-  assert.equal(pi.events.get("context")({ messages: [] }), undefined);
-  await pi.events.get("agent_settled")();
-  assert.equal(pi.messages.length, 0);
-
-  await pi.commands.get("supervised").handler("", {
-    ui: { notify(message, level) { notifications.push({ message, level }); } },
-  });
-  assert.deepEqual(notifications, [{
-    message: "Herdr Supervisor is disabled. Restart this dedicated Pi with --supervisor-mode observe, dry-run, or live.",
-    level: "warning",
-  }]);
-});
 
 function snapshot(agent = {}) {
   const current = {
@@ -137,6 +103,30 @@ async function fixture() {
   }, root, { goalId: "g_test" });
   return root;
 }
+
+test("removed mode settings fail before supervision tools are installed", () => {
+  const previousMode = process.env.HERDR_SUPERVISOR_MODE;
+  const previousArgv = process.argv;
+  try {
+    for (const value of ["off", "observe", "dry-run", "live", ""]) {
+      process.env.HERDR_SUPERVISOR_MODE = value;
+      const pi = fakePi();
+      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
+      assert.equal(pi.tools.size, 0);
+    }
+    delete process.env.HERDR_SUPERVISOR_MODE;
+    for (const args of [["--supervisor-mode", "observe"], ["--supervisor-mode=dry-run"]]) {
+      process.argv = [...previousArgv, ...args];
+      const pi = fakePi();
+      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
+      assert.equal(pi.tools.size, 0);
+    }
+  } finally {
+    process.argv = previousArgv;
+    if (previousMode === undefined) delete process.env.HERDR_SUPERVISOR_MODE;
+    else process.env.HERDR_SUPERVISOR_MODE = previousMode;
+  }
+});
 
 test("optional supervisor tool fields accept null without placeholder values", () => {
   const pi = fakePi();
@@ -1818,6 +1808,8 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Propose a new code primitive only for a proven missing capability or trigger/);
   assert.match(result.systemPrompt, /error explicitly says no action was applied/);
   assert.match(result.systemPrompt, /action was applied or may have been applied/);
+  assert.match(result.systemPrompt, /record exactly one successful result with supervisor_global_result/);
+  assert.match(result.systemPrompt, /rejects a result before routing worker action, correct it and retry in the same turn/);
   assert.match(result.systemPrompt, /follow the current worker evidence/);
   assert.match(result.systemPrompt, /steer only when it says the supervisor can resume the exact session/);
   assert.match(result.systemPrompt, /event-watchd is agent-operable infrastructure/);
@@ -3199,7 +3191,7 @@ test("a native Goal resume that changes worker identity fails closed without a f
   pi.events.get("session_shutdown")();
 });
 
-test("a settled worker may wait on one explicit peer condition", async (t) => {
+test("a settled worker can record a peer wait and queue that idle peer's review", async (t) => {
   const root = await fixture();
   const peerWorker = {
     paneId: "w1:p7",
@@ -3218,6 +3210,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   });
   let prompts = 0;
   let peerStatus = "working";
+  let peerSession = peerWorker.agentSession;
   t.mock.method(HerdrClient.prototype, "snapshot", async () => ({
     agents: [
       snapshot({ agent_status: "done", state_change_seq: 3 }).agents[0],
@@ -3226,7 +3219,7 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
         terminal_id: peerWorker.terminalId,
         agent_status: peerStatus,
         state_change_seq: 4,
-        agent_session: peerWorker.agentSession,
+        agent_session: peerSession,
       },
     ],
     panes: [
@@ -3245,15 +3238,25 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   await waitFor(() => pi.messages.length === 1);
   await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
   peerStatus = "idle";
-  const convoy = await pi.tools.get("supervisor_leave").execute("leave-convoy", {
+  peerSession = { ...peerWorker.agentSession, value: "replacement_session" };
+  const before = (await loadSupervisorGoals(root)).active;
+  const mismatched = await pi.tools.get("supervisor_leave").execute("leave-replacement", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
-    waiting_for: "w1:p7 to prepare the shared fixture",
-    waiting_on_pane: "w1:p7",
+    waiting_for: "the shared fixture",
+    waiting_on_pane: peerWorker.paneId,
   });
-  assert.equal(convoy.isError, true);
-  assert.match(convoy.content[0].text, /inactive peer cannot satisfy this condition/);
-  peerStatus = "working";
+  assert.equal(mismatched.isError, true);
+  assert.match(mismatched.content[0].text, /worker value changed/);
+  assert.match(mismatched.content[0].text, /No action was applied/);
+  assert.deepEqual((await loadSupervisorGoals(root)).active, before);
+  peerSession = peerWorker.agentSession;
+  const reconsider = await pi.tools.get("supervisor_reconsider").execute("reconsider-peer", {
+    pane_ids: [peerWorker.paneId],
+    reason: "The local result is ready; the peer can prepare the shared fixture now.",
+  });
+  assert.equal(reconsider.isError, false);
+  assert.equal(pi.messages.length, 1);
   const leave = await pi.tools.get("supervisor_leave").execute("leave", {
     pane_id: worker.paneId,
     progress: "Local proof is preserved.",
@@ -3271,6 +3274,10 @@ test("a settled worker may wait on one explicit peer condition", async (t) => {
   assert.equal(stored.wait.condition, "w1:p7 to report that the shared fixture is ready");
   assert.equal(stored.wait.goalId, "g_peer");
   assert.ok(Date.parse(stored.wait.reviewAt) > Date.now());
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.length === 2);
+  assert.match(pi.messages[1].content, /g_peer/);
+  assert.match(pi.messages[1].content, /peer can prepare the shared fixture now/);
   pi.events.get("session_shutdown")();
 });
 
@@ -4725,7 +4732,8 @@ test("a global review exposes unstarted goals without pretending they have worke
   });
   assert.equal(invalid.isError, true);
   assert.match(invalid.content[0].text, /no worker/);
-  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+  assert.match(invalid.content[0].text, /No worker action was routed/);
+  assert.match(invalid.content[0].text, /retry in this turn/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("unstarted-finding", {
     summary: "One saved goal has no worker and needs a human resume decision.",
@@ -4740,6 +4748,55 @@ test("a global review exposes unstarted goals without pretending they have worke
   assert.match(valid.content[0].text, /No focused review is needed/);
   assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-global-finding").length, 1);
   pi.events.get("session_shutdown")();
+});
+
+test("global review reports unreadable goals but cannot route actions to them", async (t) => {
+  const root = await fixture();
+  await mkdir(join(root, "g_unreadable"));
+  await writeFile(join(root, "g_unreadable", "goal.json"), "invalid JSON");
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  t.after(() => pi.events.get("session_shutdown")());
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-global-review"));
+  const review = pi.messages.find((message) => message.customType === "herdr-supervisor-global-review");
+  assert.match(review.content, /unreadableGoals/);
+  assert.match(review.content, /g_unreadable/);
+  assert.match(review.content, /g_test/);
+  const findings = [{
+    problem: "One goal contract cannot be read",
+    evidence: ["g_unreadable contains invalid JSON"],
+    affected_goal_ids: ["g_unreadable"],
+  }];
+  const rejected = await pi.tools.get("supervisor_global_result").execute("invalid", {
+    summary: "Read error", findings,
+    reconsider: [{ goal_id: "g_unreadable", reason: "Inspect this worker" }],
+  });
+  assert.equal(rejected.isError, true);
+  assert.match(rejected.content[0].text, /no valid worker binding/);
+  assert.match(rejected.content[0].text, /No worker action was routed/);
+  assert.match(rejected.content[0].text, /retry in this turn/);
+  assert.equal((await loadGlobalReviewState(root)).lastReviewedAt, undefined);
+  const recorded = await pi.tools.get("supervisor_global_result").execute("valid", {
+    summary: "Read error needs attention", findings,
+    reconsider: [{ goal_id: "g_test", reason: "Check the valid worker's current evidence" }],
+  });
+  assert.equal(recorded.isError, false);
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /g_unreadable/);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
+  const focused = pi.messages.filter((message) => message.customType === "herdr-supervisor-review");
+  assert.equal(focused.length, 1);
+  assert.match(focused[0].content, /g_test/);
+  assert.doesNotMatch(focused[0].content, /g_unreadable/);
 });
 
 test("a global review reloads goal contracts copied in after session start", async (t) => {
@@ -4816,6 +4873,95 @@ test("focused worker review runs before a due global review", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
+test("a goal-store read failure records nothing and explicitly permits retry", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  let failGoalRead = false;
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi, {
+    loadGoals: async () => {
+      if (failGoalRead) throw new Error("goal store is temporarily unreadable");
+      return loadSupervisorGoals();
+    },
+  });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  failGoalRead = true;
+  const failed = await pi.tools.get("supervisor_global_result").execute("unreadable", {
+    summary: "The snapshot could not be validated.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(failed.isError, true);
+  assert.match(failed.content[0].text, /goal store is temporarily unreadable/);
+  assert.match(failed.content[0].text, /No worker action was routed/);
+  assert.match(failed.content[0].text, /retry in this turn/);
+  assert.equal((await loadGlobalReviewState(root)).lastReviewedAt, undefined);
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length, 0);
+
+  failGoalRead = false;
+  const retry = await pi.tools.get("supervisor_global_result").execute("retry", {
+    summary: "No cross-goal fault remains.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(retry.isError, false);
+  pi.events.get("session_shutdown")();
+});
+
+test("finding display failure after a saved result does not reopen routing", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const sendMessage = pi.sendMessage;
+  pi.sendMessage = (message, options) => {
+    if (message.customType === "herdr-supervisor-global-finding") {
+      throw new Error("finding delivery failed");
+    }
+    return sendMessage(message, options);
+  };
+
+  const result = await pi.tools.get("supervisor_global_result").execute("recorded", {
+    summary: "One cross-goal fault remains.",
+    findings: [{
+      problem: "The goal needs a focused evidence check",
+      evidence: ["Current worker state and checkpoint need reconciliation"],
+      affected_goal_ids: ["g_test"],
+    }],
+    reconsider: [],
+  });
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /new finding could not be shown/);
+  assert.match(result.content[0].text, /End this turn without repeating the result/);
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /focused evidence check/);
+  const repeated = await pi.tools.get("supervisor_global_result").execute("repeated", {
+    summary: "Do not apply this twice.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already has a result/);
+  pi.events.get("session_shutdown")();
+});
+
 test("an invalid global result has no partial routing", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -4840,7 +4986,18 @@ test("an invalid global result has no partial routing", async (t) => {
   });
   assert.equal(invalidDeadline.isError, true);
   assert.match(invalidDeadline.content[0].text, /timezone-bearing ISO 8601/);
-  assert.match(invalidDeadline.content[0].text, /No focused reviews were queued/);
+  assert.match(invalidDeadline.content[0].text, /No worker action was routed/);
+  assert.match(invalidDeadline.content[0].text, /retry in this turn/);
+
+  const invalidGoalId = await pi.tools.get("supervisor_global_result").execute("invalid-goal-id", {
+    summary: "The finding has blank goal IDs.",
+    findings: [{ problem: "Check the goal", evidence: ["The goal IDs are blank"], affected_goal_ids: ["", " "] }],
+    reconsider: [],
+  });
+  assert.equal(invalidGoalId.isError, true);
+  assert.match(invalidGoalId.content[0].text, /goal IDs must not be empty/);
+  assert.match(invalidGoalId.content[0].text, /No worker action was routed/);
+  assert.match(invalidGoalId.content[0].text, /retry in this turn/);
 
   const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
     summary: "One reference is invalid.",
@@ -4848,8 +5005,9 @@ test("an invalid global result has no partial routing", async (t) => {
     reconsider: [],
   });
   assert.equal(invalid.isError, true);
-  assert.match(invalid.content[0].text, /not found among active or unstarted goals/);
-  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+  assert.match(invalid.content[0].text, /not found among active, unstarted, or unreadable goals/);
+  assert.match(invalid.content[0].text, /No worker action was routed/);
+  assert.match(invalid.content[0].text, /retry in this turn/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("valid", {
     summary: "No cross-goal fault remains.",

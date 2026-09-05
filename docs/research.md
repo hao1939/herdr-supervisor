@@ -188,8 +188,9 @@ this project:
 - uses output hashes, terminal text, and regex heuristics to correct status;
 - adds its own task and daemon state.
 
-Decision: borrow its small decision vocabulary, dry-run behavior, cooldowns,
-and same-session steering. Use Herdr events instead of its poller and parser.
+Decision: borrow its small decision vocabulary and same-session steering.
+Use Herdr events instead of its poller and parser. The initial observe/dry-run
+rollout modes have been retired; the current design keeps one execution path.
 
 ### Larger replacements
 
@@ -231,7 +232,7 @@ and same-session steering. Use Herdr events instead of its poller and parser.
    because the current one is idle, blocked, or slow.
 6. Fence every action to the exact pane, terminal, and agent-session identity
    that was reviewed.
-7. Begin in observe-only and dry-run modes.
+7. Validate changes with isolated tests and inspect existing status and logs.
 8. Persist only goal bindings and recovery checkpoints. Do not persist another
    copy of Herdr status.
 

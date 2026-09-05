@@ -71,19 +71,6 @@ const EvidenceItems = Type.Array(
 const Optional = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
 const Evidence = Optional(EvidenceItems);
 const client = new HerdrClient();
-const supervisorTools = [
-  "supervisor_start_goal",
-  "supervisor_discard_goal",
-  "supervisor_update_goal",
-  "supervisor_status",
-  "supervisor_reconsider",
-  "supervisor_global_result",
-  "supervisor_observe",
-  "supervisor_leave",
-  "supervisor_steer",
-  "supervisor_ask_human",
-  "supervisor_finish",
-];
 const focusedReviewTools = [
   "supervisor_status",
   "supervisor_reconsider",
@@ -98,7 +85,6 @@ const reviewMessageType = "herdr-supervisor-review";
 const globalReviewMessageType = "herdr-supervisor-global-review";
 const humanFollowUpMessageType = "herdr-supervisor-human-follow-up";
 const WORKER_EVENT_SETTLE_MS = 250;
-type SupervisorMode = "off" | "observe" | "dry-run" | "live";
 type ContractFields = {
   objective: string;
   context: string[];
@@ -177,7 +163,15 @@ type SupervisorServices = {
   workerEventSettleMs?: number;
 };
 
-export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
+export default function removedDirectLoad() {
+  throw new Error("Direct supervisor loading was removed. Source checkout: pi -e /path/to/herdr-supervisor/container/supervisor-extension.ts. Container: pi -e /opt/herdr-supervisor/container/supervisor-extension.ts. Remove supervisor auto-discovery and default-extension entries.");
+}
+
+export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices = {}) {
+  if (process.env.HERDR_SUPERVISOR_MODE !== undefined
+    || process.argv.some((arg) => arg === "--supervisor-mode" || arg.startsWith("--supervisor-mode="))) {
+    throw new Error("Supervisor modes were removed. Remove --supervisor-mode and HERDR_SUPERVISOR_MODE before starting supervision; a running supervisor applies validated decisions.");
+  }
   const readGoals = services.loadGoals || loadSupervisorGoals;
   let stopSubscription: undefined | (() => void);
   let reconnectTimer: undefined | ReturnType<typeof setTimeout>;
@@ -432,7 +426,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   async function reconcileWorkerLabels(goals) {
-    if (mode() !== "live") return;
     const snapshot = await client.snapshot();
     await Promise.all(goals.active.map(async (binding) => {
       if (identityMismatch(
@@ -453,12 +446,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
 
-  pi.registerFlag("supervisor-mode", {
-    description: "Supervision authority: off, observe, dry-run, or live",
-    type: "string",
-    default: process.env.HERDR_SUPERVISOR_MODE || "off",
-  });
-
   pi.registerFlag("supervisor-review-ms", {
     description: "Time without a supervision review before a stale-progress check",
     type: "string",
@@ -470,24 +457,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     type: "string",
     default: process.env.HERDR_SUPERVISOR_GLOBAL_REVIEW_MS || String(DEFAULT_GLOBAL_REVIEW_INTERVAL_MS),
   });
-
-  function mode(): SupervisorMode {
-    const value = pi.getFlag("supervisor-mode");
-    return value === "live" || value === "dry-run" || value === "observe" ? value : "off";
-  }
-
-  function enabled() {
-    return mode() !== "off";
-  }
-
-  function requireEnabled(ctx) {
-    if (enabled()) return true;
-    ctx.ui.notify(
-      "Herdr Supervisor is disabled. Restart this dedicated Pi with --supervisor-mode observe, dry-run, or live.",
-      "warning",
-    );
-    return false;
-  }
 
   function reviewIntervalMs() {
     const value = Number(pi.getFlag("supervisor-review-ms"));
@@ -726,6 +695,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       ...runtimeFor(binding),
     }));
     const compactSnapshot = buildGlobalSnapshot(bindings, storedGoals.unstarted, snapshot, {
+      goalErrors: storedGoals.errors,
       observerConnected: Boolean(stopSubscription),
       pendingFocusedReviews: pendingSignals.size,
       activeReview: reviewTurn.isActive() ? `goal:${reviewTurn.paneId}` : "global",
@@ -827,25 +797,22 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     runtime.lastNoticeKey = decision.key;
     scheduleReview(binding);
     runtime.pendingObservationHasMessages = undefined;
-    const currentMode = mode();
-    if (currentMode !== "observe") {
-      reviewTurn.begin(paneId, decision.reason);
-      activateReviewTools(focusedReviewTools);
-    }
+    reviewTurn.begin(paneId, decision.reason);
+    activateReviewTools(focusedReviewTools);
     try {
       pi.sendMessage(
         {
           customType: reviewMessageType,
-          content: `${reviewMessage(
+          content: reviewMessage(
             binding,
             agent,
             decision.reason,
             new Date(),
             dependentBindings(goals.active, binding),
-          )}\n\nSupervisor mode: ${currentMode}.`,
+          ),
           display: true,
         },
-        { triggerTurn: currentMode !== "observe", deliverAs: "followUp" },
+        { triggerTurn: true, deliverAs: "followUp" },
       );
     } catch (error) {
       reviewTurn.end();
@@ -923,13 +890,11 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       warning = ` Monitoring setup failed: ${error.message}`;
     }
-    if (mode() === "live") {
-      warning += await applyWorkerLabel(binding);
-      try {
-        await deliverNativeGoal(binding);
-      } catch (error) {
-        warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
-      }
+    warning += await applyWorkerLabel(binding);
+    try {
+      await deliverNativeGoal(binding);
+    } catch (error) {
+      warning += ` Native Goal delivery could not be confirmed: ${error.message}`;
     }
     if (wake && shouldWake(binding, agent, findPane(snapshot, paneId)).wake) void handleSignal(binding.paneId);
     return { binding, warning };
@@ -1085,7 +1050,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     } catch (error) {
       warning = ` Monitoring setup failed: ${error.message}`;
     }
-    if (activateNativeGoal && mode() === "live") {
+    if (activateNativeGoal) {
       warning += await applyWorkerLabel(binding);
       try {
         await deliverNativeGoal(binding);
@@ -1156,9 +1121,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         return text("Finish the current supervision review before discarding a saved goal.", true);
       }
       const goalId = params.goal_id.trim();
-      if (mode() !== "live") {
-        return text(`${mode()} mode: would discard unstarted goal ${goalId}, but no contract was removed.`);
-      }
       try {
         if (pendingStarts.has(goalId)) {
           throw new Error(`goal ${goalId} already has a worker bootstrap in progress`);
@@ -1252,26 +1214,24 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           if (!canonical) throw new Error("updated goal is no longer active");
           const refinedBinding: ActiveGoal = { ...canonical, ...runtimeFor(canonical) };
           let deliveryWarning = "";
-          if (mode() === "live") {
-            try {
-              const snapshot = await client.snapshot();
-              const agent = findAgent(snapshot, refinedBinding.paneId);
-              const mismatch = identityMismatch(
-                refinedBinding,
-                agent,
-                findPane(snapshot, refinedBinding.paneId),
-              );
-              if (mismatch) {
-                deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
-              } else if (typeof agent.name !== "string" || !agent.name.trim()) {
-                deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
-              } else {
-                deliveryWarning += await applyWorkerLabel(refinedBinding);
-                await client.promptAgent(refinedBinding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
-              }
-            } catch (error) {
-              deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
+          try {
+            const snapshot = await client.snapshot();
+            const agent = findAgent(snapshot, refinedBinding.paneId);
+            const mismatch = identityMismatch(
+              refinedBinding,
+              agent,
+              findPane(snapshot, refinedBinding.paneId),
+            );
+            if (mismatch) {
+              deliveryWarning = ` The durable contract was updated, but it was not sent because ${mismatch}.`;
+            } else if (typeof agent.name !== "string" || !agent.name.trim()) {
+              deliveryWarning = " The durable contract was updated, but it was not sent because the Herdr worker has no stable name.";
+            } else {
+              deliveryWarning += await applyWorkerLabel(refinedBinding);
+              await client.promptAgent(refinedBinding.paneId, refinedGoalPrompt(refinedBinding, agent.name));
             }
+          } catch (error) {
+            deliveryWarning = ` The durable contract was updated, but worker delivery could not be confirmed: ${error.message}.`;
           }
           return { result, refinedBinding, deliveryWarning };
         });
@@ -1352,10 +1312,10 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       findings: Type.Array(Type.Object({
         problem: Type.String({ minLength: 1, maxLength: 2000 }),
         evidence: Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { minItems: 1, maxItems: 8 }),
-        affected_goal_ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
+        affected_goal_ids: Type.Array(Type.String(), { minItems: 1, maxItems: 10 }),
       }), { maxItems: 10 }),
       reconsider: Type.Array(Type.Object({
-        goal_id: Type.String({ minLength: 1 }),
+        goal_id: Type.String(),
         reason: Type.String({ minLength: 1, maxLength: 2000 }),
       }), { maxItems: 10 }),
       next_review_at: Optional(Type.String({ minLength: 1 })),
@@ -1364,23 +1324,41 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
     async execute(_id, params) {
       if (!activeGlobalReview) return text("No global supervision review is active.", true);
       if (globalDecisionApplied) return text("The global supervision review already has a result.", true);
-      const goals = await loadSupervisorGoals();
+      const retryableResultError = (message: string) => text(
+        `${message} No worker action was routed; correct the problem and retry in this turn.`,
+        true,
+      );
+      let goals: Awaited<ReturnType<typeof loadSupervisorGoals>>;
+      try {
+        goals = await readGoals();
+      } catch (error) {
+        return retryableResultError(`Could not read goals for the global result: ${error.message}.`);
+      }
       const byGoalId = new Map(goals.active.map((binding) => [binding.goalId, binding]));
       const unstartedGoalIds = new Set(goals.unstarted.map((goal) => goal.goalId));
-      const knownGoalIds = new Set([...byGoalId.keys(), ...unstartedGoalIds]);
+      const unreadableGoalIds = new Set(goals.errors.map((goal) => goal.goalId));
+      const knownGoalIds = new Set([...byGoalId.keys(), ...unstartedGoalIds, ...unreadableGoalIds]);
       const referenced = new Set([
         ...params.findings.flatMap((finding) => finding.affected_goal_ids),
         ...params.reconsider.map((item) => item.goal_id),
       ]);
+      const invalidGoalIds = [...referenced].filter((goalId) => !goalId.trim());
+      if (invalidGoalIds.length) {
+        return retryableResultError("Global result goal IDs must not be empty.");
+      }
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals were not found among active or unstarted goals: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+        return retryableResultError(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}.`);
+      }
+      const unreadableReconsider = params.reconsider.filter((item) => unreadableGoalIds.has(item.goal_id));
+      if (unreadableReconsider.length) {
+        return retryableResultError(`Cannot queue a focused review for unreadable goal(s): ${unreadableReconsider.map((item) => item.goal_id).join(", ")}. Report the read errors as findings; no valid worker binding is available.`);
       }
       const unstartedReconsider = [...new Set(params.reconsider
         .map((item) => item.goal_id)
         .filter((goalId) => unstartedGoalIds.has(goalId)))];
       if (unstartedReconsider.length) {
-        return text(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts. No focused reviews were queued.`, true);
+        return retryableResultError(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts.`);
       }
       const now = new Date();
       const nextReviewAt = params.next_review_at?.trim()
@@ -1388,7 +1366,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       try {
         reviewDeadline(nextReviewAt, now.getTime());
       } catch (error) {
-        return text(`Invalid next_review_at: ${error.message}. No focused reviews were queued.`, true);
+        return retryableResultError(`Invalid next_review_at: ${error.message}.`);
       }
       const findings = params.findings.map((finding) => ({
         problem: finding.problem.trim(),
@@ -1409,7 +1387,7 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       try {
         await saveGlobalReviewState(nextState);
       } catch (error) {
-        return text(`Could not save the global review result: ${error.message}. No focused reviews were queued.`, true);
+        return retryableResultError(`Could not save the global review result: ${error.message}.`);
       }
       globalState = nextState;
       const reasons = new Map<string, string[]>();
@@ -1430,15 +1408,23 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       globalDecisionApplied = true;
       globalMissingDecisionRetries = 0;
       armGlobalReviewTimer();
+      let visibility: string;
       if (isNewFinding) {
-        pi.sendMessage({
-          customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
-          display: true,
-        }, { triggerTurn: false, deliverAs: "followUp" });
+        try {
+          pi.sendMessage({
+            customType: "herdr-supervisor-global-finding",
+            content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
+            display: true,
+          }, { triggerTurn: false, deliverAs: "followUp" });
+          visibility = " The new finding was shown once.";
+        } catch (error) {
+          visibility = ` The result was recorded, but the new finding could not be shown: ${error.message}. Do not retry the result.`;
+          reportBackgroundFailure("Could not show the recorded global finding", error);
+        }
+      } else {
+        visibility = " No new finding was shown.";
       }
       const routed = reasons.size ? ` Queued focused reviews for ${[...reasons.keys()].join(", ")}.` : " No focused review is needed.";
-      const visibility = isNewFinding ? " The new finding was shown once." : " No new finding was shown.";
       return text(`Global review recorded.${routed}${visibility} End this turn without repeating the result.`);
     },
   });
@@ -1570,40 +1556,37 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
           latestPeerAgent,
           findPane(latestSnapshot, latestPeer.paneId),
         );
-        if (!latestPeer || latestPeerProblem || latestPeerAgent?.agent_status !== "working") {
-          const peerState = latestPeerProblem || `worker is ${latestPeerAgent?.agent_status || "not running"}`;
-          return text(`Cannot leave ${params.pane_id} waiting on ${effectiveWaitingOnPane} because ${peerState}. An inactive peer cannot satisfy this condition; choose useful work that can proceed or name the real external blocker.`, true);
+        if (!latestPeer || latestPeerProblem) {
+          return text(`Cannot record this peer wait: ${latestPeerProblem || "the peer goal is no longer active"}. No action was applied; choose a valid decision from current evidence.`, true);
         }
         effectiveWaitingOnPane = latestPeer.paneId;
       }
       const progress = waitingFor
         ? `${params.progress.trim()}\nWaiting for: ${waitingFor}`
         : params.progress.trim();
-      if (mode() === "live") {
-        const result = await recordDecision(binding, "leave", {
-          progress,
-          action: waitingFor
-            ? `Left the worker alone until ${waitingFor} or the next bounded review.`
-            : "Left the healthy worker running until new evidence or the next review.",
-          wait: waitingFor ? {
-            condition: waitingFor,
-            reviewAt,
-            ...(waitingOnGoalId ? { goalId: waitingOnGoalId } : {}),
-          } : undefined,
-          reviewAt: waitingFor ? undefined : params.review_at?.trim(),
-          evidence: params.evidence || binding.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-        });
-        const runtime = runtimeFor(binding);
-        runtime.pendingCursor = undefined;
-        if (result.auditError) warning += `\nAudit warning: ${result.auditError.message}`;
-      }
+      const result = await recordDecision(binding, "leave", {
+        progress,
+        action: waitingFor
+          ? `Left the worker alone until ${waitingFor} or the next bounded review.`
+          : "Left the healthy worker running until new evidence or the next review.",
+        wait: waitingFor ? {
+          condition: waitingFor,
+          reviewAt,
+          ...(waitingOnGoalId ? { goalId: waitingOnGoalId } : {}),
+        } : undefined,
+        reviewAt: waitingFor ? undefined : params.review_at?.trim(),
+        evidence: params.evidence || binding.evidence,
+        observationCursor: runtimeFor(binding).pendingCursor,
+      });
+      const runtime = runtimeFor(binding);
+      runtime.pendingCursor = undefined;
+      if (result.auditError) warning += `\nAudit warning: ${result.auditError.message}`;
       scheduleReview(binding, deadline ? deadline - Date.now() : reviewIntervalMs());
       reviewTurn.close(params.pane_id);
       try { await armReviewTimer(); }
       catch (error) { warning += `\nReview timer warning: ${error.message}`; }
       const state = waitingFor ? `waiting for ${waitingFor}` : "working";
-      return text(`${mode() === "live" ? "Left" : `${mode()} mode: would leave`} ${params.pane_id} ${state}.\n${progress}${warning}\n\nEnd this supervisor turn now.`);
+      return text(`Left ${params.pane_id} ${state}.\n${progress}${warning}\n\nEnd this supervisor turn now.`);
     },
   });
 
@@ -1643,15 +1626,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         );
         const canRecover = !agent && canRecoverAgentSession(binding.agentSession);
         if (mismatch && !canRecover) return text(`Refusing to continue: ${mismatch}.`, true);
-        if (mode() !== "live") {
-          reviewTurn.close(params.pane_id);
-          const action = canRecover && !pane
-            ? `create a new routing pane and resume the exact ${binding.agentSession.agent} session for`
-            : canRecover
-              ? `resume the exact ${binding.agentSession.agent} session in`
-              : "prompt";
-          return text(`${mode()} mode: would ${action} ${params.pane_id}: ${params.message.trim()}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
-        }
         let liveSnapshot = await client.snapshot();
         let liveAgent = findAgent(liveSnapshot, params.pane_id);
         let livePane = findPane(liveSnapshot, params.pane_id);
@@ -1907,20 +1881,18 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
         return text(`Cannot schedule review_at ${reviewAt}; ${error.message}.`, true);
       }
       let warning = "";
-      if (mode() === "live") {
-        const result = await recordDecision(binding, "ask_human", {
-          progress: `Human input is required: ${params.question.trim()}`,
-          action: params.question.trim(),
-          evidence: params.evidence || binding.evidence,
-          observationCursor: runtimeFor(binding).pendingCursor,
-          wait: {
-            condition: `the human's answer to: ${params.question.trim()}`,
-            reviewAt,
-          },
-        });
-        runtimeFor(binding).pendingCursor = undefined;
-        if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
-      }
+      const result = await recordDecision(binding, "ask_human", {
+        progress: `Human input is required: ${params.question.trim()}`,
+        action: params.question.trim(),
+        evidence: params.evidence || binding.evidence,
+        observationCursor: runtimeFor(binding).pendingCursor,
+        wait: {
+          condition: `the human's answer to: ${params.question.trim()}`,
+          reviewAt,
+        },
+      });
+      runtimeFor(binding).pendingCursor = undefined;
+      if (result.auditError) warning = `\nAudit warning: ${result.auditError.message}`;
       const runtime = runtimeFor(binding);
       runtime.awaitingHuman = true;
       runtime.nextReviewAt = reviewAt;
@@ -1946,10 +1918,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
       if (fenceError) return text(fenceError, true);
       const binding = await bindingForPane(params.pane_id);
       if (!binding) return text(`${params.pane_id} is not supervised.`, true);
-      if (mode() !== "live") {
-        reviewTurn.close(params.pane_id);
-        return text(`${mode()} mode: evidence supports accepting ${params.pane_id}, but its goal binding remains active.\n${params.summary}\n\nEnd this supervisor turn now. Wait for Herdr's next worker event; do not poll.`);
-      }
       let result;
       try {
         const decision = await withGoalActionLock(defaultGoalsRoot(), binding.goalId, async () => {
@@ -2005,7 +1973,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("supervise", {
     description: "Supervise a pane: /supervise <pane> <goal> or /supervise <pane> --goal-id <id>",
     async handler(args, ctx) {
-      if (!requireEnabled(ctx)) return;
       const [paneId, ...goalParts] = args.trim().split(/\s+/);
       const goal = goalParts.join(" ");
       if (!paneId || !goal) return ctx.ui.notify("Usage: /supervise <pane> <goal>", "warning");
@@ -2030,7 +1997,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("supervised", {
     description: "Show supervised workers and goals",
     async handler(_args, ctx) {
-      if (!requireEnabled(ctx)) return;
       try { ctx.ui.notify(await status(), "info"); }
       catch (error) { ctx.ui.notify(error.message, "error"); }
     },
@@ -2039,7 +2005,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   pi.registerCommand("unsupervise", {
     description: "Stop supervising a pane without stopping it",
     async handler(args, ctx) {
-      if (!requireEnabled(ctx)) return;
       const paneId = args.trim();
       if (!paneId) return ctx.ui.notify("Usage: /unsupervise <pane>", "warning");
       try {
@@ -2086,7 +2051,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("input", (event) => {
-    if (!enabled()) return { action: "continue" };
     const automaticReview = reviewTurn.isBusy() || activeGlobalReview || reviewPumpRunning;
     if (
       event.source === "extension"
@@ -2132,7 +2096,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   pi.on("before_agent_start", (event) => {
-    if (!enabled()) return;
     agentTurnActive = true;
     if (activeGlobalReview || reviewTurn.isBusy()) {
       activateReviewTools(activeGlobalReview ? globalReviewTools : focusedReviewTools);
@@ -2190,7 +2153,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   }
 
   pi.on("message_start", async (event) => {
-    if (!enabled()) return;
     if (event.message.role !== "custom" || event.message.customType !== humanFollowUpMessageType) return;
     const deliveryId = (event.message.details as { deliveryId?: unknown } | undefined)?.deliveryId;
     if (typeof deliveryId !== "string" || !pendingHumanFollowUps.delete(deliveryId)) return;
@@ -2207,7 +2169,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("context", (event) => {
-    if (!enabled()) return;
     let latestReview = -1;
     for (let index = event.messages.length - 1; index >= 0; index -= 1) {
       if ([reviewMessageType, globalReviewMessageType].includes((event.messages[index] as any).customType)) {
@@ -2234,11 +2195,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
 
   pi.on("session_start", async (_event, ctx) => {
     shuttingDown = false;
-    if (!enabled()) {
-      pi.setActiveTools(pi.getActiveTools().filter((tool) => !supervisorTools.includes(tool)));
-      ctx.ui.setStatus("herdr-supervisor", undefined);
-      return;
-    }
     globalState = await loadGlobalReviewState();
     const goals = await activeBindings();
     for (const binding of goals.active) {
@@ -2269,7 +2225,6 @@ export default function herdrSupervisor(pi: ExtensionAPI, services: SupervisorSe
   });
 
   pi.on("agent_settled", async () => {
-    if (!enabled()) return;
     agentTurnActive = false;
     restoreOrdinaryTools();
     if (await settleGlobalReview()) {

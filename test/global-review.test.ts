@@ -14,6 +14,15 @@ import {
 
 const session = { source: "herdr:codex", agent: "codex", kind: "id", value: "session_one" };
 
+test("global snapshot bounds goal-read errors without inventing worker state", () => {
+  const snapshot = buildGlobalSnapshot([], [], { agents: [], panes: [] }, {
+    goalErrors: [{ goalId: "g_broken", error: new Error("x".repeat(2000)) }],
+  });
+  assert.equal(snapshot.supervisorHealth.unreadableGoals[0].goalId, "g_broken");
+  assert.equal(snapshot.supervisorHealth.unreadableGoals[0].error.length, 1000);
+  assert.deepEqual(snapshot.goals, []);
+});
+
 test("global snapshot is compact current state rather than goal history", () => {
   const snapshot = buildGlobalSnapshot([{
     goalId: "g_one",
@@ -35,7 +44,8 @@ test("global snapshot is compact current state rather than goal history", () => 
   }, { observerConnected: true, pendingFocusedReviews: 0 }, new Date("2026-08-29T01:00:00.000Z"));
 
   assert.equal(snapshot.goals[0].workerState, "idle");
-  assert.equal(snapshot.goals[0].progressAgeMs, 3_600_000);
+  assert.equal(snapshot.goals[0].checkpointAgeMs, 3_600_000);
+  assert.equal("progressAgeMs" in snapshot.goals[0], false);
   assert.equal(snapshot.goals[0].wait.condition, "the pipeline result");
   assert.deepEqual(snapshot.goals[1], {
     goalId: "g_unstarted",
@@ -83,6 +93,9 @@ test("global review routes an actionable finding into ordinary focused review", 
   ].join("\n"), new Date("2026-09-05T01:00:00.000Z"));
 
   assert.match(message, /Findings report facts; reconsider routes action/);
+  assert.match(message, /Record exactly one successful result with supervisor_global_result/);
+  assert.match(message, /rejects a result before routing worker action, correct it and retry in this turn/);
+  assert.match(message, /never repeat a successful result/);
   assert.match(message, /Do not merely repeat an actionable finding/);
   assert.match(message, /put that exact fact and goal in reconsider/);
   assert.match(message, /ask the human one concrete question when durable authority is needed/);

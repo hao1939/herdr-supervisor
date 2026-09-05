@@ -49,16 +49,21 @@ docker compose up -d --build
 docker compose exec herdr herdr
 ```
 
-In the Herdr UI, open the one dedicated supervisor pane and start Pi with an
-explicit mode:
+In the Herdr UI, open the one dedicated supervisor pane and explicitly load the
+supervisor extension:
 
 ```sh
-pi --supervisor-mode live
+pi -e /opt/herdr-supervisor/container/supervisor-extension.ts
 ```
 
-The extension is available to other Pi sessions in the container but remains
-inert unless they also select a mode. Talk to the supervisor — describe what
-you want done and it handles the rest.
+Ordinary `pi` sessions do not load the supervisor. Talk to the dedicated
+supervisor — describe what you want done and it handles the rest.
+
+On upgrade, startup removes only the old container-managed auto-discovery
+symlink. Operator-owned entries are preserved. The legacy
+`container/pi-extension.ts` entry point now reports a migration error without
+loading supervision; update old launch commands to the explicit command above
+and remove any custom supervisor auto-discovery entries.
 
 After starting or restarting that agent, name it so external diagnostics and
 optional management panes can address it without relying on a recyclable pane
@@ -94,7 +99,6 @@ state at any time.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HERDR_SUPERVISOR_MODE` | `off` | `off`, `observe`, `dry-run`, or `live`; prefer the per-Pi flag when only one pane should supervise |
 | `HERDR_SUPERVISOR_CODEX_FULL_ACCESS` | `0` | Set to `1` for unattended operation (see Security below) |
 | `HERDR_SUPERVISOR_DIRECTORY` | `/app` | Supervisor's stable infrastructure directory |
 | `HERDR_WORKSPACE` | Docker volume | Project directory mounted at `/app` in the container |
@@ -150,7 +154,7 @@ confirm that the replacement has:
 - persistent home storage for Herdr and native agent sessions;
 - the configured model credentials or gateway settings;
 - network access to that gateway and any required source-control provider; and
-- the same supervisor mode and full-access choice.
+- the same full-access choice.
 
 After replacement, open Herdr, run `/supervised`, and verify one existing goal's
 exact pane and native session before trusting unattended work. Provider login
@@ -176,21 +180,22 @@ npm install
 Start Pi in a Herdr pane from a stable directory separate from any worker project:
 
 ```sh
-supervisor_extension=/path/to/herdr-supervisor/src/extension.ts
+supervisor_extension=/path/to/herdr-supervisor/container/supervisor-extension.ts
 cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-pi -e "$supervisor_extension" --supervisor-mode live
+pi -e "$supervisor_extension"
 ```
 
-Always choose the mode explicitly. Without `--supervisor-mode` or
-`HERDR_SUPERVISOR_MODE`, the extension is inert. Do not copy or link it into
-Pi's user-wide `~/.pi/agent/extensions` directory: every ordinary Pi session
-would discover it even though only the dedicated supervisor should own this
-goal store.
+The supervisor applies validated decisions whenever it is running. Remove the
+obsolete `--supervisor-mode` and `HERDR_SUPERVISOR_MODE` settings before startup;
+they are rejected so a formerly passive setup cannot silently enable actions.
+Do not copy or link the extension into Pi's user-wide or project auto-discovery
+directories, or configure it as a default extension: only the dedicated Pi
+should load it through `-e` and own the goal store.
 
-After passive behavior is verified, use `--supervisor-mode dry-run` to let the
-supervisor review events without applying decisions. Ordinary Pi tools remain
-available for direct human requests and infrastructure operations. During an
-automatic focused or global review, the extension temporarily exposes only its
+Use `/supervised` and existing logs for inspection, and isolated tests for
+validation. Ordinary Pi tools remain available for direct human requests and
+infrastructure operations. During an automatic focused or global review, the
+extension temporarily exposes only its
 supervision tools and restores the ordinary tools afterward. An operator may
 still pass `--no-builtin-tools` for a deliberately restricted deployment,
 accepting that such a session cannot operate `event-watchd` itself.
