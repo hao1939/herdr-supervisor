@@ -154,9 +154,9 @@ ordinary Pi sessions do not read goals, subscribe to Herdr, schedule reviews,
 alter model context, or expose supervisor tools. Startup removes only the known
 legacy container-managed discovery symlink, preserving operator-owned entries.
 Herdr restores native Pi sessions without their original extension arguments,
-so the container wrapper records the pane ID only when that exact explicit
-supervisor entry is launched. A later native resume in the same durable pane
-reapplies the entry; every other pane remains ordinary. Explicitly launching it
+so the explicit container entry records its Herdr pane ID and native Pi session.
+A later native resume reapplies the entry only when both the durable pane and
+native session match; every other pane remains ordinary. Explicitly launching it
 in a new pane transfers this one local role marker. This preserves explicit
 selection across process and container restarts without global discovery,
 another daemon, or a second supervisor state model.
