@@ -2,7 +2,9 @@
 set -eu
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
+supervisor_install="${HERDR_SUPERVISOR_INSTALL:-/opt/herdr-supervisor}"
 supervisor_extension="/opt/herdr-supervisor/container/supervisor-extension.ts"
+supervisor_marker_writer="${supervisor_install}/container/write-supervisor-pane-marker.mjs"
 supervisor_goals="${HERDR_SUPERVISOR_GOALS:-${XDG_STATE_HOME:-/home/node/.local/state}/herdr-supervisor/goals}"
 supervisor_pane_file="${supervisor_goals}/.supervisor/pane-id"
 
@@ -40,16 +42,7 @@ for argument in "$@"; do
 done
 
 if [ "$explicit_supervisor" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ]; then
-  marker_directory=$(dirname "$supervisor_pane_file")
-  marker_temporary="${supervisor_pane_file}.$$"
-  (
-    umask 077
-    mkdir -p "$marker_directory"
-    printf '%s\n' "$HERDR_PANE_ID" >"$marker_temporary"
-    sync -f "$marker_temporary"
-    mv -f "$marker_temporary" "$supervisor_pane_file"
-    sync -f "$marker_directory"
-  )
+  node "$supervisor_marker_writer" "$supervisor_pane_file" "$HERDR_PANE_ID"
 elif [ -n "${HERDR_PANE_ID:-}" ] \
   && [ -f "$supervisor_pane_file" ] \
   && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ]; then

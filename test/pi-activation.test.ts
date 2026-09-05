@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -16,6 +16,7 @@ const legacyExtension = fileURLToPath(new URL("../container/pi-extension.ts", im
 const managedTarget = "/opt/herdr-supervisor/container/pi-extension.ts";
 const piWrapper = fileURLToPath(new URL("../container/bin/pi", import.meta.url));
 const containerActiveExtension = "/opt/herdr-supervisor/container/supervisor-extension.ts";
+const supervisorInstall = fileURLToPath(new URL("..", import.meta.url));
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "herdr-pi-activation-"));
@@ -78,6 +79,7 @@ async function wrapperFixture(t) {
       ...process.env,
       HERDR_PANE_ID: paneId,
       HERDR_SUPERVISOR_DIRECTORY: root,
+      HERDR_SUPERVISOR_INSTALL: supervisorInstall,
       HERDR_SUPERVISOR_GOALS: goals,
       ...env,
     },
@@ -117,6 +119,7 @@ test("an explicitly chosen supervisor pane keeps its role across native Pi resum
   const explicit = await state.invoke("w1:p2", ["-e", containerActiveExtension, "--model", "test"]);
   assert.equal(explicit.stdout, `-e\n${containerActiveExtension}\n--model\ntest\n`);
   assert.equal(await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"), "w1:p2\n");
+  assert.equal((await stat(join(state.goals, ".supervisor", "pane-id"))).mode & 0o777, 0o600);
 
   const resumed = await state.invoke("w1:p2", ["--session", "saved.jsonl"]);
   assert.equal(resumed.stdout, `-e\n${containerActiveExtension}\n--session\nsaved.jsonl\n`);
@@ -136,6 +139,21 @@ test("an explicit move transfers restart ownership to the new supervisor pane", 
 
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
   const optionState = await wrapperFixture(t);
+  const afterOptionValue = await optionState.invoke("w1:p2", ["--model", "test", "-e", containerActiveExtension]);
+  assert.equal(afterOptionValue.stdout, `--model\ntest\n-e\n${containerActiveExtension}\n`);
+  assert.equal(
+    await readFile(join(optionState.goals, ".supervisor", "pane-id"), "utf8"),
+    "w1:p2\n",
+  );
+
+  const optionalFlagState = await wrapperFixture(t);
+  const afterOptionalFlag = await optionalFlagState.invoke("w1:p2", ["--print", "-e", containerActiveExtension]);
+  assert.equal(afterOptionalFlag.stdout, `--print\n-e\n${containerActiveExtension}\n`);
+  assert.equal(
+    await readFile(join(optionalFlagState.goals, ".supervisor", "pane-id"), "utf8"),
+    "w1:p2\n",
+  );
+
   const promptArgument = await optionState.invoke("w1:p2", ["review", "-e", containerActiveExtension]);
   assert.equal(promptArgument.stdout, `review\n-e\n${containerActiveExtension}\n`);
   assert.equal(
