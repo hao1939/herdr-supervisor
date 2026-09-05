@@ -143,12 +143,13 @@ dependency scheduler.
 
 ## Scope and remaining limits
 
-The runtime-source diff is a net reduction of 27 lines. There is one execution
+The live experiment candidate's runtime-source diff is a net reduction of
+27 lines. There is one execution
 path, no new persisted field, and no speculative progress metric or dependency
 mechanism. The original repository and its unrelated changes were not edited;
 the implementation lives on `refactor/simple-supervision-loop` in the isolated
-worktree loaded by the local supervisor. Nothing was pushed or deployed
-remotely.
+worktree loaded by the local supervisor. At this experiment cutoff, nothing had
+been pushed or deployed remotely.
 
 Goal-read failures and routing isolation were exercised in temporary test
 stores, not by corrupting the live experiment. A read-only snapshot of the real
@@ -161,3 +162,41 @@ native sessions were retained, and neither standing goal was completed. The
 existing Herdr limitation around identity-conditioned TUI writes is unchanged.
 The reload-time display-name `write EPIPE` warning recurred but did not prevent
 the subsequent focused review; no recovery subsystem was added for it.
+
+## PR integration: explicit activation without modes
+
+PR #83 was reconciled with main `d048fd9` in a separate integration worktree.
+Main's Codex startup update-gate safeguards and their tests are unchanged.
+Its explicit-supervisor-activation requirement now uses Pi's existing loading
+boundary instead of mode checks: only the dedicated supervisor loads
+`src/extension.ts` with `-e`. Ordinary container Pi sessions no longer discover
+the supervisor automatically.
+
+Container upgrades remove only the exact discovery symlink installed by older
+images. Operator-owned files, directories, and other symlinks are preserved.
+The legacy container extension entry point reports a migration error before
+importing any supervisor code, so stale discovery links cannot activate it.
+Obsolete mode settings, including `off`, are rejected by the active extension.
+Custom auto-discovery entries and default-extension settings must be removed
+by their operator; do not install the active source extension there.
+
+Integration validation on Node 26.8.1:
+
+- `npm run check` and two consecutive full `npm test` runs passed: 318 tests,
+  zero failures. The initial full run hit a timeout in an unchanged native
+  resume test; that file then passed independently and both full reruns passed.
+  No production timeout or test expectation was changed to hide it.
+- Real Pi resource-loader tests cover ordinary and explicit loading, upgrade
+  cleanup, preservation of operator-owned entries, and the inert legacy shim.
+- The candidate Docker image built successfully. The full CI container smoke
+  script passed, including packaged Pi loading with and without the explicit
+  extension, the migration error, production dependencies, stdin preservation,
+  and fail-closed watcher startup.
+- An isolated container started Herdr 0.8.0 and read the goal store successfully.
+- ShellCheck, actionlint, `git diff --check`, and `npm audit --audit-level=high`
+  passed; the audit reported zero vulnerabilities.
+
+The running Scout experiment worktree remained at `f9a3273`, untouched and not
+reloaded during this integration. These isolated startup checks do not claim
+a second live Scout run, long-run scheduling proof, or live corrupt-store
+model handling. The earlier handoff timing and verification limits still apply.

@@ -2,12 +2,15 @@
 set -eu
 
 pi_agent_dir="${PI_CODING_AGENT_DIR:-/home/node/.pi/agent}"
-extension_dir="${pi_agent_dir}/extensions"
+legacy_extension="${pi_agent_dir}/extensions/herdr-supervisor.ts"
 codex_skill_root="${CODEX_HOME:-/home/node/.codex}/skills"
 goal_skill_target="${codex_skill_root}/herdr-goals"
 
-mkdir -p "$extension_dir"
-ln -sfn /opt/herdr-supervisor/container/pi-extension.ts "$extension_dir/herdr-supervisor.ts"
+# Remove only the discovery link installed by previous container versions.
+# Dedicated supervisors now load src/extension.ts explicitly with Pi's -e.
+if [ -L "$legacy_extension" ] && [ "$(readlink "$legacy_extension")" = /opt/herdr-supervisor/container/pi-extension.ts ]; then
+  rm -- "$legacy_extension"
+fi
 
 # Make goal-management guidance available to ordinary Codex management panes
 # without modifying a mounted workspace. Create only a missing entry so an

@@ -49,8 +49,21 @@ docker compose up -d --build
 docker compose exec herdr herdr
 ```
 
-In the Herdr UI, open a pane and type `pi`. The extension loads automatically.
-Talk to the supervisor — describe what you want done and it handles the rest.
+In the Herdr UI, open the one dedicated supervisor pane and explicitly load the
+supervisor extension:
+
+```sh
+pi -e /opt/herdr-supervisor/src/extension.ts
+```
+
+Ordinary `pi` sessions do not load the supervisor. Talk to the dedicated
+supervisor — describe what you want done and it handles the rest.
+
+On upgrade, startup removes only the old container-managed auto-discovery
+symlink. Operator-owned entries are preserved. The legacy
+`container/pi-extension.ts` entry point now reports a migration error without
+loading supervision; update old launch commands to the explicit command above
+and remove any custom supervisor auto-discovery entries.
 
 After starting or restarting that agent, name it so external diagnostics and
 optional management panes can address it without relying on a recyclable pane
@@ -175,6 +188,10 @@ pi -e "$supervisor_extension"
 The supervisor applies validated decisions whenever it is running. Remove the
 obsolete `--supervisor-mode` and `HERDR_SUPERVISOR_MODE` settings before startup;
 they are rejected so a formerly passive setup cannot silently enable actions.
+Do not copy or link the extension into Pi's user-wide or project auto-discovery
+directories, or configure it as a default extension: only the dedicated Pi
+should load it through `-e` and own the goal store.
+
 Use `/supervised` and existing logs for inspection, and isolated tests for
 validation. Ordinary Pi tools remain available for direct human requests and
 infrastructure operations. During an automatic focused or global review, the

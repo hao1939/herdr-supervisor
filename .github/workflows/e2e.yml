@@ -50,6 +50,7 @@ jobs:
           # Start Pi with the supervisor extension in a Herdr pane
           docker exec herdr-e2e \
             herdr agent start supervisor --kind pi --pane w0:p0 -- \
+              -e /opt/herdr-supervisor/src/extension.ts \
               --no-builtin-tools
 
           # Wait for Pi to become interactive

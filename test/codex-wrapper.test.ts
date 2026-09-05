@@ -44,6 +44,16 @@ function run(
   return result.stdout.trim().split("\n");
 }
 
+function runFailure(script: string, args: string[]) {
+  const result = spawnSync(script, args, {
+    encoding: "utf8",
+    env: { ...process.env, HERDR_SUPERVISOR_CODEX_FULL_ACCESS: "0" },
+  });
+  assert.equal(result.status, 2);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /check_for_update_on_startup is managed by the container image/);
+}
+
 async function activeGoal(sessionId = "session-1") {
   const root = await mkdtemp(join(tmpdir(), "herdr-supervisor-goals-"));
   const binding = await registerSupervisedGoal({
@@ -156,6 +166,39 @@ test("a caller-supplied resume prompt remains authoritative", async () => {
 test("new Codex sessions disable image-managed update prompts without a resume-directory override", async () => {
   const script = await wrapper();
   assert.deepEqual(run(script, ["Start work."]), [...managedUpdateConfig, "Start work."]);
+});
+
+test("callers cannot override the image-managed update setting", async () => {
+  const script = await wrapper();
+  for (const args of [
+    ["-c", "check_for_update_on_startup=true", "Start work."],
+    ["--config", "check_for_update_on_startup=false", "Start work."],
+    ["-c", " check_for_update_on_startup = true", "Start work."],
+    ["-ccheck_for_update_on_startup=true", "Start work."],
+    ["-c=check_for_update_on_startup=true", "Start work."],
+    ["--config=check_for_update_on_startup=false", "Start work."],
+  ]) {
+    runFailure(script, args);
+  }
+});
+
+test("unrelated caller configuration remains authoritative", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["-c", 'model_reasoning_effort="high"', "Start work."]), [
+    ...managedUpdateConfig,
+    "-c",
+    'model_reasoning_effort="high"',
+    "Start work.",
+  ]);
+});
+
+test("the end-of-options marker leaves following text to Codex", async () => {
+  const script = await wrapper();
+  assert.deepEqual(run(script, ["--", "-ccheck_for_update_on_startup=true"]), [
+    ...managedUpdateConfig,
+    "--",
+    "-ccheck_for_update_on_startup=true",
+  ]);
 });
 
 test("the wrapper preserves native Codex Goals", async () => {

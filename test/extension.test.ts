@@ -108,7 +108,7 @@ test("removed mode settings fail before supervision tools are installed", () => 
   const previousMode = process.env.HERDR_SUPERVISOR_MODE;
   const previousArgv = process.argv;
   try {
-    for (const value of ["observe", "dry-run", "live", ""]) {
+    for (const value of ["off", "observe", "dry-run", "live", ""]) {
       process.env.HERDR_SUPERVISOR_MODE = value;
       const pi = fakePi();
       assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);

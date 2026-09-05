@@ -148,6 +148,16 @@ against the same root is outside the architecture. This keeps goal lifecycle
 serialization local and avoids pretending to provide a distributed
 transaction across goal files and Herdr worker creation.
 
+The dedicated Pi explicitly loads `src/extension.ts` through Pi's existing `-e`
+option. The container does not install that extension into auto-discovery, so
+ordinary Pi sessions do not read goals, subscribe to Herdr, schedule reviews,
+alter model context, or expose supervisor tools. Startup removes only the known
+legacy container-managed discovery symlink, preserving operator-owned entries.
+The old container entry point fails before loading supervisor code if a stale
+link or launch command still references it. Do not install the active extension
+into user-wide or project discovery or default Pi settings. This keeps explicit
+activation at the loading boundary, without adding a replacement mode or flag.
+
 A supervised goal is not a second task. It is one portable outcome contract
 bound to one exact worker. One worker may use several repositories or
 worktrees without creating more supervisor goals.
