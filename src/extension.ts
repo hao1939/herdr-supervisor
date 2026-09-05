@@ -1326,7 +1326,16 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
     async execute(_id, params) {
       if (!activeGlobalReview) return text("No global supervision review is active.", true);
       if (globalDecisionApplied) return text("The global supervision review already has a result.", true);
-      const goals = await loadSupervisorGoals();
+      const retryableResultError = (message: string) => text(
+        `${message} No global review result was recorded and no focused reviews were queued; correct the problem and retry in this turn.`,
+        true,
+      );
+      let goals: Awaited<ReturnType<typeof loadSupervisorGoals>>;
+      try {
+        goals = await loadSupervisorGoals();
+      } catch (error) {
+        return retryableResultError(`Could not read goals for the global result: ${error.message}.`);
+      }
       const byGoalId = new Map(goals.active.map((binding) => [binding.goalId, binding]));
       const unstartedGoalIds = new Set(goals.unstarted.map((goal) => goal.goalId));
       const unreadableGoalIds = new Set(goals.errors.map((goal) => goal.goalId));
@@ -1337,17 +1346,17 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       ]);
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
+        return retryableResultError(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}.`);
       }
       const unreadableReconsider = params.reconsider.filter((item) => unreadableGoalIds.has(item.goal_id));
       if (unreadableReconsider.length) {
-        return text(`Cannot queue a focused review for unreadable goal(s): ${unreadableReconsider.map((item) => item.goal_id).join(", ")}. Report the read errors as findings; no valid worker binding is available. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
+        return retryableResultError(`Cannot queue a focused review for unreadable goal(s): ${unreadableReconsider.map((item) => item.goal_id).join(", ")}. Report the read errors as findings; no valid worker binding is available.`);
       }
       const unstartedReconsider = [...new Set(params.reconsider
         .map((item) => item.goal_id)
         .filter((goalId) => unstartedGoalIds.has(goalId)))];
       if (unstartedReconsider.length) {
-        return text(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
+        return retryableResultError(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts.`);
       }
       const now = new Date();
       const nextReviewAt = params.next_review_at?.trim()
@@ -1355,7 +1364,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       try {
         reviewDeadline(nextReviewAt, now.getTime());
       } catch (error) {
-        return text(`Invalid next_review_at: ${error.message}. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
+        return retryableResultError(`Invalid next_review_at: ${error.message}.`);
       }
       const findings = params.findings.map((finding) => ({
         problem: finding.problem.trim(),
@@ -1384,7 +1393,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
           recorded = undefined;
         }
         if (recorded === false) {
-          return text(`Could not save the global review result: ${error.message}. No global review result was recorded and no focused reviews were queued; correct the storage problem and retry in this turn.`, true);
+          return retryableResultError(`Could not save the global review result: ${error.message}.`);
         }
         persistenceWarning = recorded
           ? ` The result was recorded, but its final durability check reported: ${error.message}. Do not retry it.`

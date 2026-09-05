@@ -567,8 +567,10 @@ promise to reconsider, not permission to forget the goal.
 
 For a peer wait, the existing status tool supplies current peer progress and
 reconsideration routes pending peer work through an ordinary focused review.
-Queue that reconsideration before recording the real peer condition. The peer
-need not already be working: its queued review runs after this review ends.
+When current evidence gives the peer useful work it can do now, queue that
+reconsideration before recording the real peer condition; do not queue a
+redundant review when the peer is already doing that work. A queued peer need
+not already be working: its review runs after this review ends.
 Code validates peer identity, not whether the peer's current activity can
 eventually satisfy the condition; that remains the model's judgment.
 Silence from the waiting worker does not prove that the peer stayed unchanged.

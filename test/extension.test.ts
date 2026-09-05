@@ -4732,7 +4732,8 @@ test("a global review exposes unstarted goals without pretending they have worke
   });
   assert.equal(invalid.isError, true);
   assert.match(invalid.content[0].text, /no worker/);
-  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+  assert.match(invalid.content[0].text, /No global review result was recorded/);
+  assert.match(invalid.content[0].text, /retry in this turn/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("unstarted-finding", {
     summary: "One saved goal has no worker and needs a human resume decision.",
@@ -4781,6 +4782,8 @@ test("global review reports unreadable goals but cannot route actions to them", 
   });
   assert.equal(rejected.isError, true);
   assert.match(rejected.content[0].text, /no valid worker binding/);
+  assert.match(rejected.content[0].text, /No global review result was recorded/);
+  assert.match(rejected.content[0].text, /retry in this turn/);
   assert.equal((await loadGlobalReviewState(root)).lastReviewedAt, undefined);
   const recorded = await pi.tools.get("supervisor_global_result").execute("valid", {
     summary: "Read error needs attention", findings,
