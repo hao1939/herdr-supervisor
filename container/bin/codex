@@ -102,4 +102,9 @@ if [ "${HERDR_SUPERVISOR_CODEX_FULL_ACCESS:-0}" = "1" ]; then
   fi
 fi
 
+# The container image pins and centrally updates Codex. Disable its startup
+# update check so an image refresh cannot leave restored workers at an
+# interactive upgrade gate before their exact session and native Goal resume.
+set -- -c 'check_for_update_on_startup=false' "$@"
+
 exec /usr/local/bin/codex-agent "$@"
