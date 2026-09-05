@@ -512,10 +512,12 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /goal\.json/);
   assert.match(deliveredPrompts[0].prompt, /single canonical objective/);
   assert.match(deliveredPrompts[0].prompt, /README\.md beside the goal directories.*guidance, not another goal/);
-  assert.match(deliveredPrompts[0].prompt, /goal-store directory.*read-only/);
-  assert.match(deliveredPrompts[0].prompt, /Keep checkpoints and artifacts in goal-owned project or worktree paths/);
-  assert.match(deliveredPrompts[0].prompt, /every other worker's worktree as read-only/);
-  assert.match(deliveredPrompts[0].prompt, /create a separate goal-owned worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Write only in spaces this goal explicitly created or claimed/);
+  assert.match(deliveredPrompts[0].prompt, /Goal store.*read-only/);
+  assert.match(deliveredPrompts[0].prompt, /do not run tests, generators, formatters, installers, or other commands that may write there/);
+  assert.match(deliveredPrompts[0].prompt, /Put checkpoints and artifacts in this goal's project or worktree/);
+  assert.match(deliveredPrompts[0].prompt, /other workers' worktrees are read-only/);
+  assert.match(deliveredPrompts[0].prompt, /use another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /Handoffs stay local/);
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
