@@ -160,6 +160,7 @@ function exactSessionAgent(snapshot, session) {
 
 type SupervisorServices = {
   loadGoals?: typeof loadSupervisorGoals;
+  saveGlobalState?: typeof saveGlobalReviewState;
   workerEventSettleMs?: number;
 };
 
@@ -173,6 +174,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
     throw new Error("Supervisor modes were removed. Remove --supervisor-mode and HERDR_SUPERVISOR_MODE before starting supervision; a running supervisor applies validated decisions.");
   }
   const readGoals = services.loadGoals || loadSupervisorGoals;
+  const persistGlobalState = services.saveGlobalState || saveGlobalReviewState;
   let stopSubscription: undefined | (() => void);
   let reconnectTimer: undefined | ReturnType<typeof setTimeout>;
   let reviewTimer: undefined | ReturnType<typeof setTimeout>;
@@ -1371,10 +1373,23 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
         lastFindingHash: findings.length ? findingHash : undefined,
         lastFinding: findingSummary,
       };
+      let persistenceWarning = "";
       try {
-        await saveGlobalReviewState(nextState);
+        await persistGlobalState(nextState);
       } catch (error) {
-        return text(`Could not save the global review result: ${error.message}. No focused reviews were queued.`, true);
+        let recorded: boolean | undefined;
+        try {
+          recorded = stableHash(await loadGlobalReviewState()) === stableHash(nextState);
+        } catch {
+          recorded = undefined;
+        }
+        if (recorded === false) {
+          return text(`Could not save the global review result: ${error.message}. No global review result was recorded and no focused reviews were queued; correct the storage problem and retry in this turn.`, true);
+        }
+        persistenceWarning = recorded
+          ? ` The result was recorded, but its final durability check reported: ${error.message}. Do not retry it.`
+          : ` The save outcome could not be verified after this error: ${error.message}. This result is treated as recorded to prevent duplicate routing; do not retry it.`;
+        reportBackgroundFailure("Global review result persistence warning", error);
       }
       globalState = nextState;
       const reasons = new Map<string, string[]>();
@@ -1395,16 +1410,24 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       globalDecisionApplied = true;
       globalMissingDecisionRetries = 0;
       armGlobalReviewTimer();
+      let visibility: string;
       if (isNewFinding) {
-        pi.sendMessage({
-          customType: "herdr-supervisor-global-finding",
-          content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
-          display: true,
-        }, { triggerTurn: false, deliverAs: "followUp" });
+        try {
+          pi.sendMessage({
+            customType: "herdr-supervisor-global-finding",
+            content: `Supervisor health review\n${params.summary.trim()}\n\n${findingSummary}`,
+            display: true,
+          }, { triggerTurn: false, deliverAs: "followUp" });
+          visibility = " The new finding was shown once.";
+        } catch (error) {
+          visibility = ` The result was recorded, but the new finding could not be shown: ${error.message}. Do not retry the result.`;
+          reportBackgroundFailure("Could not show the recorded global finding", error);
+        }
+      } else {
+        visibility = " No new finding was shown.";
       }
       const routed = reasons.size ? ` Queued focused reviews for ${[...reasons.keys()].join(", ")}.` : " No focused review is needed.";
-      const visibility = isNewFinding ? " The new finding was shown once." : " No new finding was shown.";
-      return text(`Global review recorded.${routed}${visibility} End this turn without repeating the result.`);
+      return text(`Global review recorded.${routed}${visibility}${persistenceWarning} End this turn without repeating the result.`);
     },
   });
 

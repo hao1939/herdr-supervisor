@@ -183,10 +183,12 @@ by their operator; do not install the active source extension there.
 
 Integration validation on Node 26.8.1:
 
-- `npm run check` and two consecutive full `npm test` runs passed: 318 tests,
-  zero failures. The initial full run hit a timeout in an unchanged native
-  resume test; that file then passed independently and both full reruns passed.
-  No production timeout or test expectation was changed to hide it.
+- `npm run check` passed. Two earlier full `npm test` runs passed 318 tests;
+  after the final activation and result-recovery regressions were added, the
+  latest full run passed all 321 tests. The initial full run hit a timeout in
+  an unchanged native resume test; that file then passed independently and the
+  later full runs passed. No production timeout or test expectation was
+  changed to hide it.
 - Real Pi resource-loader tests cover ordinary and explicit loading, upgrade
   cleanup, preservation of operator-owned entries, and the inert legacy shim.
 - The candidate Docker image built successfully. The full CI container smoke

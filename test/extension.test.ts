@@ -4870,6 +4870,98 @@ test("focused worker review runs before a due global review", async (t) => {
   pi.events.get("session_shutdown")();
 });
 
+test("a pre-commit global-result failure explicitly permits one safe retry", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  let saveAttempts = 0;
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi, {
+    saveGlobalState: async (state) => {
+      saveAttempts += 1;
+      if (saveAttempts === 1) throw new Error("storage rejected the write");
+      return saveGlobalReviewState(state);
+    },
+  });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  const first = await pi.tools.get("supervisor_global_result").execute("first", {
+    summary: "No cross-goal fault remains.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(first.isError, true);
+  assert.match(first.content[0].text, /No global review result was recorded/);
+  assert.match(first.content[0].text, /retry in this turn/);
+
+  const retry = await pi.tools.get("supervisor_global_result").execute("retry", {
+    summary: "No cross-goal fault remains.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(retry.isError, false);
+  assert.equal(saveAttempts, 2);
+  pi.events.get("session_shutdown")();
+});
+
+test("post-commit global-result failures return success with no-retry guidance", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi, {
+    saveGlobalState: async (state) => {
+      await saveGlobalReviewState(state);
+      throw new Error("directory sync failed after replacement");
+    },
+  });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  const sendMessage = pi.sendMessage;
+  pi.sendMessage = (message, options) => {
+    if (message.customType === "herdr-supervisor-global-finding") {
+      throw new Error("finding delivery failed");
+    }
+    return sendMessage(message, options);
+  };
+
+  const result = await pi.tools.get("supervisor_global_result").execute("recorded", {
+    summary: "One cross-goal fault remains.",
+    findings: [{
+      problem: "The goal needs a focused evidence check",
+      evidence: ["Current worker state and checkpoint need reconciliation"],
+      affected_goal_ids: ["g_test"],
+    }],
+    reconsider: [],
+  });
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /final durability check reported/);
+  assert.match(result.content[0].text, /new finding could not be shown/);
+  assert.match(result.content[0].text, /Do not retry/);
+  assert.match((await loadGlobalReviewState(root)).lastFinding, /focused evidence check/);
+  const repeated = await pi.tools.get("supervisor_global_result").execute("repeated", {
+    summary: "Do not apply this twice.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already has a result/);
+  pi.events.get("session_shutdown")();
+});
+
 test("an invalid global result has no partial routing", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;

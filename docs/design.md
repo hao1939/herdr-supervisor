@@ -206,6 +206,9 @@ The supervisor sleeps otherwise. It does not poll workers or providers. The
 optional shared watcher performs bounded provider reads without model turns.
 The low-frequency global review remains a safety net for missed system-level
 events, not the primary way to discover facts that a cheap observer can report.
+Its result is applied once: a failure before the state changes explicitly permits
+a corrected retry, while a recorded or indeterminate write is fenced as applied.
+Later notification failure is reported as a warning and never reopens routing.
 
 ### One review, one decision
 
