@@ -185,7 +185,7 @@ Integration validation on Node 26.8.1:
 
 - `npm run check` passed. Two earlier full `npm test` runs passed 318 tests;
   after the final activation and result-recovery regressions were added, the
-  latest full run passed all 321 tests. The initial full run hit a timeout in
+  latest full run passed all 323 tests. The initial full run hit a timeout in
   an unchanged native resume test; that file then passed independently and the
   later full runs passed. No production timeout or test expectation was
   changed to hide it.

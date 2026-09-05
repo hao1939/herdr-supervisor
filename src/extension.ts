@@ -1332,7 +1332,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       );
       let goals: Awaited<ReturnType<typeof loadSupervisorGoals>>;
       try {
-        goals = await loadSupervisorGoals();
+        goals = await readGoals();
       } catch (error) {
         return retryableResultError(`Could not read goals for the global result: ${error.message}.`);
       }

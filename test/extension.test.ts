@@ -10,7 +10,7 @@ import { installSupervisorGoal, loadSupervisorGoals, recordDecision, registerSup
 import { goalPaths, loadGoalContract, readAudit } from "../src/goal-store.ts";
 import { withGoalActionLock } from "../src/goal-action-lock.mjs";
 import { HerdrClient } from "../src/herdr-client.ts";
-import { loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
+import { globalReviewPath, loadGlobalReviewState, saveGlobalReviewState } from "../src/global-review.ts";
 import { terminalOutputCursor } from "../src/observation.ts";
 import { nativeGoalPrompt } from "../src/prompts.ts";
 
@@ -4914,6 +4914,50 @@ test("a pre-commit global-result failure explicitly permits one safe retry", asy
   pi.events.get("session_shutdown")();
 });
 
+test("a goal-store read failure records nothing and explicitly permits retry", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  let failGoalRead = false;
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi, {
+    loadGoals: async () => {
+      if (failGoalRead) throw new Error("goal store is temporarily unreadable");
+      return loadSupervisorGoals();
+    },
+  });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  failGoalRead = true;
+  const failed = await pi.tools.get("supervisor_global_result").execute("unreadable", {
+    summary: "The snapshot could not be validated.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(failed.isError, true);
+  assert.match(failed.content[0].text, /goal store is temporarily unreadable/);
+  assert.match(failed.content[0].text, /No global review result was recorded/);
+  assert.match(failed.content[0].text, /retry in this turn/);
+  assert.equal((await loadGlobalReviewState(root)).lastReviewedAt, undefined);
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length, 0);
+
+  failGoalRead = false;
+  const retry = await pi.tools.get("supervisor_global_result").execute("retry", {
+    summary: "No cross-goal fault remains.",
+    findings: [],
+    reconsider: [],
+  });
+  assert.equal(retry.isError, false);
+  pi.events.get("session_shutdown")();
+});
+
 test("post-commit global-result failures return success with no-retry guidance", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -4962,6 +5006,50 @@ test("post-commit global-result failures return success with no-retry guidance",
   });
   assert.equal(repeated.isError, true);
   assert.match(repeated.content[0].text, /already has a result/);
+  pi.events.get("session_shutdown")();
+});
+
+test("an unverifiable global-result write is routed once and fenced as applied", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "working" }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+  const pi = fakePi({ globalReviewMs: "1000" });
+  herdrSupervisor(pi, {
+    saveGlobalState: async () => {
+      await mkdir(join(root, ".supervisor"), { recursive: true });
+      await writeFile(globalReviewPath(root), "unreadable state");
+      throw new Error("save outcome is unknown");
+    },
+  });
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+
+  const result = await pi.tools.get("supervisor_global_result").execute("uncertain", {
+    summary: "The worker needs a focused evidence check.",
+    findings: [],
+    reconsider: [{ goal_id: "g_test", reason: "Check current worker evidence" }],
+  });
+  assert.equal(result.isError, false);
+  assert.match(result.content[0].text, /save outcome could not be verified/);
+  assert.match(result.content[0].text, /treated as recorded/);
+  assert.match(result.content[0].text, /do not retry/);
+
+  const repeated = await pi.tools.get("supervisor_global_result").execute("repeated", {
+    summary: "Do not route the same result again.",
+    findings: [],
+    reconsider: [{ goal_id: "g_test", reason: "Duplicate routing" }],
+  });
+  assert.equal(repeated.isError, true);
+  assert.match(repeated.content[0].text, /already has a result/);
+  await pi.events.get("agent_settled")();
+  await waitFor(() => pi.messages.some((message) => message.customType === "herdr-supervisor-review"));
+  assert.equal(pi.messages.filter((message) => message.customType === "herdr-supervisor-review").length, 1);
   pi.events.get("session_shutdown")();
 });
 
