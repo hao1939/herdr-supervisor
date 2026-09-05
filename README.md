@@ -56,12 +56,12 @@ supervisor extension:
 pi -e /opt/herdr-supervisor/container/supervisor-extension.ts
 ```
 
-That explicit container launch records the current Herdr pane ID and native Pi
-session in local supervisor state. When Herdr later restores the same native Pi
-session after a container restart, the wrapper reapplies the extension to that
-exact pane and session. Ordinary `pi` sessions in other panes do not load the
-supervisor. Explicitly starting the supervisor in a different pane transfers
-restart ownership there.
+After the explicit extension starts, it records the current Herdr pane ID and
+native Pi session in local supervisor state. When Herdr later restores the same
+native Pi session after a container restart, the wrapper reapplies the extension
+to that exact pane and session. Ordinary `pi` sessions in other panes do not load
+the supervisor. Explicitly starting the supervisor in a different pane transfers
+restart ownership there after its session starts.
 Talk to the dedicated supervisor — describe what you want done and it handles
 the rest.
 

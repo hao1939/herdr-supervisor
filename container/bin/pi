@@ -2,9 +2,7 @@
 set -eu
 
 supervisor_directory="${HERDR_SUPERVISOR_DIRECTORY:-/app}"
-supervisor_install="${HERDR_SUPERVISOR_INSTALL:-/opt/herdr-supervisor}"
 supervisor_extension="/opt/herdr-supervisor/container/supervisor-extension.ts"
-supervisor_marker_writer="${supervisor_install}/container/write-supervisor-pane-marker.mjs"
 supervisor_goals="${HERDR_SUPERVISOR_GOALS:-${XDG_STATE_HOME:-/home/node/.local/state}/herdr-supervisor/goals}"
 supervisor_pane_file="${supervisor_goals}/.supervisor/pane-id"
 
@@ -17,10 +15,10 @@ case "$supervisor_directory" in
 esac
 
 # Herdr restores a native Pi session but not the extension argument that gave
-# that session its supervisor role. Remember only an explicit container launch,
-# then restore the same role only for that exact pane and native Pi session.
-# Pi parses options on either side of its optional initial message; only -- ends
-# option parsing.
+# that session its supervisor role. Restore that role only when the marker
+# written by the explicit extension's session_start hook matches this exact pane
+# and native Pi session. Pi parses options on either side of its optional
+# initial message; only -- ends option parsing.
 explicit_supervisor=0
 expect_extension=0
 expect_session=0
@@ -67,9 +65,8 @@ for argument in "$@"; do
   esac
 done
 
-if [ "$explicit_supervisor" -eq 1 ] && [ -n "${HERDR_PANE_ID:-}" ] && [ -n "$session_ref" ]; then
-  node "$supervisor_marker_writer" "$supervisor_pane_file" "$HERDR_PANE_ID" "$session_ref"
-elif [ -n "${HERDR_PANE_ID:-}" ] \
+if [ "$explicit_supervisor" -eq 0 ] \
+  && [ -n "${HERDR_PANE_ID:-}" ] \
   && [ -f "$supervisor_pane_file" ] \
   && [ "$(sed -n '1p' "$supervisor_pane_file")" = "$HERDR_PANE_ID" ] \
   && [ -n "$session_ref" ] \
