@@ -136,8 +136,9 @@ test("optional supervisor tool fields accept null without placeholder values", (
   assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
   assert.match(
     JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
-    /verified automatic callback with no concrete near-term transition, use null/,
+    /verified goal-linked external watch with no concrete near-term transition, use null/,
   );
+  assert.match(pi.tools.get("supervisor_leave").description, /normal interval when a verified goal-linked external watch owns change detection/);
   assert.match(
     JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
     /do not reuse a prior arbitrary safety deadline/,
