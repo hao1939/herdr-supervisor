@@ -231,6 +231,18 @@ test("a former supervisor cannot reclaim ownership after an explicit transfer", 
   );
 });
 
+test("an unsuccessful initial marker update remains retryable", async (t) => {
+  const state = await wrapperFixture(t);
+  const handler = await supervisorSessionHandler(state.goals);
+  await emitSupervisorSession(handler, "w1:p2", join(state.root, "invalid.jsonl"), "");
+  await emitSupervisorSession(handler, "w1:p2", join(state.root, "valid.jsonl"), "valid-session");
+
+  assert.equal(
+    await readFile(join(state.goals, ".supervisor", "pane-id"), "utf8"),
+    `w1:p2\n${join(state.root, "valid.jsonl")}\nvalid-session\n`,
+  );
+});
+
 test("wrapper recognizes extension options anywhere before the option boundary", async (t) => {
   const optionState = await wrapperFixture(t);
   await recordSupervisorSession(optionState.goals, "w1:p2", join(optionState.root, "saved.jsonl"));
