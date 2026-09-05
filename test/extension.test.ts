@@ -3635,9 +3635,14 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pi.messages.length, 1, "the generic interval must not replace the decision deadline");
   t.mock.timers.tick(1000);
-  for (let attempt = 0; attempt < 100 && pi.messages.length < 2; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  const realWaitDeadline = performance.now() + 1000;
+  await new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (pi.messages.length < 2 && performance.now() < realWaitDeadline) return;
+      clearInterval(interval);
+      resolve(undefined);
+    }, 5);
+  });
   assert.equal(pi.messages.length, 2, "the decision deadline must still wake the review");
   assert.match(pi.messages[1].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();
