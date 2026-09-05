@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -115,7 +115,13 @@ async function supervisorSessionHandler(goals: string) {
 }
 
 async function emitSupervisorSession(handler, paneId: string, sessionFile: string, sessionId = "session-id") {
-  await writeFile(sessionFile, "");
+  await writeFile(sessionFile, `${JSON.stringify({
+    type: "session",
+    version: 3,
+    id: sessionId,
+    timestamp: new Date().toISOString(),
+    cwd: dirname(sessionFile),
+  })}\n`);
   const previousPane = process.env.HERDR_PANE_ID;
   process.env.HERDR_PANE_ID = paneId;
   try {
@@ -283,6 +289,10 @@ test("wrapper restores only canonical session marker matches", async (t) => {
 
   const conflictingIdentity = await state.invoke("w1:p2", ["--session", "exact.jsonl", "--session-id", "exact-session"]);
   assert.equal(conflictingIdentity.stdout, "--session\nexact.jsonl\n--session-id\nexact-session\n");
+
+  await writeFile(join(state.root, "exact.jsonl"), `${JSON.stringify({ type: "session", version: 3, id: "replacement" })}\n`);
+  const replacedFile = await state.invoke("w1:p2", ["--session", "exact.jsonl"]);
+  assert.equal(replacedFile.stdout, "--session\nexact.jsonl\n");
 });
 
 test("wrapper restores the caller umask before launching Pi", async (t) => {
