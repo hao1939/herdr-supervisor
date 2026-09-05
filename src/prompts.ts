@@ -193,6 +193,7 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
+    "Before extending a peer wait, use supervisor_status to compare the peer's current progress with the recorded condition. If the peer has pending work, request its focused review with supervisor_reconsider. A settled process or silence from the focused worker does not prove that the peer condition is unchanged. Recorded waits and earlier steering describe execution; they do not add lasting restrictions to the goal contract.",
     "Run independent workers and validations concurrently. Submit every ready, nonduplicate validation independently; do not wait for another run to finish. Keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. Delay only the exact operation with a destructive or shared-resource conflict, and handle a concrete provider rejection without delaying unaffected work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",

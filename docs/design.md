@@ -549,7 +549,14 @@ goal's acceptance criteria.
 
 Before leaving settled work, the model checks whether safe independent work,
 alternative proof, mitigation, or preparation can still proceed. A wait is a
-promise to reconsider, not permission to forget the goal:
+promise to reconsider, not permission to forget the goal.
+
+For a peer wait, the existing status tool supplies current peer progress and
+reconsideration routes pending peer work through an ordinary focused review.
+Silence from the waiting worker does not prove that the peer stayed unchanged.
+Recorded waits and earlier steering are execution context, not new lasting
+restrictions on the portable goal. Resolve these cases with existing facts and
+actions rather than a new dependency mechanism.
 
 - a direct peer wait resolves the selected pane to the peer's durable goal ID;
   when a peer review proves that condition materially changed, the model
