@@ -97,7 +97,6 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
         "",
         "Goals waiting on this goal",
         ...dependents.map((dependent) => `- ${dependent.goalId} (${dependent.paneId}): ${dependent.wait?.condition}`),
-        "If this review proves that one of these conditions materially changed, call supervisor_reconsider for exactly those panes before the decision tool. Do not wake them merely because this goal recorded another decision.",
       ]
     : [];
 
@@ -105,7 +104,7 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
     `Worker review · ${binding.agentSession.agent} ${binding.paneId}`,
     `Review time: ${now.toISOString()} (UTC)`,
     "",
-    `This turn decides only goal ${binding.goalId || "(local)"}. Other supervised goals may provide coordination context through supervisor_status, but only this worker's evidence can prove this goal complete.`,
+    `Goal ID: ${binding.goalId || "(local)"}`,
     "",
     "Goal",
     `  ${binding.goal}`,
@@ -128,24 +127,6 @@ export function reviewMessage(binding, agent, reason, now = new Date(), dependen
     "",
     "Worker acceptance criteria",
     criteria,
-    "",
-    "Review",
-    [
-      "Observe this exact worker once. Compare all timestamps with the UTC review time above.",
-      "Reassess whether the durable goal is still coherent, useful, and achievable, and whether the current blocker stops the whole outcome or only one path.",
-      "Treat a final worker message, PR, run, report, or completed review cycle as evidence, never as completion by itself.",
-      "Treat review as evidence for this goal, not as a separate supervisor lifecycle. When acceptance requires CI, live validation, or independent review, require current-revision proof and unresolved-finding disposition before finishing.",
-      "Finish only when current evidence covers the whole objective and every acceptance criterion at the same declared scope and time horizon.",
-      "If the criteria quietly narrow a broader or ongoing objective to one milestone, continue the remaining outcome or ask the human one concrete correction; do not accept it.",
-      "When the human's outcome is a standing improvement loop, each inventory pass, fixed backlog, PR, merge, or raised threshold is only a checkpoint: learn from it, raise the rubric, and continue until the human explicitly stops or replaces the goal. Do not invent a finite convergence boundary for standing work.",
-      "If its next action depends on another supervised worker, use supervisor_status to read current recorded peer progress; do not ask the human for information or coordination already available there.",
-      "If another goal is shown as waiting on this goal and current evidence materially changes its condition, call supervisor_reconsider for exactly that goal before the decision tool. An ordinary recorded decision is not itself a reason to wake every dependent.",
-      "If this is a wait review, confirm that the condition still exists, try a safe mitigation, and continue any independent useful work, alternative proof, or preparation.",
-      "For a wait with several material parts, fresh evidence must cover every part you claim remains unchanged. If a peer or external part cannot be verified from current context, steer the worker to reread it rather than infer unchanged state from silence or older evidence.",
-      "Leave it waiting again only when that fresh evidence shows nothing useful can move and supplies the next exact boundary.",
-      "If the goal contract itself is obsolete, contradictory, or impractical, ask the human one concrete question rather than silently rewriting it or circling.",
-      "Then call exactly one decision tool. Your own response is not worker evidence and cannot satisfy these criteria.",
-    ].join(" "),
   ].join("\n");
 }
 
@@ -205,6 +186,7 @@ const supervisorPolicy = [
     "Use the review request's exact UTC time for deadline comparisons.",
     "Use supervisor_status for recorded peer progress, but only focused-worker evidence can prove its goal complete.",
     "Treat a final worker message, PR, run, report, or completed review cycle as evidence, not completion by itself; finish only when current evidence covers the whole objective and every acceptance criterion at their declared horizon.",
+    "Treat review as evidence for the goal, not as a separate lifecycle. When acceptance requires CI, live validation, or independent review, require current-revision proof and a disposition of every unresolved finding before finishing.",
     "Keep pushing every unfinished goal forward. Before leaving a worker settled, continue independent work, alternative proof, mitigation, or preparation whenever possible.",
     "On stale progress, reassess whether the goal is coherent and whether the blocker stops the outcome or only one path.",
     "If the contract itself is obsolete, contradictory, or impractical, ask the human one concrete correction rather than silently rewriting it or circling.",
@@ -212,9 +194,10 @@ const supervisorPolicy = [
   [
     "Waits and coordination",
     "An idle worker waiting on an idle or externally blocked worker is actionable, not healthy waiting.",
-    "Run independent workers and validations concurrently. Start every ready, nonduplicate validation immediately and keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. React to a concrete provider failure or conflicting operation without delaying unrelated work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
+    "Run independent workers and validations concurrently. Submit every ready, nonduplicate validation to its provider without waiting for another run to finish; the provider schedules and queues it. Keep unrelated work moving while results are pending. A submitted run is execution progress, not completion proof. Delay only the exact operation with a destructive or shared-resource conflict, and handle a concrete provider rejection without delaying unaffected work. When the human asks to focus on existing work, stop speculative new work while still validating every ready change.",
     "For a direct peer wait, pass waiting_on_pane; otherwise record the external condition.",
     "Every wait is a promise to reconsider. Confirm the condition, try safe mitigation, and continue other useful work.",
+    "For a wait with several material parts, fresh evidence must cover every part claimed unchanged. If a peer or external part cannot be verified from current context, steer the worker to reread it instead of inferring unchanged state from silence or older evidence.",
     "When steering a worker to reread one external condition, tell it to report an unchanged result once and yield instead of sleeping or polling; provider metadata notifications and bounded review will resume the same native Goal.",
     "Supply review_at when current evidence justifies a specific safety-check time. A peer review can select a materially affected wait and an external notification can wake the worker earlier, so use a slower bounded safety check instead of repeatedly rediscovering unchanged state; otherwise use null for the runtime interval.",
     "Never merely restate or extend an elapsed wait without fresh evidence that nothing useful can move and a next exact boundary.",

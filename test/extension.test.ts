@@ -1753,9 +1753,11 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /Define goals around outcomes rather than one attempt, tool, run, or approval/);
   assert.match(result.systemPrompt, /whether the blocker stops the outcome or only one path/);
   assert.match(result.systemPrompt, /continue independent work, alternative proof, mitigation, or preparation/);
-  assert.match(result.systemPrompt, /Start every ready, nonduplicate validation immediately/);
+  assert.match(result.systemPrompt, /Submit every ready, nonduplicate validation to its provider without waiting for another run to finish/);
+  assert.match(result.systemPrompt, /the provider schedules and queues it/);
   assert.match(result.systemPrompt, /A submitted run is execution progress, not completion proof/);
-  assert.match(result.systemPrompt, /React to a concrete provider failure or conflicting operation/);
+  assert.match(result.systemPrompt, /Delay only the exact operation with a destructive or shared-resource conflict/);
+  assert.match(result.systemPrompt, /provider rejection without delaying unaffected work/);
   assert.match(result.systemPrompt, /stop speculative new work while still validating every ready change/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
   assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
