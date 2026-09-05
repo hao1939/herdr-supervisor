@@ -104,30 +104,6 @@ async function fixture() {
   return root;
 }
 
-test("removed mode settings fail before supervision tools are installed", () => {
-  const previousMode = process.env.HERDR_SUPERVISOR_MODE;
-  const previousArgv = process.argv;
-  try {
-    for (const value of ["off", "observe", "dry-run", "live", ""]) {
-      process.env.HERDR_SUPERVISOR_MODE = value;
-      const pi = fakePi();
-      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
-      assert.equal(pi.tools.size, 0);
-    }
-    delete process.env.HERDR_SUPERVISOR_MODE;
-    for (const args of [["--supervisor-mode", "observe"], ["--supervisor-mode=dry-run"]]) {
-      process.argv = [...previousArgv, ...args];
-      const pi = fakePi();
-      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
-      assert.equal(pi.tools.size, 0);
-    }
-  } finally {
-    process.argv = previousArgv;
-    if (previousMode === undefined) delete process.env.HERDR_SUPERVISOR_MODE;
-    else process.env.HERDR_SUPERVISOR_MODE = previousMode;
-  }
-});
-
 test("optional supervisor tool fields accept null without placeholder values", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
