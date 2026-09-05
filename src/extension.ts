@@ -1337,17 +1337,17 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       ]);
       const unknown = [...referenced].filter((goalId) => !knownGoalIds.has(goalId));
       if (unknown.length) {
-        return text(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}. No focused reviews were queued.`, true);
+        return text(`Cannot route the global result because these goals were not found among active, unstarted, or unreadable goals: ${unknown.join(", ")}. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
       }
       const unreadableReconsider = params.reconsider.filter((item) => unreadableGoalIds.has(item.goal_id));
       if (unreadableReconsider.length) {
-        return text(`Cannot queue a focused review for unreadable goal(s): ${unreadableReconsider.map((item) => item.goal_id).join(", ")}. Report the read errors as findings; no valid worker binding is available. No focused reviews were queued.`, true);
+        return text(`Cannot queue a focused review for unreadable goal(s): ${unreadableReconsider.map((item) => item.goal_id).join(", ")}. Report the read errors as findings; no valid worker binding is available. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
       }
       const unstartedReconsider = [...new Set(params.reconsider
         .map((item) => item.goal_id)
         .filter((goalId) => unstartedGoalIds.has(goalId)))];
       if (unstartedReconsider.length) {
-        return text(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts. No focused reviews were queued.`, true);
+        return text(`Cannot queue a focused review for unstarted goal(s) with no worker: ${unstartedReconsider.join(", ")}. Report them as findings without reconsideration so the human can decide whether to resume their saved contracts. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
       }
       const now = new Date();
       const nextReviewAt = params.next_review_at?.trim()
@@ -1355,7 +1355,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
       try {
         reviewDeadline(nextReviewAt, now.getTime());
       } catch (error) {
-        return text(`Invalid next_review_at: ${error.message}. No focused reviews were queued.`, true);
+        return text(`Invalid next_review_at: ${error.message}. No global review result was recorded; correct the input and retry in this turn. No focused reviews were queued.`, true);
       }
       const findings = params.findings.map((finding) => ({
         problem: finding.problem.trim(),

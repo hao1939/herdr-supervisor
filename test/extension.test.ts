@@ -4986,7 +4986,8 @@ test("an invalid global result has no partial routing", async (t) => {
   });
   assert.equal(invalidDeadline.isError, true);
   assert.match(invalidDeadline.content[0].text, /timezone-bearing ISO 8601/);
-  assert.match(invalidDeadline.content[0].text, /No focused reviews were queued/);
+  assert.match(invalidDeadline.content[0].text, /No global review result was recorded/);
+  assert.match(invalidDeadline.content[0].text, /retry in this turn/);
 
   const invalid = await pi.tools.get("supervisor_global_result").execute("invalid", {
     summary: "One reference is invalid.",
@@ -4995,7 +4996,8 @@ test("an invalid global result has no partial routing", async (t) => {
   });
   assert.equal(invalid.isError, true);
   assert.match(invalid.content[0].text, /not found among active, unstarted, or unreadable goals/);
-  assert.match(invalid.content[0].text, /No focused reviews were queued/);
+  assert.match(invalid.content[0].text, /No global review result was recorded/);
+  assert.match(invalid.content[0].text, /retry in this turn/);
 
   const valid = await pi.tools.get("supervisor_global_result").execute("valid", {
     summary: "No cross-goal fault remains.",
