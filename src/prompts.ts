@@ -8,7 +8,7 @@ type DependentWait = Pick<GoalBinding, "goalId" | "paneId" | "wait">;
 const workerExecutionBoundary = [
   "Write only in spaces this goal explicitly created or claimed.",
   "Goal store, starting directory, and other workers' worktrees are read-only: do not run tests, generators, formatters, installers, or other commands that may write there.",
-  "Put checkpoints and artifacts in this goal's project or worktree; use another goal-owned worktree for baseline or destructive tests and reconcile overlaps.",
+  "Keep terminal output bounded; save raw evidence in goal-owned files. Use another goal-owned worktree for baseline or destructive tests; reconcile overlaps.",
   "Handoffs stay local. Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval; local evidence and reports are allowed.",
   "Before requesting human action, exhaust safe in-scope alternatives and distinguish missing convenience tooling or default credential wiring from genuinely missing capability, authority, or information.",
   "Describe a blocker at its actual boundary: the operation that failed, where it ran, the effective identity or authority, the target, the observed error, and the smallest action that can unblock it.",

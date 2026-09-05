@@ -414,6 +414,8 @@ test("native Goal guidance stays bounded with a long goal-store path", () => {
       },
     }, "goal-diagnostic");
     assert.ok(prompt.length <= 4_006);
+    assert.match(prompt, /Keep terminal output bounded/);
+    assert.match(prompt, /save raw evidence in goal-owned files/);
   } finally {
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
@@ -527,9 +529,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Write only in spaces this goal explicitly created or claimed/);
   assert.match(deliveredPrompts[0].prompt, /Goal store.*read-only/);
   assert.match(deliveredPrompts[0].prompt, /do not run tests, generators, formatters, installers, or other commands that may write there/);
-  assert.match(deliveredPrompts[0].prompt, /Put checkpoints and artifacts in this goal's project or worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Keep terminal output bounded/);
+  assert.match(deliveredPrompts[0].prompt, /save raw evidence in goal-owned files/);
   assert.match(deliveredPrompts[0].prompt, /other workers' worktrees are read-only/);
-  assert.match(deliveredPrompts[0].prompt, /use another goal-owned worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Use another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /Handoffs stay local/);
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
