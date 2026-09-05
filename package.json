@@ -1,6 +1,6 @@
 {
   "name": "herdr-supervisor",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "One Pi agent that supervises existing Herdr workers against explicit goals, without adding a second task system.",
   "license": "MIT",
