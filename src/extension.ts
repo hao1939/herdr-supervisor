@@ -1594,7 +1594,7 @@ export function herdrSupervisor(pi: ExtensionAPI, services: SupervisorServices =
   pi.registerTool({
     name: "supervisor_steer",
     label: "Continue worker",
-    description: "Give the same supervised worker one useful next action. The runtime keeps an exact Codex worker's native Goal active and recovers its exact session when needed; the model does not choose a transport.",
+    description: "Give the same supervised worker one useful next action inside its accepted goal. This is transient guidance, not a new human-authority boundary or a reason to pause a standing goal for supervisor review. The runtime keeps an exact Codex worker's native Goal active and recovers its exact session when needed; the model does not choose a transport.",
     parameters: Type.Object({
       pane_id: Pane,
       message: Type.String({ minLength: 1 }),

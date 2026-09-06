@@ -331,6 +331,11 @@ An automatic focused review has exactly four semantic decisions:
 `stop` is a separate operator action. It ends supervision when the human asks;
 it is not a model review decision.
 
+`steer` is transient guidance inside the authority already delegated by the
+goal. It must not manufacture a pause-for-review gate or turn a supervisor's
+own step limit into a human stop. A standing worker continues normally unless
+the goal, a real blocker, or an actual human instruction requires otherwise.
+
 Resuming a native Goal is also not a model decision. If `steer` is chosen for
 an exact settled Codex worker, code resumes its native Goal before sending the
 instruction into the active turn. If the process exited while its pane and
