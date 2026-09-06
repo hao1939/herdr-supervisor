@@ -104,36 +104,25 @@ async function fixture() {
   return root;
 }
 
-test("removed mode settings fail before supervision tools are installed", () => {
-  const previousMode = process.env.HERDR_SUPERVISOR_MODE;
-  const previousArgv = process.argv;
-  try {
-    for (const value of ["off", "observe", "dry-run", "live", ""]) {
-      process.env.HERDR_SUPERVISOR_MODE = value;
-      const pi = fakePi();
-      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
-      assert.equal(pi.tools.size, 0);
-    }
-    delete process.env.HERDR_SUPERVISOR_MODE;
-    for (const args of [["--supervisor-mode", "observe"], ["--supervisor-mode=dry-run"]]) {
-      process.argv = [...previousArgv, ...args];
-      const pi = fakePi();
-      assert.throws(() => herdrSupervisor(pi), /Supervisor modes were removed/);
-      assert.equal(pi.tools.size, 0);
-    }
-  } finally {
-    process.argv = previousArgv;
-    if (previousMode === undefined) delete process.env.HERDR_SUPERVISOR_MODE;
-    else process.env.HERDR_SUPERVISOR_MODE = previousMode;
-  }
-});
-
 test("optional supervisor tool fields accept null without placeholder values", () => {
   const pi = fakePi();
   herdrSupervisor(pi);
 
   assert.match(pi.tools.get("supervisor_leave").description, /use null for waiting_for/);
   assert.doesNotMatch(pi.tools.get("supervisor_leave").description, /omit waiting_for/);
+  assert.match(
+    JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
+    /verified goal-linked external watch with no concrete near-term transition, use null/,
+  );
+  assert.match(pi.tools.get("supervisor_leave").description, /normal interval when a verified goal-linked external watch owns change detection/);
+  assert.match(
+    JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
+    /do not reuse a prior arbitrary safety deadline/,
+  );
+  assert.match(
+    JSON.stringify(pi.tools.get("supervisor_leave").parameters.properties.review_at),
+    /shorter-than-normal deadline is accepted only when waiting_for names that exact authoritative timestamp/,
+  );
 
   const startGoal = Compile(pi.tools.get("supervisor_start_goal").parameters);
   assert.equal(startGoal.Check({
@@ -425,6 +414,8 @@ test("native Goal guidance stays bounded with a long goal-store path", () => {
       },
     }, "goal-diagnostic");
     assert.ok(prompt.length <= 4_006);
+    assert.match(prompt, /Keep terminal output bounded/);
+    assert.match(prompt, /save raw evidence in goal-owned files/);
   } finally {
     if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
     else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
@@ -538,9 +529,10 @@ test("a human goal creates, prompts, and supervises one Codex worker", async (t)
   assert.match(deliveredPrompts[0].prompt, /Write only in spaces this goal explicitly created or claimed/);
   assert.match(deliveredPrompts[0].prompt, /Goal store.*read-only/);
   assert.match(deliveredPrompts[0].prompt, /do not run tests, generators, formatters, installers, or other commands that may write there/);
-  assert.match(deliveredPrompts[0].prompt, /Put checkpoints and artifacts in this goal's project or worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Keep terminal output bounded/);
+  assert.match(deliveredPrompts[0].prompt, /save raw evidence in goal-owned files/);
   assert.match(deliveredPrompts[0].prompt, /other workers' worktrees are read-only/);
-  assert.match(deliveredPrompts[0].prompt, /use another goal-owned worktree/);
+  assert.match(deliveredPrompts[0].prompt, /Use another goal-owned worktree/);
   assert.match(deliveredPrompts[0].prompt, /Handoffs stay local/);
   assert.match(deliveredPrompts[0].prompt, /Publishing comments, reviews, mentions, notifications, or messages externally needs explicit human approval/);
   assert.match(deliveredPrompts[0].prompt, /local evidence and reports are allowed/);
@@ -1788,7 +1780,11 @@ test("an accepted goal delegates normal reversible execution authority", () => {
   assert.match(result.systemPrompt, /provider rejection without delaying unaffected work/);
   assert.match(result.systemPrompt, /stop speculative new work while still validating every ready change/);
   assert.match(result.systemPrompt, /peer review can select a materially affected wait/);
-  assert.match(result.systemPrompt, /slower bounded safety check instead of repeatedly rediscovering unchanged state/);
+  assert.match(result.systemPrompt, /Keep an evidence-specific deadline for a concrete near-term transition/);
+  assert.match(result.systemPrompt, /confirms a goal-linked external watch but no concrete near-term transition exists/);
+  assert.match(result.systemPrompt, /pass null for review_at so the runtime uses its normal low-frequency safety interval/);
+  assert.match(result.systemPrompt, /normal safety interval when a verified external watch owns change detection/);
+  assert.match(result.systemPrompt, /discovered change still wakes the worker immediately/);
   assert.match(result.systemPrompt, /report an unchanged result once and yield instead of sleeping or polling/);
   assert.match(result.systemPrompt, /contract itself is obsolete, contradictory, or impractical/);
   assert.match(result.systemPrompt, /objective and acceptance criteria cover the same scope and time horizon/);
@@ -3262,7 +3258,6 @@ test("a settled worker can record a peer wait and queue that idle peer's review"
     progress: "Local proof is preserved.",
     waiting_for: "w1:p7 to report that the shared fixture is ready",
     waiting_on_pane: "w1:p7",
-    review_at: new Date(Date.now() + 60_000).toISOString(),
   });
 
   assert.equal(leave.isError, false);
@@ -3445,6 +3440,48 @@ test("a settled worker wait receives a bounded review timestamp by default", asy
   pi.events.get("session_shutdown")();
 });
 
+test("a short external review requires its exact authoritative boundary", async (t) => {
+  const root = await fixture();
+  const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
+  process.env.HERDR_SUPERVISOR_GOALS = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.HERDR_SUPERVISOR_GOALS;
+    else process.env.HERDR_SUPERVISOR_GOALS = previousRoot;
+  });
+  t.mock.method(HerdrClient.prototype, "snapshot", async () => snapshot({ agent_status: "idle", state_change_seq: 3 }));
+  t.mock.method(HerdrClient.prototype, "readAgent", async () => ({ read: { text: "The external condition is unchanged.", truncated: false } }));
+  t.mock.method(HerdrClient.prototype, "subscribe", () => () => {});
+
+  const pi = fakePi({ reviewMs: String(60 * 60 * 1000) });
+  herdrSupervisor(pi);
+  await pi.events.get("session_start")({}, { ui: { setStatus() {} } });
+  await waitFor(() => pi.messages.length === 1);
+  await pi.tools.get("supervisor_observe").execute("observe", { pane_id: worker.paneId });
+  const reviewAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+  const before = (await loadSupervisorGoals(root)).active;
+  const rejected = await pi.tools.get("supervisor_leave").execute("leave-arbitrary-short", {
+    pane_id: worker.paneId,
+    progress: "The linked pull request is unchanged.",
+    waiting_for: "a material automatic pull-request callback",
+    review_at: reviewAt,
+  });
+  assert.equal(rejected.isError, true);
+  assert.match(rejected.content[0].text, /waiting_for does not name that exact authoritative time/);
+  assert.match(rejected.content[0].text, /No action was applied/);
+  assert.deepEqual((await loadSupervisorGoals(root)).active, before);
+
+  const accepted = await pi.tools.get("supervisor_leave").execute("leave-authoritative-short", {
+    pane_id: worker.paneId,
+    progress: "The provider supplied an exact retry boundary.",
+    waiting_for: `the server retry boundary at ${reviewAt}`,
+    review_at: reviewAt,
+  });
+  assert.equal(accepted.isError, false);
+  const [stored] = (await loadSupervisorGoals(root)).active;
+  assert.equal(stored.wait.reviewAt, reviewAt);
+  pi.events.get("session_shutdown")();
+});
+
 test("a working worker cannot be mislabeled as waiting for its own next checkpoint", async (t) => {
   const root = await fixture();
   const previousRoot = process.env.HERDR_SUPERVISOR_GOALS;
@@ -3601,9 +3638,14 @@ test("settlement preserves the deadline chosen by a completed decision", async (
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(pi.messages.length, 1, "the generic interval must not replace the decision deadline");
   t.mock.timers.tick(1000);
-  for (let attempt = 0; attempt < 100 && pi.messages.length < 2; attempt += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  const realWaitDeadline = performance.now() + 1000;
+  await new Promise((resolve) => {
+    const interval = setInterval(() => {
+      if (pi.messages.length < 2 && performance.now() < realWaitDeadline) return;
+      clearInterval(interval);
+      resolve(undefined);
+    }, 5);
+  });
   assert.equal(pi.messages.length, 2, "the decision deadline must still wake the review");
   assert.match(pi.messages[1].content, /review deadline elapsed/);
   pi.events.get("session_shutdown")();

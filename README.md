@@ -67,12 +67,6 @@ own restart identity after its session starts.
 Talk to the dedicated supervisor — describe what you want done and it handles
 the rest.
 
-On upgrade, startup removes only the old container-managed auto-discovery
-symlink. Operator-owned entries are preserved. The legacy
-`container/pi-extension.ts` entry point now reports a migration error without
-loading supervision; update old launch commands to the explicit command above
-and remove any custom supervisor auto-discovery entries.
-
 After starting or restarting that agent, name it so external diagnostics and
 optional management panes can address it without relying on a recyclable pane
 ID. Herdr clears the name when the agent exits or is replaced:
@@ -193,10 +187,8 @@ cd "${HERDR_SUPERVISOR_DIRECTORY:-/app}"
 pi -e "$supervisor_extension"
 ```
 
-The supervisor applies validated decisions whenever it is running. Remove the
-obsolete `--supervisor-mode` and `HERDR_SUPERVISOR_MODE` settings before startup;
-they are rejected so a formerly passive setup cannot silently enable actions.
-Do not copy or link the extension into Pi's user-wide or project auto-discovery
+The supervisor applies validated decisions whenever it is running. Do not copy
+or link the extension into Pi's user-wide or project auto-discovery
 directories, or configure it as a default extension: only the dedicated Pi
 should load it through `-e` and own the goal store.
 

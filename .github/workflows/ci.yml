@@ -45,10 +45,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=herdr-supervisor-ci
       - name: Smoke test container
         run: |
-          # Ordinary Pi sessions must not auto-load the supervisor
-          docker run --rm herdr-supervisor:ci \
-            sh -c 'test ! -e /home/node/.pi/agent/extensions/herdr-supervisor.ts && test ! -L /home/node/.pi/agent/extensions/herdr-supervisor.ts'
-
           # Exercise the packaged Pi loader, with and without explicit activation
           docker run --rm herdr-supervisor:ci \
             node --input-type=module -e '
@@ -67,17 +63,6 @@ jobs:
                 assert.equal(result.extensions.length, explicit ? 1 : 0);
                 if (explicit) assert.ok(result.extensions[0].tools.has("supervisor_start_goal"));
               }
-            '
-
-          # The old auto-load entry point must never activate supervision
-          docker run --rm herdr-supervisor:ci \
-            node --input-type=module -e '
-              import legacy from "/opt/herdr-supervisor/container/pi-extension.ts";
-              try { legacy(); } catch (error) {
-                if (error.message.includes("auto-loading was removed")) process.exit(0);
-                throw error;
-              }
-              process.exit(1);
             '
 
           # Verify all source modules were copied

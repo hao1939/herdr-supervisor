@@ -11,11 +11,9 @@ name unreadable goals; focused actions still require a valid active binding.
 No goal-state field, queue, dependency mechanism, or cadence rule was added.
 
 Node 26.8.1: `npm run check`, `npm test` (308 passing), and `git diff --check`
-passed. Regression coverage checks obsolete-setting rejection before tools are
-installed, bounded read-error facts, findings on unreadable goals, rejection of
-actions on those goals, and continued routing to healthy goals. Compose was
-resolved with and without the obsolete environment variable: an explicit old
-setting reaches the rejection guard; an unset setting supplies no value.
+passed. Regression coverage checks bounded read-error facts, findings on
+unreadable goals, rejection of actions on those goals, and continued routing
+to healthy goals.
 
 ## Local baseline
 
@@ -172,14 +170,8 @@ boundary instead of mode checks: only the dedicated supervisor loads
 `container/supervisor-extension.ts` with `-e`. Ordinary container Pi sessions no longer discover
 the supervisor automatically.
 
-Container upgrades remove only the exact discovery symlink installed by older
-images. Operator-owned files, directories, and other symlinks are preserved.
-The legacy container extension and former direct source entry points report a
-migration error before installing supervisor tools, so preserved stale
-discovery links cannot activate them.
-Obsolete mode settings, including `off`, are rejected by the active extension.
-Custom auto-discovery entries and default-extension settings must be removed
-by their operator; do not install the active source extension there.
+The active extension is not installed into auto-discovery. Explicit `-e`
+loading is the only supervisor activation path.
 
 Integration validation on Node 26.8.1:
 
@@ -189,12 +181,11 @@ Integration validation on Node 26.8.1:
   an unchanged native resume test; that file then passed independently and the
   later full runs passed. No production timeout or test expectation was
   changed to hide it.
-- Real Pi resource-loader tests cover ordinary and explicit loading, upgrade
-  cleanup, preservation of operator-owned entries, and the inert legacy shim.
+- Real Pi resource-loader tests cover ordinary and explicit loading.
 - The candidate Docker image built successfully. The full CI container smoke
   script passed, including packaged Pi loading with and without the explicit
-  extension, the migration error, production dependencies, stdin preservation,
-  and fail-closed watcher startup.
+  extension, production dependencies, stdin preservation, and fail-closed
+  watcher startup.
 - An isolated container started Herdr 0.8.0 and read the goal store successfully.
 - ShellCheck, actionlint, `git diff --check`, and `npm audit --audit-level=high`
   passed; the audit reported zero vulnerabilities.
