@@ -214,7 +214,8 @@ exactly one decision:
 
 - **leave** — healthy progress, sleep until the next event
 - **steer** — send one goal-aware instruction to the same worker, optionally
-  preserving an exact time when that instruction must be checked again
+  preserving an exact time when that instruction must be checked again; this
+  is transient guidance, never a supervisor-created human stop
 - **ask_human** — a concrete question when your authority or information is needed
 - **accept** — goal met with convincing evidence
 

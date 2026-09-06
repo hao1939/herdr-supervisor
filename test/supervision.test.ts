@@ -452,6 +452,8 @@ test("every supervisor turn receives the null protocol for optional tool fields"
   assert.match(prompt, /current-revision proof and a disposition of every unresolved finding/);
   assert.match(prompt, /fresh evidence must cover every part claimed unchanged/);
   assert.match(prompt, /steer the worker to reread it instead of inferring unchanged state/);
+  assert.match(prompt, /steering instruction is transient guidance inside the accepted goal/);
+  assert.match(prompt, /never relabel a supervisor-authored pause or step limit as a human stop/);
 });
 
 test("a human correction updates durable authority before execution", () => {
