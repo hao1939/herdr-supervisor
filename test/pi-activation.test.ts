@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -14,6 +15,15 @@ const activeExtension = fileURLToPath(new URL("../container/supervisor-extension
 const piWrapper = fileURLToPath(new URL("../container/bin/pi", import.meta.url));
 const containerActiveExtension = "/opt/herdr-supervisor/container/supervisor-extension.ts";
 const supervisorInstall = fileURLToPath(new URL("..", import.meta.url));
+
+test("Pi's installed glob dependency honors the security override", async () => {
+  const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const minimatchRequire = createRequire(piRequire.resolve("minimatch"));
+  const installed = minimatchRequire("brace-expansion/package.json").version;
+  const manifest = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(installed, manifest.overrides["@earendil-works/pi-coding-agent"]["brace-expansion"],
+    "Pi's shrinkwrap must not replace the patched dependency during npm ci");
+});
 
 async function fixture(t) {
   const root = await mkdtemp(join(tmpdir(), "herdr-pi-activation-"));

@@ -326,6 +326,14 @@ npm run check    # tsc --noEmit + shell syntax
 npm test         # node:test suite
 ```
 
+Pi 0.87.1 ships a shrinkwrap that pins vulnerable `brace-expansion` 5.0.9.
+The scoped override selects 5.0.12, and our lockfile omits Pi's `hasShrinkwrap`
+flag so `npm ci` uses that resolution instead of restoring Pi's pinned copy.
+Keep this workaround until Pi ships a patched shrinkwrap. After dependency
+updates, run a clean `npm ci`, `npm test`, and `npm audit --audit-level=high`;
+the Pi activation tests check the installed version because the audit can pass
+against the root lockfile while a shrinkwrap installs a different version.
+
 ### Release pull requests
 
 This repository uses release-please and squash-merges pull requests. The pull
